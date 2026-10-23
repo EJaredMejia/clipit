@@ -23,6 +23,9 @@ clipit = "clipit.cli:main"
 [tool.setuptools]
 packages = ["clipit"]
 
+[tool.setuptools.package-data]
+clipit = ["dashboard.html", "dashboard.js"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

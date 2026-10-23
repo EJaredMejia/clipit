@@ -5,6 +5,7 @@ clipit URL --clips 10 --ai "ollama run qwen3:30b"
 clipit --refresh-trends
 clipit --poll              (clip the latest VODs of big + smaller live streamers; run it on a timer)
 clipit --poll --dry-run    (only show which VODs it would clip)
+clipit --dashboard         (browse every VOD and clip, mark clips keep/skip and posted)
 """
 
 import argparse
@@ -15,7 +16,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from clipit import ai, db, poll
+from clipit import ai, dashboard, db, poll
 from clipit.pipeline import process_vod
 from clipit.util import ROOT, ClipitError, log, logger
 
@@ -62,12 +63,14 @@ def main() -> None:
     )
     ap.add_argument("--lang", default="EN", help='--poll: only streams in this language (default EN, "" for any)')
     ap.add_argument("--dry-run", action="store_true", help="--poll: only print which VODs would be clipped")
+    ap.add_argument("--dashboard", action="store_true", help="open the local dashboard of every VOD and clip")
+    ap.add_argument("--port", type=int, default=8765, help="--dashboard: port on 127.0.0.1 (default 8765)")
     a = ap.parse_args()
     if isinstance(sys.stdout, io.TextIOWrapper):  # not when stdout was swapped (tests, some service wrappers)
         sys.stdout.reconfigure(errors="replace")  # emoji in stream titles crash cp1252 consoles
-    if not a.url and not a.refresh_trends and not a.poll:
-        ap.error("pass a VOD url (or --poll / --refresh-trends)")
-    if not shutil.which("ffmpeg"):
+    if not a.url and not a.refresh_trends and not a.poll and not a.dashboard:
+        ap.error("pass a VOD url (or --poll / --refresh-trends / --dashboard)")
+    if (a.url or a.poll) and not shutil.which("ffmpeg"):
         sys.exit("ffmpeg not found on PATH")
     setup_logging(a.out)
     conn = db.connect(a.out / "clipit.db")
@@ -84,6 +87,8 @@ def main() -> None:
             db.save_clips(conn, work.name, [{**c, "file": f"{work.name}/{c['file']}"} for c in clips])
         if a.poll:
             poll.poll(conn, a.top, a.small, a.lang.upper(), a.dry_run, a.out, n_clips=a.clips, ai_cmd=a.ai, whisper=a.whisper)
+        if a.dashboard:
+            dashboard.serve(a.out, a.port)
     except ClipitError as e:
         logger.error("%s", e)
         sys.exit(1)

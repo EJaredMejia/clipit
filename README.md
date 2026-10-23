@@ -8,12 +8,12 @@ a local model through Ollama, or any other AI CLI.
 
 ## Features
 
-- **Clip one stream.** Give it a Twitch VOD link and get 1080x1920 clips with a hook, word-by-word captions, a title and a caption with hashtags.
+- **Clip one stream.** Give it a Twitch VOD link and get 1080x1920 clips with a hook, word-by-word captions, a title, and ready-to-paste TikTok and YouTube text that credits the streamer and adds hashtags.
 - **Clip live streamers automatically.** Checks who's live on Twitch, picks the biggest streamers plus some smaller ones, and clips each one's latest finished stream. Built to run unattended on a timer.
 - **Follow trends.** The AI researches what's working on TikTok and Shorts this week, and the clip picks and captions follow it.
 - **Facecam layout.** Finds the streamer's webcam overlay and stacks it above the gameplay.
 - **Light on bandwidth.** Downloads only the audio to find moments (about 360 MB for 4 hours instead of 12 GB of video), then only the seconds of video it renders.
-- **Clip catalog.** Every clip is recorded in a local SQLite database, `out/clipit.db`.
+- **Dashboard.** Watch every clip in your browser, mark it keep or skip, record where you posted it, and see which VODs failed and why.
 
 ## Requirements
 
@@ -81,6 +81,25 @@ clipit --refresh-trends
 Has the AI search the web for this week's TikTok and Shorts trends and rewrites `trends.md`. Run it weekly, or edit
 `trends.md` by hand.
 
+### Dashboard
+
+```bash
+clipit --dashboard
+```
+
+Opens `http://127.0.0.1:8765` with every VOD and clip from `out/clipit.db`. It updates on its own while `--poll`
+runs in the background.
+
+- **Clips:** play each one, filter by streamer or search, sort by AI score, and copy the YouTube title, YouTube
+  description and TikTok caption with one click.
+- **Review:** mark a clip *Keep* or *Skip*. The tiles at the top count what's left to review and what you kept but
+  haven't posted yet.
+- **Posted:** after posting, click *Mark posted* for TikTok or YouTube, with the post link if you have it, so a clip
+  is never posted twice.
+- **VODs:** every processed VOD with its status, and the error for the ones that failed.
+
+It only listens on your own machine (127.0.0.1) and refuses requests from other websites.
+
 ### Options
 
 | Option | Default | Description |
@@ -97,6 +116,8 @@ Has the AI search the web for this week's TikTok and Shorts trends and rewrites 
 | `--small N` | `4` | With `--poll`: max VODs a day from smaller streamers. |
 | `--lang CODE` | `EN` | With `--poll`: only streams in this language, `""` for any. |
 | `--dry-run` | | With `--poll`: only print which VODs would be clipped. |
+| `--dashboard` | | Open the dashboard in your browser. |
+| `--port N` | `8765` | With `--dashboard`: the port on 127.0.0.1. |
 
 ## Output
 
@@ -105,10 +126,13 @@ Has the AI search the web for this week's TikTok and Shorts trends and rewrites 
 - `clips/01_<title>_<start>-<end>.mp4`: 1080x1920 with a hook box and word-by-word captions. Audio is normalized to -14 LUFS.
   - **Facecam on top, gameplay below** when a webcam overlay is on screen during that clip. Found automatically, per clip.
   - **Blurred fill + full frame** when there's no webcam, e.g. a camera-only or no-cam stream.
-- `posts.md`: per clip, the title (for Shorts), a copy-paste caption with hashtags (for TikTok), the trend it fits, and a sound to add in the app.
+- `posts.md`: per clip, the title (for Shorts), the TikTok caption and YouTube description, the trend it fits, and a sound to add in the app.
+  Both texts are the AI's description, then `Credit: twitch.tv/<streamer>`, then `#<streamer>` and 3-5 hashtags (YouTube also gets `#shorts`).
+  The credit is added by Clipit, not the AI, so chat can't trick it into tagging someone else.
 
-`out/clipit.db` (SQLite) is the catalog: a `vods` table with every processed VOD and its status, and a `clips` table
-with every rendered clip (file, title, hook, caption, score).
+`out/clipit.db` (SQLite) is the catalog: a `vods` table with every processed VOD and its status, a `clips` table
+with every rendered clip (file, title, post text, streamer, score, your keep/skip), and an `uploads` table with where
+each clip was posted.
 
 ## How it works
 
@@ -127,14 +151,14 @@ Every step is cached in `out/<vod-id>/`, so reruns are fast. Delete `picks.json`
 - Only post clips you have the rights to, or from streamers who allow clipping. Parts of Twitch VODs muted for DMCA stay silent in the clips.
 - Webcam layouts are found from 40 frames across the VOD, so a layout used for under ~1/8 of the stream may be missed; clips from it get the blurred layout. A full-screen camera scene also gets the blurred layout.
 - Gameplay is center-cropped, so text at the screen edges gets cut.
-- Uploading is manual for now. Add the trending sound inside TikTok, since burning music in gets clips muted.
+- Uploading is manual for now: mark clips posted in the dashboard. Add the trending sound inside TikTok, since burning music in gets clips muted.
 
 ## Roadmap
 
 - [ ] Publish to TikTok, on one or more accounts
 - [ ] Publish to YouTube Shorts, on one or more channels
 
-The publish commands will read the clips to post from the `clips` table in `out/clipit.db`.
+The publish commands will read the clips to post from the `clips` table in `out/clipit.db` and record each post in `uploads`.
 
 ## Contributing
 

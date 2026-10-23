@@ -37,6 +37,13 @@ def clip_file(rank: int, clip: dict) -> str:
     return f"clips/{rank:02d}_{slug(clip['title'])}_{clip['start']:.1f}-{clip['end']:.1f}.mp4"
 
 
+def streamer(info: dict) -> str:
+    """The Twitch login to credit in the post text, '' for other sites. Checked: it lands in text and hashtags."""
+    login = str(info.get("uploader_id") or "")
+    twitch_vod = info.get("extractor", "").startswith("twitch:vod")
+    return login if twitch_vod and re.fullmatch(r"[A-Za-z0-9_]{1,25}", login) else ""
+
+
 def get_chat(info: dict) -> list:
     if not info.get("extractor", "").startswith("twitch:vod"):
         return []  # other sites: no chat replay, loudness alone picks the moments
@@ -118,9 +125,11 @@ def process_vod(
     log(f"{len(layouts)} webcam layout(s) found" if layouts else "no webcam found: blurred-fill layout")
     (work / "clips").mkdir(exist_ok=True)
     words = [w for segs in tr.values() for s in segs for w in s["words"]]
-    rendered = []
+    rendered, login = [], streamer(info)
     for i, c in enumerate(picks, 1):
-        c["idx"], c["file"] = i, clip_file(i, c)
+        c.setdefault("description", c.get("caption", ""))  # picks.json cached before descriptions existed
+        c["idx"], c["file"], c["streamer"] = i, clip_file(i, c), login
+        c["caption"], c["youtube"] = render.post_texts(c)
         out = work / c["file"]
         if not out.exists():
             cam = facecam.clip_cam(urls[0], layouts, c["start"], c["end"])  # streamers switch scene layouts mid-stream

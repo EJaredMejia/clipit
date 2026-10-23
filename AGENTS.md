@@ -41,9 +41,10 @@ VODs to process; `cli.py` is the only place that parses flags, sets up logging, 
 | `facecam.py` | webcam overlay detection |
 | `render.py` | captions, ffmpeg render, `posts.md` |
 | `util.py` | logging, shell helpers with timeouts, atomic writes, `ClipitError` |
+| `dashboard.py` | `--dashboard`: local HTTP server (127.0.0.1) for `dashboard.html` / `dashboard.js`, reads and writes via `db.py` |
 
-Planned: auto-upload to TikTok / Shorts on several accounts, as an `upload/` package that reads the `clips` table, with
-accounts and per-clip upload status as new tables.
+Planned: auto-upload to TikTok / Shorts on several accounts, as an `upload/` package that reads the `clips` table and
+records each post in the `uploads` table (today filled by hand from the dashboard), with accounts as a new table.
 
 | Data | Where it lives |
 |---|---|
@@ -77,6 +78,10 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
 - AI output is validated before use (`ai.clean`): numbers parsed and clamped, text fields forced to capped strings.
 - Untrusted text never reaches a shell. File names go through `util.slug`, folder names are checked against a strict
   pattern, subtitle text goes through `render.make_ass`'s escaping (strips `\ { }` and newlines).
+- The dashboard page shows untrusted text as text only (`textContent`, never `innerHTML`), links only http(s) URLs, and
+  its server only answers its own page (Host and Origin checks, JSON-only writes, no inline scripts under its CSP).
+- Post text credits the streamer from yt-dlp's checked Twitch login (`pipeline.streamer`), added in code by
+  `render.post_texts`: the AI is told not to write links or @mentions.
 
 ### Errors and logging
 - Library code raises `ClipitError` for expected failures. Only `cli.py` calls `sys.exit`.

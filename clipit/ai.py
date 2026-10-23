@@ -19,8 +19,10 @@ from clipit.util import ROOT, ClipitError, logger, write_atomic
 TRENDS = ROOT / "trends.md"
 AI_TIMEOUT = 900
 MAX_TRENDS_CHARS = 8000  # trends.md comes from the open web; cap what it can add to every prompt
-# Field caps match what the platforms accept (TikTok captions: 2,200 chars; Shorts titles: 100).
-TEXT_FIELDS = {"title": 100, "hook": 80, "caption": 2200, "trend": 200, "sound": 200, "why": 300}
+# Field caps match what the platforms accept (Shorts titles: 100). The description leaves room in TikTok's 2,200-char
+# caption for the streamer credit and hashtags that render.post_texts adds.
+TEXT_FIELDS = {"title": 100, "hook": 80, "description": 1000, "trend": 200, "sound": 200, "why": 300}
+MAX_HASHTAGS = 5
 CLIP_LEN = (15, 60)  # seconds, as the prompt asks; longer picks are trimmed to 60 s (a window's first 60 s end on its peak)
 ANSI = re.compile(r"\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07]*\x07|[@-Z\\-_])")  # terminal escape sequences
 
@@ -44,8 +46,10 @@ Pick the {n} clips most likely to go viral. Rules:
 - Must make sense with zero stream context. Skip ad reads, waiting screens and quiet moments unless chat proves something big happened.
 - Fewer is fine if the candidates are weak. Never pad with boring clips.
 - No links, @mentions of other accounts, or slurs in any text you write.
+- Hashtags: 3-5, mixing broad ones (gaming, twitch) with specific ones (the game, the meme). A credit line for the
+  streamer and their hashtag are added for you.
 Answer with ONLY this JSON (no commentary). No emoji in "hook".
-{{"clips": [{{"start": 1234.5, "end": 1262.0, "title": "YouTube Shorts title, under 70 chars", "hook": "on-screen text for the first seconds, max 7 words", "caption": "TikTok caption with 3-5 hashtags", "trend": "trend or format this fits", "sound": "trending sound to add in-app, or empty", "score": 8, "why": "one line"}}]}}
+{{"clips": [{{"start": 1234.5, "end": 1262.0, "title": "YouTube Shorts title, under 70 chars", "hook": "on-screen text for the first seconds, max 7 words", "description": "post text for TikTok and YouTube: 1-2 sentences that make people watch, no hashtags", "hashtags": ["3 to 5 hashtags, no # sign"], "trend": "trend or format this fits", "sound": "trending sound to add in-app, or empty", "score": 8, "why": "one line"}}]}}
 
 <stream_data>
 Stream title: {title}
@@ -139,6 +143,17 @@ def extract_json(text: str) -> dict:
     return json.loads(m.group())
 
 
+def hashtags(value: object) -> list[str]:
+    """The AI's hashtags without the '#': letters, digits and _ only (no spaces, links or @), deduped, at most 5."""
+    words = value if isinstance(value, list) else str(value or "").replace(",", " ").split()
+    tags: list[str] = []
+    for w in words:
+        tag = str(w).strip().lstrip("#")
+        if re.fullmatch(r"\w{1,30}", tag) and tag.lower() not in {t.lower() for t in tags}:
+            tags.append(tag)
+    return tags[:MAX_HASHTAGS]
+
+
 def clean(clips: object, duration: float, n: int) -> list[dict]:
     """Keep well-formed clips only: numbers checked and clamped to the VOD, text fields forced to capped strings."""
     out = []
@@ -156,7 +171,7 @@ def clean(clips: object, duration: float, n: int) -> list[dict]:
             e = s + CLIP_LEN[1]
         if e - s >= CLIP_LEN[0]:
             text = {k: str(c.get(k) or "").strip()[:cap] for k, cap in TEXT_FIELDS.items()}
-            out.append({**text, "start": s, "end": e, "score": score})
+            out.append({**text, "hashtags": hashtags(c.get("hashtags")), "start": s, "end": e, "score": score})
     best, seen = [], set()
     for c in sorted(out, key=lambda c: -c["score"]):
         if (c["start"], c["end"]) not in seen:  # the same moment twice would be one clip

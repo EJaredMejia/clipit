@@ -18,6 +18,20 @@ def test_hook_cannot_inject_subtitle_lines_or_tags():
     assert "{\\an5}" not in ass and ass.count("[Script Info]") == 1
 
 
+def test_post_texts_credit_the_streamer_then_hashtags():
+    clip = {"description": "He did NOT see that coming.", "streamer": "caseoh_", "hashtags": ["CaseOh_", "gaming", "Shorts"]}
+    tiktok, youtube = render.post_texts(clip)
+    assert tiktok == "He did NOT see that coming.\n\nCredit: twitch.tv/caseoh_\n\n#caseoh_ #gaming #Shorts"
+    assert youtube == tiktok  # already has #shorts: not added twice
+    tiktok, youtube = render.post_texts({**clip, "hashtags": ["gaming"]})
+    assert youtube.endswith("#caseoh_ #gaming #shorts") and "#shorts" not in tiktok
+
+
+def test_post_texts_without_a_known_streamer_have_no_credit():
+    tiktok, youtube = render.post_texts({"description": "wow", "streamer": "", "hashtags": []})
+    assert (tiktok, youtube) == ("wow", "wow\n\n#shorts")
+
+
 def test_helpers():
     assert util.mmss(3725) == "1:02:05"
     assert util.slug("He RAGE quit!!") == "he-rage-quit"

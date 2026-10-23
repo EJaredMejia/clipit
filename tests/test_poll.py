@@ -60,6 +60,8 @@ def world(tmp_path, monkeypatch):
                 "title": "t",
                 "hook": "h",
                 "caption": "c",
+                "youtube": "y",
+                "streamer": "s",
                 "trend": "",
                 "sound": "",
                 "score": 8.0,
