@@ -77,6 +77,7 @@ def test_default_ai_disables_tools(monkeypatch):
     assert trends and "--tools WebSearch WebFetch" in trends
 
 
+@pytest.mark.skipif(sys.platform != "win32", reason="the desktop bundles are Windows paths (%APPDATA%, backslashes)")
 def test_claude_found_in_either_desktop_bundle_newest_wins(monkeypatch, tmp_path):
     monkeypatch.setattr(ai.shutil, "which", lambda _: None)
     monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
