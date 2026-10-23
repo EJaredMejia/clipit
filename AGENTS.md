@@ -23,6 +23,24 @@ facecam, captions) also need a check on a real VOD: render a clip and look at a 
 `clipit/` has one module per pipeline stage. `pipeline.process_vod()` runs them in order; `poll.py` decides which
 VODs to process; `cli.py` is the only place that parses flags, sets up logging, or exits the process.
 
+| Module | Job |
+|---|---|
+| `cli.py` | command-line flags, then calls the pipeline |
+| `pipeline.py` | `process_vod(url, ...)`: runs every stage with caching and returns `(folder, rendered clips)` |
+| `db.py` | the SQLite catalog: schema migrations, claiming VODs, recording clips |
+| `source.py` | yt-dlp: VOD info, audio download, stream URLs |
+| `twitch.py` | Twitch's public API: chat replay, live streams, latest VODs |
+| `poll.py` | picks which streamers to clip and runs the pipeline on each, never the same VOD twice |
+| `moments.py` | loudness + chat scoring, picks candidate windows |
+| `transcribe.py` | Whisper on the candidate windows |
+| `ai.py` | prompts, calling the AI CLI, validating its picks, trend research |
+| `facecam.py` | webcam overlay detection |
+| `render.py` | captions, ffmpeg render, `posts.md` |
+| `util.py` | logging, shell helpers with timeouts, atomic writes, `ClipitError` |
+
+Planned: auto-upload to TikTok / Shorts on several accounts, as an `upload/` package that reads the `clips` table, with
+accounts and per-clip upload status as new tables.
+
 | Data | Where it lives |
 |---|---|
 | State shared across runs (which VODs are done, clips, later uploads and accounts) | SQLite, `out/clipit.db`, only through `clipit/db.py` |
