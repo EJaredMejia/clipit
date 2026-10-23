@@ -82,13 +82,24 @@ def ask_ai(cmd: str, prompt: str) -> str:
     # The command string is the user's own config, never untrusted data; the prompt goes in on stdin.
     with tempfile.TemporaryDirectory() as empty:  # nothing local for an AI tool to read
         try:
-            r = subprocess.run(cmd, shell=True, input=prompt, capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", cwd=empty, timeout=AI_TIMEOUT)
+            r = subprocess.run(
+                cmd,
+                shell=True,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=empty,
+                timeout=AI_TIMEOUT,
+            )
         except subprocess.TimeoutExpired:
             raise ClipitError(f"AI command timed out after {AI_TIMEOUT}s: {cmd}") from None
     if r.returncode or not r.stdout.strip():
-        raise ClipitError(f"AI command failed: {cmd}\n{(r.stdout + r.stderr)[-2000:]}\n"
-                          "(Claude says 'Not logged in'? run `claude` once and type /login)")
+        raise ClipitError(
+            f"AI command failed: {cmd}\n{(r.stdout + r.stderr)[-2000:]}\n"
+            "(Claude says 'Not logged in'? run `claude` once and type /login)"
+        )
     return r.stdout
 
 
@@ -103,11 +114,18 @@ def build_prompt(info: dict, cands: list[dict], n: int, trends: str) -> str:
         msgs = c["chat"][:: max(1, len(c["chat"]) // 30)][:30]
         chat = " | ".join(m[:80] for _, m in msgs) or "(no chat)"
         blocks.append(f"### Candidate {i}: {c['start']}-{c['end']}s ({c['stats']})\n" + "\n".join(lines) + f"\nChat: {chat}")
+
     def fenced(s) -> str:  # untrusted text must not be able to close the <stream_data> block early
         return str(s).replace("stream_data", "stream-data")
 
-    return PROMPT.format(date=datetime.date.today(), title=fenced(info.get("title"))[:200], streamer=fenced(info.get("uploader")),
-                         trends=trends[:MAX_TRENDS_CHARS], n=n, candidates=fenced("\n\n".join(blocks)))
+    return PROMPT.format(
+        date=datetime.date.today(),
+        title=fenced(info.get("title"))[:200],
+        streamer=fenced(info.get("uploader")),
+        trends=trends[:MAX_TRENDS_CHARS],
+        n=n,
+        candidates=fenced("\n\n".join(blocks)),
+    )
 
 
 def extract_json(text: str) -> dict:
@@ -117,23 +135,30 @@ def extract_json(text: str) -> dict:
     return json.loads(m.group())
 
 
-def clean(clips: list, duration: float, n: int) -> list[dict]:
+def clean(clips: object, duration: float, n: int) -> list[dict]:
     """Keep well-formed clips only: numbers checked and clamped to the VOD, text fields forced to capped strings."""
     out = []
     for c in clips if isinstance(clips, list) else []:
         if not isinstance(c, dict):
             continue
         try:
-            s, e, score = max(0.0, float(c["start"])), min(duration, float(c["end"])), float(c.get("score") or 0)
+            # rounded: a clip is identified by its time range (db.save_clips, file names), 0.1 s is plenty
+            s, e = round(max(0.0, float(c["start"])), 1), round(min(duration, float(c["end"])), 1)
+            score = float(c.get("score") or 0)
         except (KeyError, TypeError, ValueError):
             continue
         if 5 <= e - s <= 180:
             text = {k: str(c.get(k) or "").strip()[:cap] for k, cap in TEXT_FIELDS.items()}
             out.append({**text, "start": s, "end": e, "score": score})
-    return sorted(out, key=lambda c: -c["score"])[:n]
+    best, seen = [], set()
+    for c in sorted(out, key=lambda c: -c["score"]):
+        if (c["start"], c["end"]) not in seen:  # the same moment twice would be one clip
+            seen.add((c["start"], c["end"]))
+            best.append(c)
+    return best[:n]
 
 
-def pick_clips(cmd: str, info: dict, cands: list[dict], n: int, work: Path) -> list[dict]:
+def pick_clips(cmd: str | None, info: dict, cands: list[dict], n: int, work: Path) -> list[dict]:
     """Ask the AI and validate its picks. The raw reply is kept in work/ai_reply.txt for debugging."""
     if not cmd:
         raise ClipitError('No AI command. Install Claude Code or pass --ai "<command>"')

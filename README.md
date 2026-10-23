@@ -44,7 +44,7 @@ Each pass:
 2. **Big streamers:** the 6 biggest (`--top`). For each, it clips their latest *finished* VOD, ignoring a stream that's still live. A channel with no usable VOD gives its slot to the next one.
 3. **Smaller streamers** (300-2,000 viewers): picked at random, at most 4 VODs a day (`--small`), so they're included without crowding out the big ones.
 4. Skips VODs that ended more than 2 days ago and anything already done. Only English streams by default (`--lang ""` for any).
-5. Each VOD is claimed in the database before processing, so two overlapping passes never do the same one. Finished VODs are never redone. Failed ones retry up to 3 times, at least an hour apart, and a pass that crashed mid-VOD is taken over after 4 hours. Downloaded audio is deleted after each VOD to save disk.
+5. Each VOD is claimed in the database before processing, so two overlapping passes never do the same one. Finished VODs are never redone. Failed ones retry up to 3 times, at least an hour apart, and a pass that crashed mid-VOD is taken over 30 minutes after it stopped refreshing its claim. Downloaded audio is deleted after each VOD to save disk.
 
 Run it on a timer (launchd on a Mac, Task Scheduler on Windows) every 30-60 minutes. A pass with new VODs takes about 10 minutes per VOD. Logs go to `out/logs/clipit.log`.
 
@@ -53,7 +53,7 @@ Run it on a timer (launchd on a Mac, Task Scheduler on Windows) every 30-60 minu
 `out/clipit.db` (SQLite) is the catalog: a `vods` table with every processed VOD and its status, and a `clips` table with every rendered clip (file, title, hook, caption, score). This is what the uploaders will read.
 
 `out/<vod-id>/` holds the working files and the clips:
-- `clips/01_<title>.mp4`: 1080x1920 with a hook box and word-by-word captions. Audio is normalized to -14 LUFS.
+- `clips/01_<title>_<start>-<end>.mp4`: 1080x1920 with a hook box and word-by-word captions. Audio is normalized to -14 LUFS.
   - **Facecam on top, gameplay below** when the stream has a webcam overlay. The overlay is found automatically.
   - **Blurred fill + full frame** when there's no webcam, e.g. a camera-only or no-cam stream.
 - `posts.md`: per clip, the title (for Shorts), a copy-paste caption with hashtags (for TikTok), the trend it fits, and a sound to add in the app.
@@ -97,4 +97,4 @@ Planned: **auto-upload to TikTok / Shorts on several accounts**, an `upload/` pa
 - Only post clips you have the rights to, or from streamers who allow clipping. Parts of Twitch VODs muted for DMCA stay silent in the clips.
 - The facecam is detected once per VOD. If the streamer moves the cam or switches to a full-screen camera scene partway through, clips from those parts get the wrong crop. Gameplay is center-cropped, so text at the screen edges gets cut.
 - Upload is manual for now. Add the trending sound inside TikTok, since burning music in gets clips muted.
-- Development: `ruff check .` and `pytest -q`, also run by GitHub Actions on every push (Linux and macOS).
+- Development: run `pre-commit install` once (lint + format on every commit). `ruff check .`, `ruff format --check .`, `pyright` and `pytest -q` also run in GitHub Actions on every push (Linux and macOS).

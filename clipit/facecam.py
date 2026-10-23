@@ -63,16 +63,35 @@ def find_facecam(url: str, duration: float, n: int = 40) -> tuple[float, float, 
 
     def grab(t):
         try:
-            raw = subprocess.run(["ffmpeg", "-v", "error", *REMOTE, "-ss", f"{t:.2f}", "-i", url, "-frames:v", "1",
-                                  "-vf", "scale=960:540,format=gray", "-f", "rawvideo", "-"],
-                                 capture_output=True, timeout=120).stdout
+            raw = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-v",
+                    "error",
+                    *REMOTE,
+                    "-ss",
+                    f"{t:.2f}",
+                    "-i",
+                    url,
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale=960:540,format=gray",
+                    "-f",
+                    "rawvideo",
+                    "-",
+                ],
+                capture_output=True,
+                timeout=120,
+            ).stdout
         except subprocess.TimeoutExpired:
             return None
         return np.frombuffer(raw, np.uint8).reshape(540, 960) if len(raw) == 960 * 540 else None
 
     with ThreadPoolExecutor(8) as ex:
         frames = [f for f in ex.map(grab, np.linspace(0.05 * duration, 0.95 * duration, n)) if f is not None]
-    det = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    cascades = cv2.data.haarcascades  # pyright: ignore[reportAttributeAccessIssue]  # exists, missing from cv2's stubs
+    det = cv2.CascadeClassifier(cascades + "haarcascade_frontalface_default.xml")
     boxes = [(i, *b) for i, f in enumerate(frames) for b in det.detectMultiScale(f, 1.1, 6, minSize=(24, 24))]
     face = cam_face(boxes, len(frames))
     return None if face is None else cam_box(frames, face)

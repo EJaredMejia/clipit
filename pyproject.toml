@@ -15,7 +15,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6", "pyright[nodejs]>=1.1.400", "pre-commit>=4"]  # pyright[nodejs]: bundles Node, no install
 
 [project.scripts]
 clipit = "clipit.cli:main"
@@ -25,6 +25,10 @@ packages = ["clipit"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.pyright]
+include = ["clipit", "tests"]
+pythonVersion = "3.11"
 
 [tool.ruff]
 line-length = 130
