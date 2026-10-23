@@ -21,9 +21,21 @@ def download_audio(url: str, work: Path) -> Path:
     if not done.exists():
         log("downloading audio only")
         subprocess.run(
-            ytdlp("-N", "8", "-f", "ba/worst", "--no-simulate", "--print-to-file", "after_move:filepath",
-                  str(done), "-o", str(work / "audio.%(ext)s"), url),
-            check=True, timeout=DOWNLOAD_TIMEOUT,
+            ytdlp(
+                "-N",
+                "8",
+                "-f",
+                "ba/worst",
+                "--no-simulate",
+                "--print-to-file",
+                "after_move:filepath",
+                str(done),
+                "-o",
+                str(work / "audio.%(ext)s"),
+                url,
+            ),
+            check=True,
+            timeout=DOWNLOAD_TIMEOUT,
         )
     return Path(done.read_text(encoding="utf-8").strip().splitlines()[-1])
 

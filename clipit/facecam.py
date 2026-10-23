@@ -63,9 +63,27 @@ def find_facecam(url: str, duration: float, n: int = 40) -> tuple[float, float, 
 
     def grab(t):
         try:
-            raw = subprocess.run(["ffmpeg", "-v", "error", *REMOTE, "-ss", f"{t:.2f}", "-i", url, "-frames:v", "1",
-                                  "-vf", "scale=960:540,format=gray", "-f", "rawvideo", "-"],
-                                 capture_output=True, timeout=120).stdout
+            raw = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-v",
+                    "error",
+                    *REMOTE,
+                    "-ss",
+                    f"{t:.2f}",
+                    "-i",
+                    url,
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale=960:540,format=gray",
+                    "-f",
+                    "rawvideo",
+                    "-",
+                ],
+                capture_output=True,
+                timeout=120,
+            ).stdout
         except subprocess.TimeoutExpired:
             return None
         return np.frombuffer(raw, np.uint8).reshape(540, 960) if len(raw) == 960 * 540 else None

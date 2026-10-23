@@ -23,8 +23,11 @@ VODS = """query($login: String!) {
 
 
 def gql(query: str, variables: dict | None = None) -> dict:
-    req = urllib.request.Request("https://gql.twitch.tv/gql", json.dumps({"query": query, "variables": variables or {}}).encode(),
-                                 {"Client-Id": GQL_CLIENT, "Content-Type": "application/json"})
+    req = urllib.request.Request(
+        "https://gql.twitch.tv/gql",
+        json.dumps({"query": query, "variables": variables or {}}).encode(),
+        {"Client-Id": GQL_CLIENT, "Content-Type": "application/json"},
+    )
     d = json.load(urllib.request.urlopen(req, timeout=30))
     if d.get("errors"):
         raise ClipitError(f"Twitch API: {d['errors'][0]['message']}")
@@ -35,8 +38,11 @@ def live_streams() -> list[tuple[str, int, str]]:
     """Live streams as (login, viewers, language), most viewers first."""
     d = gql(LIVE)
     edges = d["streams"]["edges"] + [s for g in d["games"]["edges"] for s in g["node"]["streams"]["edges"]]
-    found = {e["node"]["broadcaster"]["login"]: (e["node"]["viewersCount"], e["node"]["language"])
-             for e in edges if e["node"]["broadcaster"]}
+    found = {
+        e["node"]["broadcaster"]["login"]: (e["node"]["viewersCount"], e["node"]["language"])
+        for e in edges
+        if e["node"]["broadcaster"]
+    }
     return sorted(((login, v, lang) for login, (v, lang) in found.items()), key=lambda s: -s[1])
 
 
@@ -48,9 +54,15 @@ def latest_vod(login: str) -> dict | None:
 
 
 def gql_comments(vid, t):
-    body = json.dumps([{"operationName": "VideoCommentsByOffsetOrCursor",
-                        "variables": {"videoID": vid, "contentOffsetSeconds": t},
-                        "extensions": {"persistedQuery": {"version": 1, "sha256Hash": GQL_HASH}}}]).encode()
+    body = json.dumps(
+        [
+            {
+                "operationName": "VideoCommentsByOffsetOrCursor",
+                "variables": {"videoID": vid, "contentOffsetSeconds": t},
+                "extensions": {"persistedQuery": {"version": 1, "sha256Hash": GQL_HASH}},
+            }
+        ]
+    ).encode()
     req = urllib.request.Request("https://gql.twitch.tv/gql", body, {"Client-Id": GQL_CLIENT, "Content-Type": "application/json"})
     for attempt in range(4):
         try:
@@ -58,11 +70,12 @@ def gql_comments(vid, t):
         except (OSError, ValueError):
             if attempt == 3:
                 raise
-            time.sleep(2 ** attempt)
+            time.sleep(2**attempt)
 
 
 def fetch_chat(vid: str, duration: float, slice_len: int = 300) -> list[list]:
     """All chat messages as [offset_seconds, text], fetched in parallel time slices."""
+
     def one_slice(a):
         b, t, seen, out = a + slice_len, a, set(), []
         while t < b:

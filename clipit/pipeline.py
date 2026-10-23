@@ -81,8 +81,9 @@ def process_vod(
             stats = f"audio peak +{loud[s:e].max() - np.median(loud):.0f} dB"
             if rate.any():
                 stats = f"chat {rate[s:e].mean() / rate.mean():.1f}x normal, " + stats
-            cands.append({"start": s, "end": e, "segments": tr[f"{s}-{e}"], "stats": stats,
-                          "chat": [m for m in msgs if s <= m[0] < e]})
+            cands.append(
+                {"start": s, "end": e, "segments": tr[f"{s}-{e}"], "stats": stats, "chat": [m for m in msgs if s <= m[0] < e]}
+            )
         log(f"asking the AI to pick {n_clips} clips from {len(cands)} candidates")
         return ai.pick_clips(ai_cmd, info, cands, n_clips, work)
 

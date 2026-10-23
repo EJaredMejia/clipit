@@ -1,10 +1,10 @@
 """Command line entry point.
 
-  clipit https://www.twitch.tv/videos/2906456464
-  clipit URL --clips 10 --ai "ollama run qwen3:30b"
-  clipit --refresh-trends
-  clipit --poll              (clip the latest VODs of big + smaller live streamers; run it on a timer)
-  clipit --poll --dry-run    (only show which VODs it would clip)
+clipit https://www.twitch.tv/videos/2906456464
+clipit URL --clips 10 --ai "ollama run qwen3:30b"
+clipit --refresh-trends
+clipit --poll              (clip the latest VODs of big + smaller live streamers; run it on a timer)
+clipit --poll --dry-run    (only show which VODs it would clip)
 """
 
 import argparse
@@ -35,18 +35,30 @@ def main() -> None:
     ap = argparse.ArgumentParser(prog="clipit", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("url", nargs="?", help="Twitch VOD link (other yt-dlp sites work too, without chat)")
     ap.add_argument("-n", "--clips", type=int, default=6, help="how many clips to make per VOD (default 6)")
-    ap.add_argument("--ai", default=ai.default_ai(),
-                    help="command that reads a prompt on stdin and prints the answer, used to pick clips. "
-                         'Give it no tools: its prompt contains text from strangers. Default: Claude Code with --tools ""')
-    ap.add_argument("--trends-ai", default=ai.default_trends_ai(),
-                    help="command for --refresh-trends; needs web search (default: Claude Code with web tools only)")
+    ap.add_argument(
+        "--ai",
+        default=ai.default_ai(),
+        help="command that reads a prompt on stdin and prints the answer, used to pick clips. "
+        'Give it no tools: its prompt contains text from strangers. Default: Claude Code with --tools ""',
+    )
+    ap.add_argument(
+        "--trends-ai",
+        default=ai.default_trends_ai(),
+        help="command for --refresh-trends; needs web search (default: Claude Code with web tools only)",
+    )
     ap.add_argument("--whisper", default="small", help="faster-whisper model: tiny, base, small (default), medium, turbo")
     ap.add_argument("--out", type=Path, default=ROOT / "out", help="working files, clips, logs and the database")
-    ap.add_argument("--refresh-trends", action="store_true", help="have the AI research current TikTok/Shorts trends into trends.md")
+    ap.add_argument(
+        "--refresh-trends", action="store_true", help="have the AI research current TikTok/Shorts trends into trends.md"
+    )
     ap.add_argument("--poll", action="store_true", help="pick live streamers automatically and clip their latest finished VOD")
     ap.add_argument("--top", type=int, default=6, help="--poll: how many of the biggest live streamers to clip (default 6)")
-    ap.add_argument("--small", type=int, default=4,
-                    help=f"--poll: max VODs per day from smaller streamers, {poll.SMALL[0]}-{poll.SMALL[1]} viewers (default 4)")
+    ap.add_argument(
+        "--small",
+        type=int,
+        default=4,
+        help=f"--poll: max VODs per day from smaller streamers, {poll.SMALL[0]}-{poll.SMALL[1]} viewers (default 4)",
+    )
     ap.add_argument("--lang", default="EN", help='--poll: only streams in this language (default EN, "" for any)')
     ap.add_argument("--dry-run", action="store_true", help="--poll: only print which VODs would be clipped")
     a = ap.parse_args()

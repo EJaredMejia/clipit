@@ -6,8 +6,19 @@ import pytest
 from clipit import db
 
 T0 = datetime.datetime(2026, 10, 22, 12, tzinfo=datetime.UTC)
-CLIP = {"idx": 1, "file": "v1/clips/01_a.mp4", "start": 1.0, "end": 20.0, "title": "t", "hook": "h", "caption": "c",
-        "trend": "", "sound": "", "score": 8.0, "why": ""}
+CLIP = {
+    "idx": 1,
+    "file": "v1/clips/01_a.mp4",
+    "start": 1.0,
+    "end": 20.0,
+    "title": "t",
+    "hook": "h",
+    "caption": "c",
+    "trend": "",
+    "sound": "",
+    "score": 8.0,
+    "why": "",
+}
 
 
 @pytest.fixture

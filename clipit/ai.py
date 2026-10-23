@@ -82,13 +82,24 @@ def ask_ai(cmd: str, prompt: str) -> str:
     # The command string is the user's own config, never untrusted data; the prompt goes in on stdin.
     with tempfile.TemporaryDirectory() as empty:  # nothing local for an AI tool to read
         try:
-            r = subprocess.run(cmd, shell=True, input=prompt, capture_output=True, text=True, encoding="utf-8",
-                               errors="replace", cwd=empty, timeout=AI_TIMEOUT)
+            r = subprocess.run(
+                cmd,
+                shell=True,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                cwd=empty,
+                timeout=AI_TIMEOUT,
+            )
         except subprocess.TimeoutExpired:
             raise ClipitError(f"AI command timed out after {AI_TIMEOUT}s: {cmd}") from None
     if r.returncode or not r.stdout.strip():
-        raise ClipitError(f"AI command failed: {cmd}\n{(r.stdout + r.stderr)[-2000:]}\n"
-                          "(Claude says 'Not logged in'? run `claude` once and type /login)")
+        raise ClipitError(
+            f"AI command failed: {cmd}\n{(r.stdout + r.stderr)[-2000:]}\n"
+            "(Claude says 'Not logged in'? run `claude` once and type /login)"
+        )
     return r.stdout
 
 
@@ -103,11 +114,18 @@ def build_prompt(info: dict, cands: list[dict], n: int, trends: str) -> str:
         msgs = c["chat"][:: max(1, len(c["chat"]) // 30)][:30]
         chat = " | ".join(m[:80] for _, m in msgs) or "(no chat)"
         blocks.append(f"### Candidate {i}: {c['start']}-{c['end']}s ({c['stats']})\n" + "\n".join(lines) + f"\nChat: {chat}")
+
     def fenced(s) -> str:  # untrusted text must not be able to close the <stream_data> block early
         return str(s).replace("stream_data", "stream-data")
 
-    return PROMPT.format(date=datetime.date.today(), title=fenced(info.get("title"))[:200], streamer=fenced(info.get("uploader")),
-                         trends=trends[:MAX_TRENDS_CHARS], n=n, candidates=fenced("\n\n".join(blocks)))
+    return PROMPT.format(
+        date=datetime.date.today(),
+        title=fenced(info.get("title"))[:200],
+        streamer=fenced(info.get("uploader")),
+        trends=trends[:MAX_TRENDS_CHARS],
+        n=n,
+        candidates=fenced("\n\n".join(blocks)),
+    )
 
 
 def extract_json(text: str) -> dict:

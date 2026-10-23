@@ -17,15 +17,16 @@ DECODE_TIMEOUT = 1800
 
 def loudness(audio) -> np.ndarray:
     """Per-second loudness in dB, streamed so multi-hour VODs don't need GBs of RAM."""
-    p = subprocess.Popen(["ffmpeg", "-v", "error", "-i", str(audio), "-ac", "1", "-ar", str(SR), "-f", "s16le", "-"],
-                         stdout=subprocess.PIPE)
+    p = subprocess.Popen(
+        ["ffmpeg", "-v", "error", "-i", str(audio), "-ac", "1", "-ar", str(SR), "-f", "s16le", "-"], stdout=subprocess.PIPE
+    )
     watchdog = threading.Timer(DECODE_TIMEOUT, p.kill)  # the read loop blocks, so a hung ffmpeg must be killed from outside
     watchdog.start()
     db = []
     try:
         while chunk := p.stdout.read(SR * 2 * 600):
             x = np.frombuffer(chunk[: len(chunk) // (SR * 2) * SR * 2], np.int16).astype(np.float32).reshape(-1, SR)
-            db.extend(10 * np.log10((x ** 2).mean(1) + 1))
+            db.extend(10 * np.log10((x**2).mean(1) + 1))
     finally:
         watchdog.cancel()
     if p.wait():

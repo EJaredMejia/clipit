@@ -132,8 +132,9 @@ def heartbeat(conn: sqlite3.Connection, vod_id: str) -> Iterator[None]:
         try:
             while not stop.wait(HEARTBEAT.total_seconds()):
                 try:
-                    own.execute("UPDATE vods SET claimed_at = ? WHERE id = ? AND status = 'processing'",
-                                (utcnow().isoformat(), vod_id))
+                    own.execute(
+                        "UPDATE vods SET claimed_at = ? WHERE id = ? AND status = 'processing'", (utcnow().isoformat(), vod_id)
+                    )
                 except sqlite3.Error:
                     logger.warning("could not refresh the claim on %s", vod_id, exc_info=True)
         finally:

@@ -29,8 +29,15 @@ def ended(vod: dict) -> datetime.datetime:
     return datetime.datetime.fromisoformat(vod["publishedAt"]) + datetime.timedelta(seconds=vod["lengthSeconds"])
 
 
-def poll(conn: sqlite3.Connection, top_n: int = 6, small_per_day: int = 4, lang: str = "EN", dry_run: bool = False,
-         out_root: Path = ROOT / "out", **pipeline_opts) -> None:
+def poll(
+    conn: sqlite3.Connection,
+    top_n: int = 6,
+    small_per_day: int = 4,
+    lang: str = "EN",
+    dry_run: bool = False,
+    out_root: Path = ROOT / "out",
+    **pipeline_opts,
+) -> None:
     """One polling pass. Safe to run on a timer, and even twice at once."""
     now = utcnow()
     small_left = small_per_day - db.small_done_since(conn, now - datetime.timedelta(days=1))
