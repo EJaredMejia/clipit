@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "clipit"
+version = "0.1.0"
+description = "Turn hours-long Twitch VODs into vertical TikTok / YouTube Shorts clips picked by an AI"
+requires-python = ">=3.11"
+dependencies = [
+    "yt-dlp",                          # unpinned on purpose here: Twitch changes break old versions; requirements.lock pins it
+    "faster-whisper>=1.2",
+    "numpy>=2",
+    "opencv-python-headless>=4.8,<5",  # 5.x dropped the bundled Haar face detector
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+clipit = "clipit.cli:main"
+
+[tool.setuptools]
+packages = ["clipit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+ignore = [
+    "S602",  # shell=True is the --ai design: the command is the user's own config, untrusted text only goes to stdin
+    "S603",  # subprocess with list args (ffmpeg / yt-dlp) is the normal, safe form
+    "S607",  # ffmpeg is resolved from PATH on purpose
+    "S310",  # urllib only ever opens the fixed https://gql.twitch.tv URL
+    "S311",  # random only picks which small streamer to clip, not security
+    "E731",  # log = logger.info
+    "E501",  # long lines are prompt/subtitle data inside strings; keep code lines near 130 by hand
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101"]  # asserts are how pytest tests work
