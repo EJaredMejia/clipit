@@ -32,9 +32,20 @@ def test_clean_forces_text_fields_to_capped_strings():
     assert c["hook"] == "" and c["caption"] == "7" and c["sound"] == ""
 
 
+def test_clean_trims_overlong_picks():
+    # Real case: qwen3:8b returned each 90 s candidate window whole; its first 60 s end on the detected moment.
+    (c,) = ai.clean([{"start": 15430, "end": 15520}], 20000.0, 5)
+    assert (c["start"], c["end"]) == (15430.0, 15490.0)
+
+
 def test_clean_rounds_times_and_drops_duplicate_moments():
     got = ai.clean([{"start": 10.04, "end": 30.01, "score": 5}, {"start": 10.0, "end": 30.0, "score": 9}], 100.0, 5)
     assert [(c["start"], c["end"], c["score"]) for c in got] == [(10.0, 30.0, 9.0)]
+
+
+def test_clean_enforces_the_prompts_minimum_length():
+    got = ai.clean([{"start": 0, "end": 14.9, "score": 9}, {"start": 50, "end": 65, "score": 1}], 100.0, 5)
+    assert [(c["start"], c["end"]) for c in got] == [(50.0, 65.0)]  # 14.9 s dropped, exactly 15 s kept
 
 
 def test_clean_rejects_non_list():
@@ -68,6 +79,17 @@ def test_default_ai_disables_tools(monkeypatch):
 def test_ask_ai_runs_in_an_empty_folder():
     out = ai.ask_ai(f'"{sys.executable}" -c "import os; print(os.listdir() or \'EMPTY\')"', "prompt")
     assert out.strip() == "EMPTY"
+
+
+def test_ask_ai_strips_terminal_escape_codes(tmp_path):
+    # Real `ollama run` output: word-wrap cursor codes landed inside JSON strings even though stdout was a pipe.
+    raw = '{"title": "a piece\x1b[5D\x1b[K\npiece", "x": "\x1b[?25h\x1b[?2026lok"}'
+    reply = tmp_path / "reply.txt"
+    reply.write_text(raw, encoding="utf-8")
+    out = ai.ask_ai(
+        f'"{sys.executable}" -c "import sys; sys.stdout.write(open(sys.argv[1], encoding=\'utf-8\').read())" "{reply}"', "p"
+    )
+    assert "\x1b" not in out and out.endswith('"x": "ok"}')
 
 
 def test_ask_ai_failures_raise_clipit_error(monkeypatch):

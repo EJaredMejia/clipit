@@ -4,6 +4,7 @@ Every stage caches its result in out/<vod-id>/ (written atomically), so a rerun 
 Cross-run state (which VODs are done, which clips exist) is in the SQLite catalog, see clipit.db.
 """
 
+import functools
 import json
 import re
 import subprocess
@@ -34,15 +35,16 @@ def clip_file(rank: int, clip: dict) -> str:
     return f"clips/{rank:02d}_{slug(clip['title'])}_{clip['start']:.1f}-{clip['end']:.1f}.mp4"
 
 
-def get_chat(info: dict):
+def get_chat(info: dict) -> list:
     if not info.get("extractor", "").startswith("twitch:vod"):
-        return []
+        return []  # other sites: no chat replay, loudness alone picks the moments
     log("fetching chat replay")
     try:
         return twitch.fetch_chat(info["id"].lstrip("v"), info["duration"])
-    except Exception:  # chat is a bonus signal, audio alone still works
-        logger.warning("chat unavailable, using audio only", exc_info=True)
-        return None
+    except Exception as e:
+        # Chat is the strongest signal for Twitch: fail the VOD so it's retried later, rather than make worse clips.
+        # (A VOD with chat disabled isn't an error: it just returns no messages.)
+        raise ClipitError(f"couldn't fetch chat replay ({type(e).__name__}: {e}), will retry later") from e
 
 
 def process_vod(
@@ -59,7 +61,8 @@ def process_vod(
     work.mkdir(parents=True, exist_ok=True)
     log(f"{info.get('title')} ({mmss(dur)}) -> {work}")
 
-    audio = source.download_audio(url, work)
+    # Audio is only needed to measure loudness and transcribe: a rerun with those cached skips the big download.
+    audio = functools.cache(lambda: source.download_audio(url, work))
     msgs = cached_json(work / "chat.json", lambda: get_chat(info)) or []
     log(f"{len(msgs)} chat messages")
 
@@ -67,7 +70,7 @@ def process_vod(
     if not loud_file.exists():
         log("measuring loudness")
         tmp = work / "loudness.tmp.npy"
-        np.save(tmp, moments.loudness(audio))
+        np.save(tmp, moments.loudness(audio()))
         tmp.replace(loud_file)
     score, loud, rate = moments.signals(dur, np.load(loud_file), msgs)
     windows = moments.windows(score, max(10, n_clips * 3), dur)
@@ -77,7 +80,7 @@ def process_vod(
     todo = [w for w in windows if f"{w[0]}-{w[1]}" not in tr]
     if todo:
         log(f"transcribing {len(todo)} candidate moments (whisper {whisper})")
-        for i, (w, segs) in enumerate(zip(todo, transcribe.transcribe(audio, todo, whisper), strict=True), 1):
+        for i, (w, segs) in enumerate(zip(todo, transcribe.transcribe(audio(), todo, whisper), strict=True), 1):
             tr[f"{w[0]}-{w[1]}"] = segs
             write_atomic(tr_file, json.dumps(tr))
             log(f"  {i}/{len(todo)} @ {mmss(w[0])}")
@@ -99,11 +102,11 @@ def process_vod(
     urls = source.stream_urls(url)
 
     def detect():
-        log("looking for the facecam")
-        return facecam.find_facecam(urls[0], dur) or False  # False is cached as "no facecam", None would retry
+        log("looking for webcam layouts")
+        return facecam.find_layouts(urls[0], dur)
 
-    cam = cached_json(work / "facecam.json", detect)
-    log("layout: facecam on top, gameplay below" if cam else "layout: blurred fill (no facecam found)")
+    layouts = cached_json(work / "facecam_layouts.json", detect)  # delete it to re-detect
+    log(f"{len(layouts)} webcam layout(s) found" if layouts else "no webcam found: blurred-fill layout")
     (work / "clips").mkdir(exist_ok=True)
     words = [w for segs in tr.values() for s in segs for w in s["words"]]
     rendered = []
@@ -111,7 +114,8 @@ def process_vod(
         c["idx"], c["file"] = i, clip_file(i, c)
         out = work / c["file"]
         if not out.exists():
-            log(f"rendering {out.name} ({c['end'] - c['start']:.0f}s)")
+            cam = facecam.clip_cam(urls[0], layouts, c["start"], c["end"])  # streamers switch scene layouts mid-stream
+            log(f"rendering {out.name} ({c['end'] - c['start']:.0f}s, {'facecam on top' if cam else 'blurred fill'})")
             try:
                 render.render(urls, c, [w for w in words if c["start"] - 0.05 <= w[0] and w[1] <= c["end"] + 0.3], out, cam)
             except subprocess.CalledProcessError as e:

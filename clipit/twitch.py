@@ -7,6 +7,7 @@ import json
 import time
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 from clipit.util import ClipitError
 
@@ -22,13 +23,26 @@ VODS = """query($login: String!) {
   user(login: $login) { videos(first: 3, type: ARCHIVE, sort: TIME) { edges { node { id publishedAt lengthSeconds status } } } } }"""
 
 
-def gql(query: str, variables: dict | None = None) -> dict:
+RETRY_WAITS = (2, 4, 8, 16, 30, 30)  # seconds between attempts: rides out ~90 s of network trouble (seen: DNS failures)
+
+
+def post(body: dict | list) -> Any:
+    """POST to Twitch GQL and return the decoded JSON, retrying network errors and garbled responses with backoff."""
     req = urllib.request.Request(
         "https://gql.twitch.tv/gql",
-        json.dumps({"query": query, "variables": variables or {}}).encode(),
+        json.dumps(body).encode(),
         {"Client-Id": GQL_CLIENT, "Content-Type": "application/json"},
     )
-    d = json.load(urllib.request.urlopen(req, timeout=30))
+    for wait in RETRY_WAITS:
+        try:
+            return json.load(urllib.request.urlopen(req, timeout=30))
+        except (OSError, ValueError):
+            time.sleep(wait)
+    return json.load(urllib.request.urlopen(req, timeout=30))  # last attempt: its error propagates
+
+
+def gql(query: str, variables: dict | None = None) -> dict:
+    d = post({"query": query, "variables": variables or {}})
     if d.get("errors"):
         raise ClipitError(f"Twitch API: {d['errors'][0]['message']}")
     return d["data"]
@@ -53,24 +67,15 @@ def latest_vod(login: str) -> dict | None:
     return next((v for v in vods if v["status"] == "RECORDED"), None)
 
 
-def gql_comments(vid, t):
-    body = json.dumps(
-        [
-            {
-                "operationName": "VideoCommentsByOffsetOrCursor",
-                "variables": {"videoID": vid, "contentOffsetSeconds": t},
-                "extensions": {"persistedQuery": {"version": 1, "sha256Hash": GQL_HASH}},
-            }
-        ]
-    ).encode()
-    req = urllib.request.Request("https://gql.twitch.tv/gql", body, {"Client-Id": GQL_CLIENT, "Content-Type": "application/json"})
-    for attempt in range(4):
-        try:
-            return json.load(urllib.request.urlopen(req, timeout=30))[0]["data"]["video"]["comments"]
-        except (OSError, ValueError):
-            if attempt == 3:
-                raise
-            time.sleep(2**attempt)
+def gql_comments(vid: str, t: int) -> dict | None:
+    body = [
+        {
+            "operationName": "VideoCommentsByOffsetOrCursor",
+            "variables": {"videoID": vid, "contentOffsetSeconds": t},
+            "extensions": {"persistedQuery": {"version": 1, "sha256Hash": GQL_HASH}},
+        }
+    ]
+    return post(body)[0]["data"]["video"]["comments"]
 
 
 def fetch_chat(vid: str, duration: float, slice_len: int = 300) -> list[list]:
