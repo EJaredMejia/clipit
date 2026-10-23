@@ -76,6 +76,21 @@ def test_default_ai_disables_tools(monkeypatch):
     assert trends and "--tools WebSearch WebFetch" in trends
 
 
+def test_claude_found_in_either_desktop_bundle_newest_wins(monkeypatch):
+    bundles = {"Claude-Data": [], r"\Claude\claude-code": []}  # glob results per bundle folder (Windows paths)
+    mtime = {"C:/local/claude.exe": 2.0, "C:/roaming/claude.exe": 1.0}
+    monkeypatch.setattr(ai.shutil, "which", lambda _: None)
+    monkeypatch.setattr(ai.glob, "glob", lambda p: next(v for k, v in bundles.items() if k in p))
+    monkeypatch.setattr(ai.os.path, "getmtime", mtime.__getitem__)
+    assert ai.default_ai() is None
+    bundles["Claude-Data"].append("C:/local/claude.exe")  # newer desktop installs only
+    assert "C:/local/claude.exe" in (ai.default_ai() or "")
+    bundles[r"\Claude\claude-code"].append("C:/roaming/claude.exe")  # both: the newest file wins
+    assert "C:/local/claude.exe" in (ai.default_ai() or "")
+    mtime["C:/roaming/claude.exe"] = 3.0
+    assert "C:/roaming/claude.exe" in (ai.default_ai() or "")
+
+
 def test_ask_ai_runs_in_an_empty_folder():
     out = ai.ask_ai(f'"{sys.executable}" -c "import os; print(os.listdir() or \'EMPTY\')"', "prompt")
     assert out.strip() == "EMPTY"

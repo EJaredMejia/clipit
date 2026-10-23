@@ -9,7 +9,7 @@ def stages(tmp_path, monkeypatch):
     """Every external stage of process_vod faked; counts audio downloads."""
     downloads = []
 
-    def download(url, work):
+    def download(url, work, stop=None):
         downloads.append(url)
         return work / "audio.m4a"
 
@@ -55,3 +55,21 @@ def test_clip_file_changes_with_the_time_range():
     assert pipeline.clip_file(1, clip) == "clips/01_huge-clutch_12.0-40.5.mp4"
     # same rank and title, different moment: must not hit the old render's file
     assert pipeline.clip_file(1, {**clip, "start": 13.0}) != pipeline.clip_file(1, clip)
+
+
+def test_chat_failure_stops_the_audio_download(stages, monkeypatch):
+    _, out = stages
+    stopped = []
+
+    def download(url, work, stop):
+        stopped.append(stop.wait(5))  # a real download runs for minutes; returns as soon as it's told to stop
+        return work / "audio.m4a"
+
+    def chat(info):
+        raise pipeline.ClipitError("chat broke")
+
+    monkeypatch.setattr(pipeline.source, "download_audio", download)
+    monkeypatch.setattr(pipeline, "get_chat", chat)
+    with pytest.raises(pipeline.ClipitError, match="chat broke"):
+        pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
+    assert stopped == [True]

@@ -2,17 +2,22 @@
 
 import subprocess
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import numpy as np
+
+WORKERS = 2  # measured on 12 cores: 2 parallel windows are 1.5x faster, a 3rd adds nothing
 
 
 def transcribe(audio: Path, windows: list[tuple[int, int]], model_name: str) -> Iterator[list[dict]]:
     """Yields the segments of each window, with absolute timestamps."""
     from faster_whisper import WhisperModel  # heavy import, only when needed
 
-    model, lang = WhisperModel(model_name, device="cpu", compute_type="int8"), None
-    for a, b in windows:
+    model = WhisperModel(model_name, device="cpu", compute_type="int8", num_workers=WORKERS)
+
+    def one(w: tuple[int, int], lang: str | None) -> tuple[list[dict], str]:
+        a, b = w
         pcm = subprocess.run(
             [
                 "ffmpeg",
@@ -48,5 +53,12 @@ def transcribe(audio: Path, windows: list[tuple[int, int]], model_name: str) -> 
             }
             for s in segs
         ]
-        lang = lang or info.language  # lock language after the first window, screaming confuses detection
-        yield segs
+        return segs, info.language
+
+    if not windows:
+        return
+    segs, lang = one(windows[0], None)  # lock language after the first window, screaming confuses detection
+    yield segs
+    with ThreadPoolExecutor(WORKERS) as pool:
+        for segs, _ in pool.map(lambda w: one(w, lang), windows[1:]):
+            yield segs
