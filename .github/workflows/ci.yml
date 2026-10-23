@@ -9,6 +9,20 @@ permissions:
   contents: read
 
 jobs:
+  branch-name:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Branch is <type>/<short-name>
+        env:
+          BRANCH: ${{ github.head_ref }}  # via env, never inlined into the script: branch names are user input
+        run: |
+          if [[ ! "$BRANCH" =~ ^(feat|fix|refactor|test)/[a-z0-9][a-z0-9._-]*$ ]]; then
+            echo "::error::Branch '$BRANCH' must be <type>/<short-name>, type one of feat, fix, refactor, test (e.g. fix/stale-claim)"
+            exit 1
+          fi
+
   test:
     strategy:
       fail-fast: false

@@ -81,6 +81,14 @@ def test_clips_are_identified_by_their_moment_not_their_rank(conn):
     assert rows[0]["id"] == ids[30.0] and rows[1]["id"] not in ids.values()
 
 
+def test_a_deleted_clips_id_is_never_reused(conn):
+    db.record_manual(conn, "v1", "u")
+    db.save_clips(conn, "v1", [CLIP])
+    (old_id,) = conn.execute("SELECT id FROM clips").fetchone()
+    db.save_clips(conn, "v1", [{**CLIP, "start": 60.0, "end": 80.0}])  # replaces the only (so highest-id) clip
+    assert conn.execute("SELECT id FROM clips").fetchone()[0] != old_id
+
+
 def test_migration_keeps_clips_saved_under_the_old_schema(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:1])
     old = db.connect(tmp_path / "x.db")
@@ -93,6 +101,8 @@ def test_migration_keeps_clips_saved_under_the_old_schema(tmp_path, monkeypatch)
     assert [tuple(r) for r in c.execute("SELECT id, idx, start_s FROM clips")] == [(1, 1, 1.0)]
     db.save_clips(c, "v1", [{**CLIP, "start": 1.0, "end": 20.0, "title": "new"}])  # upserts on the new key
     assert [tuple(r) for r in c.execute("SELECT id, title FROM clips")] == [(1, "new")]
+    db.save_clips(c, "v1", [{**CLIP, "start": 60.0, "end": 80.0}])  # ids copied in by the migration aren't reused
+    assert c.execute("SELECT id FROM clips").fetchone()[0] != 1
 
 
 def test_heartbeat_keeps_a_long_run_claimed(conn, monkeypatch):

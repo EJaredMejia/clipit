@@ -29,6 +29,11 @@ def cached_json(path: Path, make: Callable[[], Any]) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def clip_file(rank: int, clip: dict) -> str:
+    """Path under the work folder. The time range is in it so a re-picked moment never reuses an old render."""
+    return f"clips/{rank:02d}_{slug(clip['title'])}_{clip['start']:.1f}-{clip['end']:.1f}.mp4"
+
+
 def get_chat(info: dict):
     if not info.get("extractor", "").startswith("twitch:vod"):
         return []
@@ -103,8 +108,7 @@ def process_vod(
     words = [w for segs in tr.values() for s in segs for w in s["words"]]
     rendered = []
     for i, c in enumerate(picks, 1):
-        # The time range is in the name so a re-picked moment never reuses an old render of a different one.
-        c["idx"], c["file"] = i, f"clips/{i:02d}_{slug(c['title'])}_{c['start']:.1f}-{c['end']:.1f}.mp4"
+        c["idx"], c["file"] = i, clip_file(i, c)
         out = work / c["file"]
         if not out.exists():
             log(f"rendering {out.name} ({c['end'] - c['start']:.0f}s)")

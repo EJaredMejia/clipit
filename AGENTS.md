@@ -72,6 +72,8 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
 - New dependency: add it to `pyproject.toml`, then regenerate the lockfile
   (`pip freeze --exclude-editable > requirements.lock`) and say why in the commit.
 - Never commit `out/`, `.venv/`, credentials, browser profiles or tokens.
+- Branch names are `<type>/<short-name>` in lowercase (CI rejects others): `feat/` new feature, `fix/` bug fix,
+  `refactor/` no behavior change, `test/` tests only. Example: `fix/stale-claim`.
 
 ## Mistakes made before (don't repeat them)
 - Stored shared state in a JSON file instead of a database.

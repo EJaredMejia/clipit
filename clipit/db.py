@@ -49,9 +49,10 @@ MIGRATIONS = [
     """,
     # Clips are identified by their moment, not their rank: a re-pick that moves a moment keeps its id (uploads
     # point at it), and a new moment at an old rank gets a new id. SQLite can't drop a constraint, so rebuild.
+    # AUTOINCREMENT: a deleted clip's id is never handed to a new one (plain INTEGER PRIMARY KEY reuses the highest).
     """
     CREATE TABLE clips_new (
-        id         INTEGER PRIMARY KEY,
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
         vod_id     TEXT NOT NULL REFERENCES vods (id) ON DELETE CASCADE,
         idx        INTEGER NOT NULL,           -- 1-based order the AI ranked it in the latest pick
         file       TEXT NOT NULL,              -- relative to the out folder
