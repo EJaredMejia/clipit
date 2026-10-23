@@ -2,6 +2,8 @@
 
 import json
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 from clipit.util import ClipitError, log, sh, ytdlp
@@ -16,11 +18,12 @@ def fetch_info(url: str) -> dict:
     return info
 
 
-def download_audio(url: str, work: Path) -> Path:
+def download_audio(url: str, work: Path, stop: threading.Event | None = None) -> Path:
+    """Audio-only download, cached. Setting stop kills it (the pipeline does when chat fails meanwhile)."""
     done = work / "audio.txt"  # yt-dlp writes the path only after the download finished
     if not done.exists():
         log("downloading audio only")
-        subprocess.run(
+        p = subprocess.Popen(
             ytdlp(
                 "-N",
                 "32",  # Twitch serves ~10 s fragments; the download waits on request latency, not bandwidth
@@ -35,10 +38,16 @@ def download_audio(url: str, work: Path) -> Path:
                 "-o",
                 str(work / "audio.%(ext)s"),
                 url,
-            ),
-            check=True,
-            timeout=DOWNLOAD_TIMEOUT,
+            )
         )
+        deadline, stop = time.monotonic() + DOWNLOAD_TIMEOUT, stop or threading.Event()
+        while p.poll() is None:
+            if stop.wait(1) or time.monotonic() > deadline:
+                p.kill()
+                p.wait()
+                raise ClipitError("audio download " + ("stopped" if stop.is_set() else f"took over {DOWNLOAD_TIMEOUT}s"))
+        if p.returncode:
+            raise ClipitError(f"yt-dlp could not download the audio (exit {p.returncode})")
     return Path(done.read_text(encoding="utf-8").strip().splitlines()[-1])
 
 

@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 
@@ -74,6 +75,22 @@ def test_default_ai_disables_tools(monkeypatch):
     picking, trends = ai.default_ai(), ai.default_trends_ai()
     assert picking and picking.endswith('--tools ""')
     assert trends and "--tools WebSearch WebFetch" in trends
+
+
+def test_claude_found_in_either_desktop_bundle_newest_wins(monkeypatch, tmp_path):
+    monkeypatch.setattr(ai.shutil, "which", lambda _: None)
+    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
+    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    assert ai.default_ai() is None
+    new = tmp_path / "local/Claude-Data/claude_x/claude-code/2.1/abc/claude.exe"
+    new.parent.mkdir(parents=True)
+    new.write_text("")
+    assert str(new) in (ai.default_ai() or "")
+    old = tmp_path / "roaming/Claude/claude-code/2.0/def/claude.exe"
+    old.parent.mkdir(parents=True)
+    old.write_text("")
+    os.utime(old, (1, 1))
+    assert str(new) in (ai.default_ai() or "")
 
 
 def test_ask_ai_runs_in_an_empty_folder():
