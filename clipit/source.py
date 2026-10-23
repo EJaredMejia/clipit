@@ -23,9 +23,11 @@ def download_audio(url: str, work: Path) -> Path:
         subprocess.run(
             ytdlp(
                 "-N",
-                "8",
+                "32",  # Twitch serves ~10 s fragments; the download waits on request latency, not bandwidth
                 "-f",
                 "ba/worst",
+                "--fixup",
+                "never",  # remuxing Twitch's MPEG-TS into MP4 took 2+ min on a 24 h VOD; ffmpeg reads the raw file as fast
                 "--no-simulate",
                 "--print-to-file",
                 "after_move:filepath",

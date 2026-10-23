@@ -9,6 +9,7 @@ import json
 import re
 import subprocess
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -62,11 +63,13 @@ def process_vod(
     log(f"{info.get('title')} ({mmss(dur)}) -> {work}")
 
     # Audio is only needed to measure loudness and transcribe: a rerun with those cached skips the big download.
-    audio = functools.cache(lambda: source.download_audio(url, work))
-    msgs = cached_json(work / "chat.json", lambda: get_chat(info)) or []
+    loud_file = work / "loudness.npy"
+    with ThreadPoolExecutor(1) as pool:  # chat and audio both wait on the network: fetch them at the same time
+        dl = None if loud_file.exists() else pool.submit(source.download_audio, url, work)
+        msgs = cached_json(work / "chat.json", lambda: get_chat(info)) or []
+    audio = functools.cache(lambda: dl.result() if dl else source.download_audio(url, work))
     log(f"{len(msgs)} chat messages")
 
-    loud_file = work / "loudness.npy"
     if not loud_file.exists():
         log("measuring loudness")
         tmp = work / "loudness.tmp.npy"

@@ -63,9 +63,10 @@ Start with a line "_Updated {date}_". Output only the markdown."""
 
 
 def _claude() -> str | None:
+    bundled = [r"%APPDATA%\Claude\claude-code\*\*\claude.exe", r"%LOCALAPPDATA%\Claude-Data\*\claude-code\*\*\claude.exe"]
     found = shutil.which("claude") or max(
-        glob.glob(os.path.expandvars(r"%APPDATA%\Claude\claude-code\*\*\claude.exe")), key=os.path.getmtime, default=None
-    )  # the Claude desktop app on Windows bundles the CLI there
+        (f for p in bundled for f in glob.glob(os.path.expandvars(p))), key=os.path.getmtime, default=None
+    )  # the Claude desktop app on Windows bundles the CLI there (newer Store installs: under Claude-Data)
     return found and f'"{found}" -p --no-session-persistence'
 
 
