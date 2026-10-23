@@ -65,6 +65,33 @@ def test_box_snaps_to_overlay_border_despite_chat_and_room_clutter():
     assert abs(h * 540 - want_h) < 1 and abs(y * 540 - (68 + (150 - want_h) / 2)) < 1
 
 
+def test_webcams_are_small_overlays_against_an_edge():
+    assert facecam.webcam_like((0.0, 0.62, 0.29, 0.38))  # Asmongold's bottom-left cam
+    assert facecam.webcam_like((0.40, 0.56, 0.21, 0.44))  # a cam centered along the bottom
+    assert not facecam.webcam_like((0.34, 0.02, 0.37, 0.95))  # real case: a reacted video's panel, nearly full height
+    assert not facecam.webcam_like((0.34, 0.26, 0.37, 0.46))  # mid-screen, touching no edge
+
+
+def test_webcam_flush_with_the_frame_edge_is_kept(monkeypatch):
+    # Review example: a 200x240 cam centered along the bottom edge. It has no border line at the bottom, and
+    # trimming it to the panel shape pulls its crop ~50 px off that edge; the edge check must see the real overlay.
+    rng = np.random.default_rng(1)
+    frames = []
+    for _ in range(12):
+        f = np.full((540, 960), rng.uniform(60, 200), np.float32)
+        f[300:540, 380:580] = rng.uniform(10, 50)
+        frames.append(f.astype(np.uint8))
+    face = (450, 380, 60, 60)
+    x, y, w, h = facecam.overlay(frames, face)
+    assert [round(v) for v in (x * 960, y * 540, w * 960, h * 540)] == [380, 300, 200, 240]
+    assert not facecam.at_edge(facecam.cam_box(frames, face))  # the trimmed crop alone would fail the check
+
+    monkeypatch.setattr(facecam, "grab_frames", lambda url, times: frames)
+    monkeypatch.setattr(facecam, "detect_faces", lambda fr: [(i, *face) for i in range(len(fr))])
+    (layout,) = facecam.find_layouts("https://example/v.m3u8", 3600)
+    assert layout["face"] == list(face) and layout["box"] == list(facecam.cam_box(frames, face))
+
+
 def test_no_border_falls_back_to_a_box_around_the_face():
     x, y, w, h = facecam.cam_box([np.full((540, 960), 100, np.uint8)] * 3, (400, 200, 60, 60))
     assert 0.1 < x < 0.5 and 0.2 < y < 0.5 and w < 0.3

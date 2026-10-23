@@ -42,9 +42,12 @@ def cam_faces(boxes: list, n_frames: int, width: int = 960) -> list[tuple[np.nda
     return found
 
 
-def cam_box(
-    frames: list[np.ndarray], face: Sequence[float] | np.ndarray, aspect: float = TOP[0] / TOP[1]
-) -> tuple[float, float, float, float]:
+def cam_box(frames: list[np.ndarray], face: Sequence[float] | np.ndarray) -> tuple[float, float, float, float]:
+    """Webcam crop as (x, y, w, h) frame fractions: the overlay, trimmed to the top panel's shape."""
+    return fit(overlay(frames, face), frames[0].shape)
+
+
+def overlay(frames: list[np.ndarray], face: Sequence[float] | np.ndarray) -> tuple[float, float, float, float]:
     """Webcam overlay as (x, y, w, h) frame fractions, snapped to its border (the one edge that's static for hours)."""
     H, W = frames[0].shape
     x, y, w, h = (int(v) for v in face)
@@ -52,16 +55,25 @@ def cam_box(
     fb = max(0, cx - 2 * w), max(0, cy - 3 * h // 2), min(W, cx + 2 * w), min(H, cy + 3 * h // 2)
     gx = np.mean([np.abs(np.diff(f.astype(np.float32), axis=1)) for f in frames], 0)
     gy = np.mean([np.abs(np.diff(f.astype(np.float32), axis=0)) for f in frames], 0)
+    # A side with no border line whose search reaches the frame edge is an overlay flush with that edge.
+    left, top = (0 if x - 3 * w <= 0 else fb[0]), (0 if y - 3 * h <= 0 else fb[1])
+    right, bottom = (W if x + 4 * w >= W else fb[2]), (H if y + 4 * h >= H else fb[3])
     x0, y0, x1, y1 = fb
     for _ in range(2):  # median along the span found so far: the border runs its full length, chat text and room clutter don't
         row = np.median(gy[:, x0:x1], 1)
-        y0, y1 = edge(row, y - 3 * h, y, y0), edge(row, y + h, y + 4 * h, y1)
+        y0, y1 = edge(row, y - 3 * h, y, top), edge(row, y + h, y + 4 * h, bottom)
         col = np.median(gx[y0:y1], 0)
-        x0, x1 = edge(col, x - 3 * w, x, x0), edge(col, x + w, x + 4 * w, x1)
+        x0, x1 = edge(col, x - 3 * w, x, left), edge(col, x + w, x + 4 * w, right)
     if not (1.5 * w <= x1 - x0 <= 8 * w and 1.2 * h <= y1 - y0 <= 6 * h):
         x0, y0, x1, y1 = fb
-    bw, bh = x1 - x0, y1 - y0
-    if bw / bh > aspect:  # trim to the top panel's shape so nothing stretches
+    return float(x0 / W), float(y0 / H), float((x1 - x0) / W), float((y1 - y0) / H)
+
+
+def fit(box: Sequence[float], shape: tuple[int, ...], aspect: float = TOP[0] / TOP[1]) -> tuple[float, float, float, float]:
+    """Trim a frame-fraction box around its center to the top panel's shape, so nothing stretches."""
+    H, W = shape[:2]
+    x0, y0, bw, bh = box[0] * W, box[1] * H, box[2] * W, box[3] * H
+    if bw / bh > aspect:
         x0, bw = x0 + (bw - bh * aspect) / 2, bh * aspect
     else:
         y0, bh = y0 + (bh - bw / aspect) / 2, bw / aspect
@@ -117,10 +129,16 @@ def find_layouts(url: str, duration: float, n: int = 40) -> list[dict]:
     frames = grab_frames(url, np.linspace(0.05 * duration, 0.95 * duration, n))
     layouts = []
     for face, idx in cam_faces(detect_faces(frames), len(frames)):
-        box = cam_box([frames[i] for i in sorted(idx)], face)
-        if at_edge(box):
-            layouts.append({"face": [int(v) for v in face], "box": list(box)})
+        box = overlay([frames[i] for i in sorted(idx)], face)
+        if webcam_like(box):  # on the real overlay: trimming to the panel shape can pull it off its edge
+            layouts.append({"face": [int(v) for v in face], "box": list(fit(box, frames[0].shape))})
     return layouts
+
+
+def webcam_like(box: Sequence[float]) -> bool:
+    """An overlay (frame fractions) that can be a webcam: against a frame edge, and at most half the frame each way.
+    Real case: a face in a video Asmongold reacted to recurred mid-screen inside a 37% x 95% panel."""
+    return at_edge(box) and box[2] <= 0.5 and box[3] <= 0.5
 
 
 def at_edge(box: Sequence[float], margin: float = 0.05) -> bool:
