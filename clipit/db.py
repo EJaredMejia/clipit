@@ -4,11 +4,14 @@ Per-VOD working files (audio, transcripts, renders) stay on disk in out/<vod-id>
 Everything shared across runs lives here, never in ad-hoc JSON files.
 """
 
+import contextlib
 import datetime
 import sqlite3
+import threading
+from collections.abc import Iterator
 from pathlib import Path
 
-from clipit.util import utcnow
+from clipit.util import logger, utcnow
 
 # One entry per schema version, applied in order and recorded in PRAGMA user_version.
 # Never edit an entry that has shipped: append a new one (ALTER TABLE ...) instead.
@@ -44,9 +47,34 @@ MIGRATIONS = [
         UNIQUE (vod_id, idx)
     );
     """,
+    # Clips are identified by their moment, not their rank: a re-pick that moves a moment keeps its id (uploads
+    # point at it), and a new moment at an old rank gets a new id. SQLite can't drop a constraint, so rebuild.
+    """
+    CREATE TABLE clips_new (
+        id         INTEGER PRIMARY KEY,
+        vod_id     TEXT NOT NULL REFERENCES vods (id) ON DELETE CASCADE,
+        idx        INTEGER NOT NULL,           -- 1-based order the AI ranked it in the latest pick
+        file       TEXT NOT NULL,              -- relative to the out folder
+        start_s    REAL NOT NULL,
+        end_s      REAL NOT NULL,
+        title      TEXT NOT NULL,
+        hook       TEXT NOT NULL,
+        caption    TEXT NOT NULL,
+        trend      TEXT NOT NULL,
+        sound      TEXT NOT NULL,
+        score      REAL NOT NULL,
+        why        TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE (vod_id, start_s, end_s)
+    );
+    INSERT OR IGNORE INTO clips_new SELECT * FROM clips ORDER BY id;
+    DROP TABLE clips;
+    ALTER TABLE clips_new RENAME TO clips;
+    """,
 ]
 
-STALE_CLAIM = datetime.timedelta(hours=4)  # a 'processing' row older than this was a crashed run
+STALE_CLAIM = datetime.timedelta(minutes=30)  # a 'processing' row not refreshed for this long was a crashed run
+HEARTBEAT = datetime.timedelta(minutes=5)  # how often a live run refreshes its claim, well under STALE_CLAIM
 MAX_ATTEMPTS = 3
 RETRY_AFTER = datetime.timedelta(hours=1)
 
@@ -93,6 +121,33 @@ def claim(conn: sqlite3.Connection, vod_id: str, url: str, login: str | None, ti
         raise
 
 
+@contextlib.contextmanager
+def heartbeat(conn: sqlite3.Connection, vod_id: str) -> Iterator[None]:
+    """Refresh the VOD's claim while the block runs, so a long but alive run is never taken for a crashed one."""
+    path = conn.execute("PRAGMA database_list").fetchone()["file"]
+    stop = threading.Event()
+
+    def beat() -> None:
+        own = sqlite3.connect(path, timeout=30, isolation_level=None)  # connections can't cross threads
+        try:
+            while not stop.wait(HEARTBEAT.total_seconds()):
+                try:
+                    own.execute("UPDATE vods SET claimed_at = ? WHERE id = ? AND status = 'processing'",
+                                (utcnow().isoformat(), vod_id))
+                except sqlite3.Error:
+                    logger.warning("could not refresh the claim on %s", vod_id, exc_info=True)
+        finally:
+            own.close()
+
+    t = threading.Thread(target=beat, daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        t.join()
+
+
 def finish(conn: sqlite3.Connection, vod_id: str, error: str | None = None, now=None) -> None:
     conn.execute(
         "UPDATE vods SET status = ?, error = ?, finished_at = ? WHERE id = ?",
@@ -117,16 +172,22 @@ def status(conn: sqlite3.Connection, vod_id: str) -> str | None:
 
 
 def save_clips(conn: sqlite3.Connection, vod_id: str, clips: list[dict]) -> None:
-    """Upsert by (vod, rank): re-rendering keeps clip ids stable for anything that references them (uploads)."""
+    """Make the VOD's clips exactly these. Keyed by (vod, start, end): the same moment keeps its clip id across
+    re-renders and re-picks, so anything that references it (uploads) stays right."""
     now = utcnow().isoformat()
+    keep = {(c["start"], c["end"]) for c in clips}
     conn.execute("BEGIN IMMEDIATE")
     try:
+        # shortcut: picks the AI dropped are deleted; once an uploads table references clips, keep uploaded ones instead
+        for row in conn.execute("SELECT id, start_s, end_s FROM clips WHERE vod_id = ?", (vod_id,)).fetchall():
+            if (row["start_s"], row["end_s"]) not in keep:
+                conn.execute("DELETE FROM clips WHERE id = ?", (row["id"],))
         for c in clips:
             conn.execute(
                 """INSERT INTO clips (vod_id, idx, file, start_s, end_s, title, hook, caption, trend, sound, score, why, created_at)
                    VALUES (:vod_id, :idx, :file, :start, :end, :title, :hook, :caption, :trend, :sound, :score, :why, :now)
-                   ON CONFLICT (vod_id, idx) DO UPDATE SET file = excluded.file, start_s = excluded.start_s,
-                       end_s = excluded.end_s, title = excluded.title, hook = excluded.hook, caption = excluded.caption,
+                   ON CONFLICT (vod_id, start_s, end_s) DO UPDATE SET idx = excluded.idx, file = excluded.file,
+                       title = excluded.title, hook = excluded.hook, caption = excluded.caption,
                        trend = excluded.trend, sound = excluded.sound, score = excluded.score, why = excluded.why""",
                 {**c, "vod_id": vod_id, "now": now},
             )

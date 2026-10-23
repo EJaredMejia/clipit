@@ -124,13 +124,20 @@ def clean(clips: list, duration: float, n: int) -> list[dict]:
         if not isinstance(c, dict):
             continue
         try:
-            s, e, score = max(0.0, float(c["start"])), min(duration, float(c["end"])), float(c.get("score") or 0)
+            # rounded: a clip is identified by its time range (db.save_clips, file names), 0.1 s is plenty
+            s, e = round(max(0.0, float(c["start"])), 1), round(min(duration, float(c["end"])), 1)
+            score = float(c.get("score") or 0)
         except (KeyError, TypeError, ValueError):
             continue
         if 5 <= e - s <= 180:
             text = {k: str(c.get(k) or "").strip()[:cap] for k, cap in TEXT_FIELDS.items()}
             out.append({**text, "start": s, "end": e, "score": score})
-    return sorted(out, key=lambda c: -c["score"])[:n]
+    best, seen = [], set()
+    for c in sorted(out, key=lambda c: -c["score"]):
+        if (c["start"], c["end"]) not in seen:  # the same moment twice would be one clip
+            seen.add((c["start"], c["end"]))
+            best.append(c)
+    return best[:n]
 
 
 def pick_clips(cmd: str, info: dict, cands: list[dict], n: int, work: Path) -> list[dict]:

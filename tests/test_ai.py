@@ -23,6 +23,11 @@ def test_clean_forces_text_fields_to_capped_strings():
     assert c["hook"] == "" and c["caption"] == "7" and c["sound"] == ""
 
 
+def test_clean_rounds_times_and_drops_duplicate_moments():
+    got = ai.clean([{"start": 10.04, "end": 30.01, "score": 5}, {"start": 10.0, "end": 30.0, "score": 9}], 100.0, 5)
+    assert [(c["start"], c["end"], c["score"]) for c in got] == [(10.0, 30.0, 9.0)]
+
+
 def test_clean_rejects_non_list():
     assert ai.clean({"start": 1}, 100.0, 5) == []
 

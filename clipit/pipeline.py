@@ -100,7 +100,8 @@ def process_vod(
     words = [w for segs in tr.values() for s in segs for w in s["words"]]
     rendered = []
     for i, c in enumerate(picks, 1):
-        c["idx"], c["file"] = i, f"clips/{i:02d}_{slug(c['title'])}.mp4"
+        # The time range is in the name so a re-picked moment never reuses an old render of a different one.
+        c["idx"], c["file"] = i, f"clips/{i:02d}_{slug(c['title'])}_{c['start']:.1f}-{c['end']:.1f}.mp4"
         out = work / c["file"]
         if not out.exists():
             log(f"rendering {out.name} ({c['end'] - c['start']:.0f}s)")

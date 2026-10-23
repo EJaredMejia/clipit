@@ -61,6 +61,20 @@ def test_poll_pass(world):
     assert len(calls) == 3  # nothing new: v1 done, v3 waits RETRY_AFTER, today's small budget used
 
 
+def test_one_streamers_vod_lookup_failing_does_not_end_the_pass(world, monkeypatch):
+    conn, calls, out = world
+    real = poll.twitch.latest_vod
+
+    def flaky(login):
+        if login == "big1":
+            raise ClipitError("Twitch API: service timeout")
+        return real(login)
+
+    monkeypatch.setattr(poll.twitch, "latest_vod", flaky)
+    poll.poll(conn, top_n=2, small_per_day=0, lang="EN", out_root=out)
+    assert calls == ["v3"]  # big1 skipped, big2 has no VOD, mid still processed
+
+
 def test_dry_run_touches_nothing(world):
     conn, calls, out = world
     poll.poll(conn, top_n=2, small_per_day=1, lang="EN", dry_run=True, out_root=out)

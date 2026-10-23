@@ -38,8 +38,13 @@ def poll(conn: sqlite3.Connection, top_n: int = 6, small_per_day: int = 4, lang:
     for tier, login in candidates(twitch.live_streams(), lang):
         if (top_left if tier == "top" else small_left) <= 0:
             continue
-        vod = twitch.latest_vod(login)
-        if not vod or now - ended(vod) > MAX_AGE:
+        try:
+            vod = twitch.latest_vod(login)
+            usable = vod and now - ended(vod) <= MAX_AGE
+        except Exception:  # one streamer's VOD list failing (API change, odd data) must not end the pass
+            logger.warning("could not list VODs of %s", login, exc_info=True)
+            continue
+        if not usable:
             continue  # no usable VOD (VODs off, corporate channel...): the next streamer takes the slot
         if tier == "top":
             top_left -= 1  # an already-clipped VOD still fills its slot, so we don't drift down the list
@@ -56,7 +61,8 @@ def poll(conn: sqlite3.Connection, top_n: int = 6, small_per_day: int = 4, lang:
         if tier == "small":
             small_left -= 1
         try:
-            _, clips = process_vod(url, out_root=out_root, **pipeline_opts)
+            with db.heartbeat(conn, vod_id):
+                _, clips = process_vod(url, out_root=out_root, **pipeline_opts)
             db.save_clips(conn, vod_id, [{**c, "file": f"{vod_id}/{c['file']}"} for c in clips])
             db.finish(conn, vod_id)
         except Exception as e:  # one bad VOD (sub-only, deleted...) must not stop the rest
