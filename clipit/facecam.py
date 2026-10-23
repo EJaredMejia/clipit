@@ -67,11 +67,30 @@ def cam_box(frames: list[np.ndarray], face, aspect: float = TOP[0] / TOP[1]) -> 
 
 def grab_frames(url: str, times) -> list[np.ndarray]:
     """Gray 960x540 frames at the given seconds, straight from the stream; frames that fail are skipped."""
+
     def grab(t):
         try:
-            raw = subprocess.run(["ffmpeg", "-v", "error", *REMOTE, "-ss", f"{t:.2f}", "-i", url, "-frames:v", "1",
-                                  "-vf", "scale=960:540,format=gray", "-f", "rawvideo", "-"],
-                                 capture_output=True, timeout=120).stdout
+            raw = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-v",
+                    "error",
+                    *REMOTE,
+                    "-ss",
+                    f"{t:.2f}",
+                    "-i",
+                    url,
+                    "-frames:v",
+                    "1",
+                    "-vf",
+                    "scale=960:540,format=gray",
+                    "-f",
+                    "rawvideo",
+                    "-",
+                ],
+                capture_output=True,
+                timeout=120,
+            ).stdout
         except subprocess.TimeoutExpired:
             return None
         return np.frombuffer(raw, np.uint8).reshape(540, 960) if len(raw) == 960 * 540 else None
@@ -84,7 +103,8 @@ def detect_faces(frames: list[np.ndarray]) -> list[tuple]:
     """Frontal faces as (frame index, x, y, w, h) in 960x540 pixels."""
     import cv2  # heavy import, only needed here
 
-    det = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    cascades = cv2.data.haarcascades  # pyright: ignore[reportAttributeAccessIssue]  # exists, missing from cv2's stubs
+    det = cv2.CascadeClassifier(cascades + "haarcascade_frontalface_default.xml")
     return [(i, *map(int, b)) for i, f in enumerate(frames) for b in det.detectMultiScale(f, 1.1, 6, minSize=(24, 24))]
 
 
@@ -108,6 +128,7 @@ def at_edge(box, margin: float = 0.05) -> bool:
 
 def pick_layout(layouts: list[dict], boxes: list[tuple], n_frames: int) -> list[float] | None:
     """The layout whose webcam face shows up in most of a clip's frames (at least 2), else None (blurred layout)."""
+
     def hits(layout):
         face = (None, *layout["face"])
         return len({b[0] for b in boxes if near(face, b, 0.75)})

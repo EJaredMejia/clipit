@@ -67,7 +67,7 @@ Each pass:
 2. **Big streamers:** the 6 biggest (`--top`). For each, it clips their latest *finished* VOD, ignoring a stream that's still live. A channel with no usable VOD gives its slot to the next one.
 3. **Smaller streamers** (300-2,000 viewers): picked at random, at most 4 VODs a day (`--small`), so they're included without crowding out the big ones.
 4. Skips VODs that ended more than 2 days ago and anything already done. Only English streams by default (`--lang ""` for any).
-5. Each VOD is claimed in the database before processing, so two overlapping passes never do the same one. Finished VODs are never redone. Failed ones retry up to 3 times, at least an hour apart, and a pass that crashed mid-VOD is taken over after 4 hours. Downloaded audio is deleted after each VOD to save disk.
+5. Each VOD is claimed in the database before processing, so two overlapping passes never do the same one. Finished VODs are never redone. Failed ones retry up to 3 times, at least an hour apart, and a pass that crashed mid-VOD is taken over 30 minutes after it stopped refreshing its claim. Downloaded audio is deleted after each VOD to save disk.
 
 Run it on a timer (launchd on macOS, Task Scheduler on Windows) every 30-60 minutes. A pass with new VODs takes about
 10 minutes per VOD. Logs go to `out/logs/clipit.log`.
@@ -102,8 +102,8 @@ Has the AI search the web for this week's TikTok and Shorts trends and rewrites 
 
 `out/<vod-id>/` holds the clips and the working files:
 
-- `clips/01_<title>.mp4`: 1080x1920 with a hook box and word-by-word captions. Audio is normalized to -14 LUFS.
-  - **Facecam on top, gameplay below** when the stream has a webcam overlay. The overlay is found automatically.
+- `clips/01_<title>_<start>-<end>.mp4`: 1080x1920 with a hook box and word-by-word captions. Audio is normalized to -14 LUFS.
+  - **Facecam on top, gameplay below** when a webcam overlay is on screen during that clip. Found automatically, per clip.
   - **Blurred fill + full frame** when there's no webcam, e.g. a camera-only or no-cam stream.
 - `posts.md`: per clip, the title (for Shorts), a copy-paste caption with hashtags (for TikTok), the trend it fits, and a sound to add in the app.
 
@@ -116,7 +116,7 @@ with every rendered clip (file, title, hook, caption, score).
 2. Pulls the **chat replay** and scores every second by chat speed (hype emotes like KEKW, LUL and "clip" count double), shifted 8 s earlier because chat reacts late, plus **loudness** peaks.
 3. Takes the top `3 x clips` peaks and transcribes 90 s around each one with Whisper, locally.
 4. Sends the transcripts, chat samples and `trends.md` to the AI. It returns exact cut points, a cold-open hook and the post text.
-5. **Finds the facecam** in 40 frames spread over the whole VOD. The webcam face stays in one spot for hours while game faces move, so the spot with the most face sightings wins. The crop then snaps to the overlay's border, the one edge that stays put while the gameplay changes.
+5. **Finds the facecam layouts** in 40 frames spread over the whole VOD. A webcam face recurs in the same spot for long stretches while game faces move, so each recurring spot against a frame edge is a webcam layout (streamers often have several, one per scene). Each crop snaps to that overlay's border, the one edge that stays put while the gameplay changes. Then, for every clip, a few frames from the clip itself decide which layout is on screen, or the blurred layout if none is.
 6. ffmpeg **seeks straight into the stream** and downloads only those seconds of 1080p video while rendering.
 
 Every step is cached in `out/<vod-id>/`, so reruns are fast. Delete `picks.json` to get new picks from the AI,
@@ -125,7 +125,7 @@ Every step is cached in `out/<vod-id>/`, so reruns are fast. Delete `picks.json`
 ## Limitations
 
 - Only post clips you have the rights to, or from streamers who allow clipping. Parts of Twitch VODs muted for DMCA stay silent in the clips.
-- The facecam is detected once per VOD. If the streamer moves the cam or switches to a full-screen camera scene partway through, clips from those parts get the wrong crop.
+- Webcam layouts are found from 40 frames across the VOD, so a layout used for under ~1/8 of the stream may be missed; clips from it get the blurred layout. A full-screen camera scene also gets the blurred layout.
 - Gameplay is center-cropped, so text at the screen edges gets cut.
 - Uploading is manual for now. Add the trending sound inside TikTok, since burning music in gets clips muted.
 
@@ -140,9 +140,9 @@ The publish commands will read the clips to post from the `clips` table in `out/
 
 ```bash
 pip install -c requirements.lock -e ".[dev]"
-ruff check .
-pytest -q
+pre-commit install          # lint + format on every commit
+ruff check . && ruff format --check . && pyright && pytest -q
 ```
 
-Both checks also run in GitHub Actions on pushes to `main` and on pull requests (Linux and macOS). The code layout,
-the coding conventions and the rules every change must follow are in [AGENTS.md](AGENTS.md).
+All four checks also run in GitHub Actions on pushes to `main` and on pull requests (Linux and macOS). The code
+layout, the coding conventions and the rules every change must follow are in [AGENTS.md](AGENTS.md).

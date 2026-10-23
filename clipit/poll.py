@@ -17,11 +17,11 @@ SMALL = (300, 2000)  # viewer range for "smaller streamers": below ~300 there's 
 MAX_AGE = datetime.timedelta(days=2)  # older VODs aren't worth clipping anymore
 
 
-def candidates(streams: list[tuple[str, int, str]], lang: str, rng=random) -> list[tuple[str, str]]:
+def candidates(streams: list[tuple[str, int, str]], lang: str, rng: random.Random | None = None) -> list[tuple[str, str]]:
     """(tier, login) in priority order: big streamers biggest first, then smaller streamers in random order."""
     streams = [s for s in streams if not lang or s[2] == lang]
     small = [s[0] for s in streams if SMALL[0] <= s[1] <= SMALL[1]]
-    rng.shuffle(small)
+    (rng or random.Random()).shuffle(small)
     return [("top", s[0]) for s in streams if s[1] > SMALL[1]] + [("small", login) for login in small]
 
 
@@ -29,8 +29,15 @@ def ended(vod: dict) -> datetime.datetime:
     return datetime.datetime.fromisoformat(vod["publishedAt"]) + datetime.timedelta(seconds=vod["lengthSeconds"])
 
 
-def poll(conn: sqlite3.Connection, top_n: int = 6, small_per_day: int = 4, lang: str = "EN", dry_run: bool = False,
-         out_root: Path = ROOT / "out", **pipeline_opts) -> None:
+def poll(
+    conn: sqlite3.Connection,
+    top_n: int = 6,
+    small_per_day: int = 4,
+    lang: str = "EN",
+    dry_run: bool = False,
+    out_root: Path = ROOT / "out",
+    **pipeline_opts,
+) -> None:
     """One polling pass. Safe to run on a timer, and even twice at once."""
     now = utcnow()
     small_left = small_per_day - db.small_done_since(conn, now - datetime.timedelta(days=1))
@@ -38,9 +45,13 @@ def poll(conn: sqlite3.Connection, top_n: int = 6, small_per_day: int = 4, lang:
     for tier, login in candidates(twitch.live_streams(), lang):
         if (top_left if tier == "top" else small_left) <= 0:
             continue
-        vod = twitch.latest_vod(login)
-        if not vod or now - ended(vod) > MAX_AGE:
-            continue  # no usable VOD (VODs off, corporate channel...): the next streamer takes the slot
+        try:
+            vod = twitch.latest_vod(login)
+            if not vod or now - ended(vod) > MAX_AGE:
+                continue  # no usable VOD (VODs off, corporate channel...): the next streamer takes the slot
+        except Exception:  # one streamer's VOD list failing (API change, odd data) must not end the pass
+            logger.warning("could not list VODs of %s", login, exc_info=True)
+            continue
         if tier == "top":
             top_left -= 1  # an already-clipped VOD still fills its slot, so we don't drift down the list
         vod_id, url = f"v{vod['id']}", f"https://www.twitch.tv/videos/{vod['id']}"
@@ -56,7 +67,8 @@ def poll(conn: sqlite3.Connection, top_n: int = 6, small_per_day: int = 4, lang:
         if tier == "small":
             small_left -= 1
         try:
-            _, clips = process_vod(url, out_root=out_root, **pipeline_opts)
+            with db.heartbeat(conn, vod_id):
+                _, clips = process_vod(url, out_root=out_root, **pipeline_opts)
             db.save_clips(conn, vod_id, [{**c, "file": f"{vod_id}/{c['file']}"} for c in clips])
             db.finish(conn, vod_id)
         except Exception as e:  # one bad VOD (sub-only, deleted...) must not stop the rest

@@ -30,8 +30,10 @@ def test_only_faces_against_a_frame_edge_count_as_webcams():
 
 
 def test_each_clip_gets_the_layout_on_screen_during_it():
-    layouts = [{"face": [114, 358, 83, 83], "box": [0, 0.62, 0.28, 0.35]},
-               {"face": [79, 248, 90, 90], "box": [0, 0.44, 0.29, 0.36]}]
+    layouts = [
+        {"face": [114, 358, 83, 83], "box": [0, 0.62, 0.28, 0.35]},
+        {"face": [79, 248, 90, 90], "box": [0, 0.44, 0.29, 0.36]},
+    ]
     game_scene = [(0, 82, 250, 88, 88), (1, 75, 245, 92, 92), (2, 500, 100, 60, 60)]
     assert facecam.pick_layout(layouts, game_scene, 5) == [0, 0.44, 0.29, 0.36]
     assert facecam.pick_layout(layouts, [(0, 82, 250, 88, 88)], 5) is None  # one sighting isn't enough

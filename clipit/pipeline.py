@@ -8,7 +8,9 @@ import functools
 import json
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -18,7 +20,7 @@ from clipit.util import ROOT, ClipitError, log, logger, mmss, slug, write_atomic
 MAX_DURATION = 48 * 3600  # bounds disk use (~2.5 GB of audio); longer VODs are skipped
 
 
-def cached_json(path: Path, make):
+def cached_json(path: Path, make: Callable[[], Any]) -> Any:
     """Load path, or build it with make() and save it. make() returning None means don't cache (retry next run)."""
     if not path.exists():
         value = make()
@@ -26,6 +28,11 @@ def cached_json(path: Path, make):
             return None
         write_atomic(path, json.dumps(value))
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def clip_file(rank: int, clip: dict) -> str:
+    """Path under the work folder. The time range is in it so a re-picked moment never reuses an old render."""
+    return f"clips/{rank:02d}_{slug(clip['title'])}_{clip['start']:.1f}-{clip['end']:.1f}.mp4"
 
 
 def get_chat(info: dict) -> list:
@@ -84,8 +91,9 @@ def process_vod(
             stats = f"audio peak +{loud[s:e].max() - np.median(loud):.0f} dB"
             if rate.any():
                 stats = f"chat {rate[s:e].mean() / rate.mean():.1f}x normal, " + stats
-            cands.append({"start": s, "end": e, "segments": tr[f"{s}-{e}"], "stats": stats,
-                          "chat": [m for m in msgs if s <= m[0] < e]})
+            cands.append(
+                {"start": s, "end": e, "segments": tr[f"{s}-{e}"], "stats": stats, "chat": [m for m in msgs if s <= m[0] < e]}
+            )
         log(f"asking the AI to pick {n_clips} clips from {len(cands)} candidates")
         return ai.pick_clips(ai_cmd, info, cands, n_clips, work)
 
@@ -103,7 +111,7 @@ def process_vod(
     words = [w for segs in tr.values() for s in segs for w in s["words"]]
     rendered = []
     for i, c in enumerate(picks, 1):
-        c["idx"], c["file"] = i, f"clips/{i:02d}_{slug(c['title'])}.mp4"
+        c["idx"], c["file"] = i, clip_file(i, c)
         out = work / c["file"]
         if not out.exists():
             cam = facecam.clip_cam(urls[0], layouts, c["start"], c["end"])  # streamers switch scene layouts mid-stream
