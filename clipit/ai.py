@@ -21,7 +21,7 @@ AI_TIMEOUT = 900
 MAX_TRENDS_CHARS = 8000  # trends.md comes from the open web; cap what it can add to every prompt
 # Field caps match what the platforms accept (TikTok captions: 2,200 chars; Shorts titles: 100).
 TEXT_FIELDS = {"title": 100, "hook": 80, "caption": 2200, "trend": 200, "sound": 200, "why": 300}
-CLIP_LEN = (10, 60)  # seconds; longer picks are trimmed to the first 60 s (a candidate's first 60 s end on its peak)
+CLIP_LEN = (15, 60)  # seconds, as the prompt asks; longer picks are trimmed to 60 s (a window's first 60 s end on its peak)
 ANSI = re.compile(r"\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07]*\x07|[@-Z\\-_])")  # terminal escape sequences
 
 PROMPT = """You are the editor behind a top TikTok / YouTube Shorts clip channel. Today is {date}.

@@ -1,11 +1,13 @@
 """Local speech-to-text with word timestamps, only on the candidate windows."""
 
 import subprocess
+from collections.abc import Iterator
+from pathlib import Path
 
 import numpy as np
 
 
-def transcribe(audio, windows, model_name):
+def transcribe(audio: Path, windows: list[tuple[int, int]], model_name: str) -> Iterator[list[dict]]:
     """Yields the segments of each window, with absolute timestamps."""
     from faster_whisper import WhisperModel  # heavy import, only when needed
 

@@ -1,6 +1,7 @@
 """Finding the streamer's webcam overlay so it can go in its own panel."""
 
 import subprocess
+from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -20,7 +21,7 @@ def edge(profile: np.ndarray, lo: int, hi: int, fallback: int) -> int:
     return lo + i + 1 if seg[i] > max(8, 5 * np.median(seg)) else fallback
 
 
-def near(a, b, tol: float) -> bool:
+def near(a: tuple, b: tuple, tol: float) -> bool:
     """Face boxes (frame, x, y, w, h) whose centers are within tol face-sizes of each other."""
     return abs(a[1] + a[3] / 2 - b[1] - b[3] / 2) < tol * a[3] and abs(a[2] + a[4] / 2 - b[2] - b[4] / 2) < tol * a[4]
 
@@ -41,7 +42,9 @@ def cam_faces(boxes: list, n_frames: int, width: int = 960) -> list[tuple[np.nda
     return found
 
 
-def cam_box(frames: list[np.ndarray], face, aspect: float = TOP[0] / TOP[1]) -> tuple[float, float, float, float]:
+def cam_box(
+    frames: list[np.ndarray], face: Sequence[float] | np.ndarray, aspect: float = TOP[0] / TOP[1]
+) -> tuple[float, float, float, float]:
     """Webcam overlay as (x, y, w, h) frame fractions, snapped to its border (the one edge that's static for hours)."""
     H, W = frames[0].shape
     x, y, w, h = (int(v) for v in face)
@@ -65,7 +68,7 @@ def cam_box(frames: list[np.ndarray], face, aspect: float = TOP[0] / TOP[1]) -> 
     return float(x0 / W), float(y0 / H), float(bw / W), float(bh / H)
 
 
-def grab_frames(url: str, times) -> list[np.ndarray]:
+def grab_frames(url: str, times: Iterable[float]) -> list[np.ndarray]:
     """Gray 960x540 frames at the given seconds, straight from the stream; frames that fail are skipped."""
 
     def grab(t):
@@ -120,13 +123,13 @@ def find_layouts(url: str, duration: float, n: int = 40) -> list[dict]:
     return layouts
 
 
-def at_edge(box, margin: float = 0.05) -> bool:
+def at_edge(box: Sequence[float], margin: float = 0.05) -> bool:
     """Webcam overlays sit against a frame edge. A recurring face mid-screen is content (e.g. a video being reacted to)."""
     x, y, w, h = box
     return x < margin or y < margin or x + w > 1 - margin or y + h > 1 - margin
 
 
-def pick_layout(layouts: list[dict], boxes: list[tuple], n_frames: int) -> list[float] | None:
+def pick_layout(layouts: list[dict], boxes: list[tuple]) -> list[float] | None:
     """The layout whose webcam face shows up in most of a clip's frames (at least 2), else None (blurred layout)."""
 
     def hits(layout):
@@ -134,7 +137,7 @@ def pick_layout(layouts: list[dict], boxes: list[tuple], n_frames: int) -> list[
         return len({b[0] for b in boxes if near(face, b, 0.75)})
 
     best = max(layouts, key=hits, default=None)
-    return best["box"] if best and hits(best) >= min(2, n_frames) else None
+    return best["box"] if best and hits(best) >= 2 else None  # 0 frames (all grabs failed) must not pick a layout blind
 
 
 def clip_cam(url: str, layouts: list[dict], start: float, end: float, n: int = 5) -> list[float] | None:
@@ -142,4 +145,4 @@ def clip_cam(url: str, layouts: list[dict], start: float, end: float, n: int = 5
     if not layouts:
         return None
     frames = grab_frames(url, np.linspace(start, end, n + 2)[1:-1])
-    return pick_layout(layouts, detect_faces(frames), len(frames))
+    return pick_layout(layouts, detect_faces(frames))

@@ -35,9 +35,17 @@ def test_each_clip_gets_the_layout_on_screen_during_it():
         {"face": [79, 248, 90, 90], "box": [0, 0.44, 0.29, 0.36]},
     ]
     game_scene = [(0, 82, 250, 88, 88), (1, 75, 245, 92, 92), (2, 500, 100, 60, 60)]
-    assert facecam.pick_layout(layouts, game_scene, 5) == [0, 0.44, 0.29, 0.36]
-    assert facecam.pick_layout(layouts, [(0, 82, 250, 88, 88)], 5) is None  # one sighting isn't enough
-    assert facecam.pick_layout([], game_scene, 5) is None
+    assert facecam.pick_layout(layouts, game_scene) == [0, 0.44, 0.29, 0.36]
+    assert facecam.pick_layout(layouts, [(0, 82, 250, 88, 88)]) is None  # one sighting isn't enough
+    assert facecam.pick_layout([], game_scene) is None
+
+
+def test_no_frames_means_no_layout(monkeypatch):
+    # If every frame grab for a clip fails, no layout may be picked unseen (it could crop the wrong region).
+    layouts = [{"face": [114, 358, 83, 83], "box": [0, 0.62, 0.28, 0.35]}]
+    assert facecam.pick_layout(layouts, []) is None
+    monkeypatch.setattr(facecam, "grab_frames", lambda url, times: [])
+    assert facecam.clip_cam("https://example/v.m3u8", layouts, 0, 30) is None
 
 
 def test_box_snaps_to_overlay_border_despite_chat_and_room_clutter():

@@ -43,6 +43,11 @@ def test_clean_rounds_times_and_drops_duplicate_moments():
     assert [(c["start"], c["end"], c["score"]) for c in got] == [(10.0, 30.0, 9.0)]
 
 
+def test_clean_enforces_the_prompts_minimum_length():
+    got = ai.clean([{"start": 0, "end": 14.9, "score": 9}, {"start": 50, "end": 65, "score": 1}], 100.0, 5)
+    assert [(c["start"], c["end"]) for c in got] == [(50.0, 65.0)]  # 14.9 s dropped, exactly 15 s kept
+
+
 def test_clean_rejects_non_list():
     assert ai.clean({"start": 1}, 100.0, 5) == []
 

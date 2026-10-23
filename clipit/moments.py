@@ -3,6 +3,7 @@
 import re
 import subprocess
 import threading
+from pathlib import Path
 
 import numpy as np
 
@@ -15,7 +16,7 @@ SR = 4000  # loudness only needs a coarse sample rate
 DECODE_TIMEOUT = 1800
 
 
-def loudness(audio) -> np.ndarray:
+def loudness(audio: Path) -> np.ndarray:
     """Per-second loudness in dB, streamed so multi-hour VODs don't need GBs of RAM."""
     p = subprocess.Popen(
         ["ffmpeg", "-v", "error", "-i", str(audio), "-ac", "1", "-ar", str(SR), "-f", "s16le", "-"], stdout=subprocess.PIPE
@@ -34,11 +35,11 @@ def loudness(audio) -> np.ndarray:
     return np.array(db)
 
 
-def smooth(x, w):
+def smooth(x: np.ndarray, w: int) -> np.ndarray:
     return np.convolve(x, np.ones(w) / w, "same")
 
 
-def z(x):
+def z(x: np.ndarray) -> np.ndarray:
     return (x - x.mean()) / (x.std() + 1e-9)
 
 
