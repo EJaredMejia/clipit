@@ -20,17 +20,25 @@ def edge(profile: np.ndarray, lo: int, hi: int, fallback: int) -> int:
     return lo + i + 1 if seg[i] > max(8, 5 * np.median(seg)) else fallback
 
 
-def cam_face(boxes: list, n_frames: int, width: int = 960) -> np.ndarray | None:
-    """Median (x, y, w, h) of the face seen at the same spot in many frames (the webcam), else None."""
-    best = []
-    for _, x, y, w, h in boxes:
-        near = [b for b in boxes if abs(b[1] + b[3] / 2 - x - w / 2) < 1.5 * w and abs(b[2] + b[4] / 2 - y - h / 2) < 1.5 * h]
-        if len({b[0] for b in near}) > len({b[0] for b in best}):
-            best = near
-    if len({b[0] for b in best}) < max(3, n_frames // 4):
-        return None
-    face = np.median([b[1:] for b in best], 0)
-    return None if face[2] > 0.15 * width else face  # a huge face is a full-screen camera scene, not an overlay
+def near(a, b, tol: float) -> bool:
+    """Face boxes (frame, x, y, w, h) whose centers are within tol face-sizes of each other."""
+    return abs(a[1] + a[3] / 2 - b[1] - b[3] / 2) < tol * a[3] and abs(a[2] + a[4] / 2 - b[2] - b[4] / 2) < tol * a[4]
+
+
+def cam_faces(boxes: list, n_frames: int, width: int = 960) -> list[tuple[np.ndarray, set[int]]]:
+    """Every webcam position: a face that recurs at one spot across the VOD (streamers can have several scene
+    layouts, each with the cam elsewhere). Returns (median face box, frames it's in), most frequent first."""
+    found, left = [], list(boxes)
+    while left:
+        group = max(([b for b in left if near(a, b, 0.5)] for a in left), key=lambda g: len({b[0] for b in g}))
+        frames = {b[0] for b in group}
+        if len(frames) < max(3, n_frames // 8):  # game faces move; a layout used <1/8 of the stream isn't worth it
+            break
+        face = np.median([b[1:] for b in group], 0)
+        if face[2] <= 0.15 * width:  # a huge face is a full-screen camera scene, not an overlay
+            found.append((face, frames))
+        left = [b for b in left if b not in group]
+    return found
 
 
 def cam_box(frames: list[np.ndarray], face, aspect: float = TOP[0] / TOP[1]) -> tuple[float, float, float, float]:
@@ -57,10 +65,8 @@ def cam_box(frames: list[np.ndarray], face, aspect: float = TOP[0] / TOP[1]) -> 
     return float(x0 / W), float(y0 / H), float(bw / W), float(bh / H)
 
 
-def find_facecam(url: str, duration: float, n: int = 40) -> tuple[float, float, float, float] | None:
-    """Webcam overlay as frame fractions, or None. Votes over frames from the whole VOD: the webcam stays put, game faces move."""
-    import cv2  # only needed here
-
+def grab_frames(url: str, times) -> list[np.ndarray]:
+    """Gray 960x540 frames at the given seconds, straight from the stream; frames that fail are skipped."""
     def grab(t):
         try:
             raw = subprocess.run(["ffmpeg", "-v", "error", *REMOTE, "-ss", f"{t:.2f}", "-i", url, "-frames:v", "1",
@@ -71,8 +77,48 @@ def find_facecam(url: str, duration: float, n: int = 40) -> tuple[float, float, 
         return np.frombuffer(raw, np.uint8).reshape(540, 960) if len(raw) == 960 * 540 else None
 
     with ThreadPoolExecutor(8) as ex:
-        frames = [f for f in ex.map(grab, np.linspace(0.05 * duration, 0.95 * duration, n)) if f is not None]
+        return [f for f in ex.map(grab, times) if f is not None]
+
+
+def detect_faces(frames: list[np.ndarray]) -> list[tuple]:
+    """Frontal faces as (frame index, x, y, w, h) in 960x540 pixels."""
+    import cv2  # heavy import, only needed here
+
     det = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-    boxes = [(i, *b) for i, f in enumerate(frames) for b in det.detectMultiScale(f, 1.1, 6, minSize=(24, 24))]
-    face = cam_face(boxes, len(frames))
-    return None if face is None else cam_box(frames, face)
+    return [(i, *map(int, b)) for i, f in enumerate(frames) for b in det.detectMultiScale(f, 1.1, 6, minSize=(24, 24))]
+
+
+def find_layouts(url: str, duration: float, n: int = 40) -> list[dict]:
+    """Every webcam layout of the VOD as {"face": px box, "box": crop as frame fractions}, from n frames spread
+    over the whole stream. Each crop is computed only from the frames that show that layout."""
+    frames = grab_frames(url, np.linspace(0.05 * duration, 0.95 * duration, n))
+    layouts = []
+    for face, idx in cam_faces(detect_faces(frames), len(frames)):
+        box = cam_box([frames[i] for i in sorted(idx)], face)
+        if at_edge(box):
+            layouts.append({"face": [int(v) for v in face], "box": list(box)})
+    return layouts
+
+
+def at_edge(box, margin: float = 0.05) -> bool:
+    """Webcam overlays sit against a frame edge. A recurring face mid-screen is content (e.g. a video being reacted to)."""
+    x, y, w, h = box
+    return x < margin or y < margin or x + w > 1 - margin or y + h > 1 - margin
+
+
+def pick_layout(layouts: list[dict], boxes: list[tuple], n_frames: int) -> list[float] | None:
+    """The layout whose webcam face shows up in most of a clip's frames (at least 2), else None (blurred layout)."""
+    def hits(layout):
+        face = (None, *layout["face"])
+        return len({b[0] for b in boxes if near(face, b, 0.75)})
+
+    best = max(layouts, key=hits, default=None)
+    return best["box"] if best and hits(best) >= min(2, n_frames) else None
+
+
+def clip_cam(url: str, layouts: list[dict], start: float, end: float, n: int = 5) -> list[float] | None:
+    """Crop for one clip: check which of the VOD's webcam layouts is on screen during this clip."""
+    if not layouts:
+        return None
+    frames = grab_frames(url, np.linspace(start, end, n + 2)[1:-1])
+    return pick_layout(layouts, detect_faces(frames), len(frames))

@@ -94,3 +94,10 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
 - Put a `Popen` timeout after a blocking read loop, where it could never fire.
 - Wrote a test whose setup painted over the very thing it was testing (always check that a test can fail).
 - Trusted a single heuristic on a few frames (facecam detection) instead of checking it against real data.
+- Assumed one webcam position per VOD. Streamers switch scene layouts mid-stream (Asmongold: three), so layouts are
+  found per VOD and chosen per clip. Test detection changes on more than one streamer.
+- Trusted the AI to follow rules stated only in the prompt. A small local model ignored the clip-length rule, so the
+  validator enforces it. Anything the prompt asks for that matters must also be checked in code.
+- Let a failing signal degrade silently (chat download failed, clips were made without chat). Prefer failing the VOD
+  so it's retried over quietly producing worse output.
+- Assumed AI CLIs print clean text. `ollama run` writes terminal cursor codes even into a pipe; output is sanitized.

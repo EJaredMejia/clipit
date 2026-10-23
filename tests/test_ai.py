@@ -23,6 +23,12 @@ def test_clean_forces_text_fields_to_capped_strings():
     assert c["hook"] == "" and c["caption"] == "7" and c["sound"] == ""
 
 
+def test_clean_trims_overlong_picks():
+    # Real case: qwen3:8b returned each 90 s candidate window whole; its first 60 s end on the detected moment.
+    (c,) = ai.clean([{"start": 15430, "end": 15520}], 20000.0, 5)
+    assert (c["start"], c["end"]) == (15430.0, 15490.0)
+
+
 def test_clean_rejects_non_list():
     assert ai.clean({"start": 1}, 100.0, 5) == []
 
