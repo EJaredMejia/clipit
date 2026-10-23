@@ -27,15 +27,16 @@ def cached_json(path: Path, make):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def get_chat(info: dict):
+def get_chat(info: dict) -> list:
     if not info.get("extractor", "").startswith("twitch:vod"):
-        return []
+        return []  # other sites: no chat replay, loudness alone picks the moments
     log("fetching chat replay")
     try:
         return twitch.fetch_chat(info["id"].lstrip("v"), info["duration"])
-    except Exception:  # chat is a bonus signal, audio alone still works
-        logger.warning("chat unavailable, using audio only", exc_info=True)
-        return None
+    except Exception as e:
+        # Chat is the strongest signal for Twitch: fail the VOD so it's retried later, rather than make worse clips.
+        # (A VOD with chat disabled isn't an error: it just returns no messages.)
+        raise ClipitError(f"couldn't fetch chat replay ({type(e).__name__}: {e}), will retry later") from e
 
 
 def process_vod(

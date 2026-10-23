@@ -21,6 +21,7 @@ AI_TIMEOUT = 900
 MAX_TRENDS_CHARS = 8000  # trends.md comes from the open web; cap what it can add to every prompt
 # Field caps match what the platforms accept (TikTok captions: 2,200 chars; Shorts titles: 100).
 TEXT_FIELDS = {"title": 100, "hook": 80, "caption": 2200, "trend": 200, "sound": 200, "why": 300}
+ANSI = re.compile(r"\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07]*\x07|[@-Z\\-_])")  # terminal escape sequences
 
 PROMPT = """You are the editor behind a top TikTok / YouTube Shorts clip channel. Today is {date}.
 
@@ -89,7 +90,7 @@ def ask_ai(cmd: str, prompt: str) -> str:
     if r.returncode or not r.stdout.strip():
         raise ClipitError(f"AI command failed: {cmd}\n{(r.stdout + r.stderr)[-2000:]}\n"
                           "(Claude says 'Not logged in'? run `claude` once and type /login)")
-    return r.stdout
+    return ANSI.sub("", r.stdout)  # some CLIs (ollama run) emit cursor codes even into a pipe
 
 
 def refresh_trends(cmd: str) -> None:

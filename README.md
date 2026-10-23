@@ -1,6 +1,18 @@
-# clip-it
+# Clipit
 
-Give it an hours-long Twitch VOD. It returns vertical 9:16 clips ready for TikTok and YouTube Shorts, with a title, hook and caption for each. An AI of your choice picks the moments and checks them against current TikTok trends.
+Clipit is a command-line tool that turns Twitch streams into short vertical clips for TikTok and YouTube Shorts, using whatever AI you have on your machine (Claude Code, a local model through Ollama, or any other AI CLI).
+
+It's built as a set of commands that grows over time:
+
+| Command | What it does | Status |
+|---|---|---|
+| `clipit <vod-url>` | **Clip one stream.** Give it a Twitch VOD link. It finds the best moments and renders 9:16 clips with captions, each with a title, hook and caption. | ✅ available |
+| `clipit --poll` | **Find streams automatically.** Checks who's live on Twitch, picks the biggest streamers plus some smaller ones, and clips each one's latest finished stream. Meant to run on a timer. | ✅ available |
+| `clipit --refresh-trends` | **Keep up with trends.** Has the AI research what's working on TikTok and Shorts this week. Clip picks and captions follow it. | ✅ available |
+| publish to TikTok | Post the clips to one or more TikTok accounts. | 🔜 planned |
+| publish to YouTube Shorts | Post the clips to one or more YouTube channels. | 🔜 planned |
+
+Every clip it makes is recorded in a local database (`out/clipit.db`), which is how the planned publish commands will find what to post.
 
 ## Setup (once)
 
@@ -13,10 +25,19 @@ python3 -m venv .venv
 
 This installs a `clipit` command inside the venv, with every dependency pinned by `requirements.lock`.
 
-You also need an AI CLI that's logged in. Claude Code works by default: install it, run `claude` once and type `/login`.
-A local model works too: `--ai "ollama run qwen3:30b"`.
+You also need an AI CLI. Two tested options:
 
-## Use
+- **Claude Code** (the default): install it, run `claude` once and type `/login`.
+- **A local model with [Ollama](https://ollama.com)**:
+  ```bash
+  ollama pull qwen3:8b
+  clipit <vod-url> --ai "ollama run qwen3:8b --think=false --format json --nowordwrap"
+  ```
+  - **Context window:** start the Ollama server with `OLLAMA_CONTEXT_LENGTH=32768`. The default window is much smaller than the ~10k-token clip-picking prompt, and Ollama silently cuts off whatever doesn't fit, so the model would never see most of the candidate moments.
+  - **Flags:** `--think=false` and `--format json` make the reply plain JSON. `--nowordwrap` stops `ollama run` from writing terminal cursor codes into the reply (Clipit strips them anyway).
+  - **Model size:** pick the biggest model your RAM allows (e.g. `qwen3:30b` with 32 GB).
+
+## Clip one stream
 
 ```bash
 clipit https://www.twitch.tv/videos/2906456464
@@ -32,7 +53,7 @@ Options:
 | `--whisper turbo` | a bigger transcription model, more accurate but slower (default `small`) |
 | `--refresh-trends` | has the AI search the web for this week's TikTok/Shorts trends and rewrites `trends.md`. Run it weekly, or edit `trends.md` by hand. |
 
-## Automatic mode (polling)
+## Find streams automatically (polling)
 
 ```bash
 clipit --poll --dry-run

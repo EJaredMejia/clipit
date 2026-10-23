@@ -48,6 +48,15 @@ def test_ask_ai_runs_in_an_empty_folder():
     assert out.strip() == "EMPTY"
 
 
+def test_ask_ai_strips_terminal_escape_codes(tmp_path):
+    # Real `ollama run` output: word-wrap cursor codes landed inside JSON strings even though stdout was a pipe.
+    raw = '{"title": "a piece\x1b[5D\x1b[K\npiece", "x": "\x1b[?25h\x1b[?2026lok"}'
+    reply = tmp_path / "reply.txt"
+    reply.write_text(raw, encoding="utf-8")
+    out = ai.ask_ai(f'"{sys.executable}" -c "import sys; sys.stdout.write(open(sys.argv[1], encoding=\'utf-8\').read())" "{reply}"', "p")
+    assert "\x1b" not in out and out.endswith('"x": "ok"}')
+
+
 def test_ask_ai_failures_raise_clipit_error(monkeypatch):
     with pytest.raises(ClipitError):
         ai.ask_ai(f'"{sys.executable}" -c "import sys; sys.exit(3)"', "prompt")
