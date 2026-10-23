@@ -17,11 +17,11 @@ SMALL = (300, 2000)  # viewer range for "smaller streamers": below ~300 there's 
 MAX_AGE = datetime.timedelta(days=2)  # older VODs aren't worth clipping anymore
 
 
-def candidates(streams: list[tuple[str, int, str]], lang: str, rng=random) -> list[tuple[str, str]]:
+def candidates(streams: list[tuple[str, int, str]], lang: str, rng: random.Random | None = None) -> list[tuple[str, str]]:
     """(tier, login) in priority order: big streamers biggest first, then smaller streamers in random order."""
     streams = [s for s in streams if not lang or s[2] == lang]
     small = [s[0] for s in streams if SMALL[0] <= s[1] <= SMALL[1]]
-    rng.shuffle(small)
+    (rng or random.Random()).shuffle(small)
     return [("top", s[0]) for s in streams if s[1] > SMALL[1]] + [("small", login) for login in small]
 
 
@@ -47,12 +47,11 @@ def poll(
             continue
         try:
             vod = twitch.latest_vod(login)
-            usable = vod and now - ended(vod) <= MAX_AGE
+            if not vod or now - ended(vod) > MAX_AGE:
+                continue  # no usable VOD (VODs off, corporate channel...): the next streamer takes the slot
         except Exception:  # one streamer's VOD list failing (API change, odd data) must not end the pass
             logger.warning("could not list VODs of %s", login, exc_info=True)
             continue
-        if not usable:
-            continue  # no usable VOD (VODs off, corporate channel...): the next streamer takes the slot
         if tier == "top":
             top_left -= 1  # an already-clipped VOD still fills its slot, so we don't drift down the list
         vod_id, url = f"v{vod['id']}", f"https://www.twitch.tv/videos/{vod['id']}"

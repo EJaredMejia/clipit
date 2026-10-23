@@ -8,6 +8,7 @@ clipit --poll --dry-run    (only show which VODs it would clip)
 """
 
 import argparse
+import io
 import logging
 import shutil
 import sys
@@ -62,7 +63,8 @@ def main() -> None:
     ap.add_argument("--lang", default="EN", help='--poll: only streams in this language (default EN, "" for any)')
     ap.add_argument("--dry-run", action="store_true", help="--poll: only print which VODs would be clipped")
     a = ap.parse_args()
-    sys.stdout.reconfigure(errors="replace")  # emoji in stream titles crash cp1252 consoles
+    if isinstance(sys.stdout, io.TextIOWrapper):  # not when stdout was swapped (tests, some service wrappers)
+        sys.stdout.reconfigure(errors="replace")  # emoji in stream titles crash cp1252 consoles
     if not a.url and not a.refresh_trends and not a.poll:
         ap.error("pass a VOD url (or --poll / --refresh-trends)")
     if not shutil.which("ffmpeg"):

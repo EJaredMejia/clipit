@@ -135,7 +135,7 @@ def extract_json(text: str) -> dict:
     return json.loads(m.group())
 
 
-def clean(clips: list, duration: float, n: int) -> list[dict]:
+def clean(clips: object, duration: float, n: int) -> list[dict]:
     """Keep well-formed clips only: numbers checked and clamped to the VOD, text fields forced to capped strings."""
     out = []
     for c in clips if isinstance(clips, list) else []:
@@ -158,7 +158,7 @@ def clean(clips: list, duration: float, n: int) -> list[dict]:
     return best[:n]
 
 
-def pick_clips(cmd: str, info: dict, cands: list[dict], n: int, work: Path) -> list[dict]:
+def pick_clips(cmd: str | None, info: dict, cands: list[dict], n: int, work: Path) -> list[dict]:
     """Ask the AI and validate its picks. The raw reply is kept in work/ai_reply.txt for debugging."""
     if not cmd:
         raise ClipitError('No AI command. Install Claude Code or pass --ai "<command>"')

@@ -6,7 +6,8 @@ from clipit import facecam
 def test_face_that_stays_put_wins_over_moving_game_faces():
     cam = [(i, 40 + i % 3 * 10, 125, 62, 62) for i in range(12)]
     game = [(i, 300 + i * 40, 200, 70, 70) for i in range(12)]
-    assert list(facecam.cam_face(cam + game, 40)) == [50, 125, 62, 62]
+    face = facecam.cam_face(cam + game, 40)
+    assert face is not None and list(face) == [50, 125, 62, 62]
 
 
 def test_too_few_sightings_or_full_screen_camera_means_no_facecam():

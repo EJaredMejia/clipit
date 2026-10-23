@@ -1,0 +1,10 @@
+# Runs on every `git commit` once installed with `pre-commit install`. Fast checks only: formatting and lint.
+# Type checking (pyright) needs every dependency installed, so it runs in CI and by hand, not here.
+# Keep `rev` equal to the ruff version in requirements.lock, so the hook and CI agree.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.17.2
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format

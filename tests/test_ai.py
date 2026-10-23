@@ -60,8 +60,9 @@ def test_prompt_fences_untrusted_text():
 
 def test_default_ai_disables_tools(monkeypatch):
     monkeypatch.setattr(ai.shutil, "which", lambda _: "/usr/bin/claude")
-    assert ai.default_ai().endswith('--tools ""')
-    assert "--tools WebSearch WebFetch" in ai.default_trends_ai()
+    picking, trends = ai.default_ai(), ai.default_trends_ai()
+    assert picking and picking.endswith('--tools ""')
+    assert trends and "--tools WebSearch WebFetch" in trends
 
 
 def test_ask_ai_runs_in_an_empty_folder():

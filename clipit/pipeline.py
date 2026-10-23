@@ -7,7 +7,9 @@ Cross-run state (which VODs are done, which clips exist) is in the SQLite catalo
 import json
 import re
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -17,7 +19,7 @@ from clipit.util import ROOT, ClipitError, log, logger, mmss, slug, write_atomic
 MAX_DURATION = 48 * 3600  # bounds disk use (~2.5 GB of audio); longer VODs are skipped
 
 
-def cached_json(path: Path, make):
+def cached_json(path: Path, make: Callable[[], Any]) -> Any:
     """Load path, or build it with make() and save it. make() returning None means don't cache (retry next run)."""
     if not path.exists():
         value = make()

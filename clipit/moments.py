@@ -24,7 +24,7 @@ def loudness(audio) -> np.ndarray:
     watchdog.start()
     db = []
     try:
-        while chunk := p.stdout.read(SR * 2 * 600):
+        while chunk := p.stdout.read(SR * 2 * 600):  # pyright: ignore[reportOptionalMemberAccess]  # stdout=PIPE sets it
             x = np.frombuffer(chunk[: len(chunk) // (SR * 2) * SR * 2], np.int16).astype(np.float32).reshape(-1, SR)
             db.extend(10 * np.log10((x**2).mean(1) + 1))
     finally:

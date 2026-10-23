@@ -10,12 +10,16 @@ input, and running for weeks without anyone watching.
 
 ```bash
 python -m pip install -c requirements.lock -e ".[dev]"   # install, versions pinned by the lockfile
+pre-commit install                                       # once per clone: lint + format on every commit
 ruff check .                                             # lint, must pass
+ruff format .                                            # format (CI runs `ruff format --check .`)
+pyright                                                  # type check, must pass
 pytest -q                                                # tests, must pass
 clipit --poll --dry-run                                  # see what polling would clip, touches nothing
 ```
 
-A change is not done until `ruff check .` and `pytest -q` both pass. Changes to media handling (ffmpeg, Whisper,
+A change is not done until `ruff check .`, `ruff format --check .`, `pyright` and `pytest -q` all pass. CI runs all four
+on every push and pull request. Changes to media handling (ffmpeg, Whisper,
 facecam, captions) also need a check on a real VOD: render a clip and look at a frame from it.
 
 ## Architecture
@@ -62,7 +66,8 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
 - Log with `util.log` / `util.logger`, never `print`. Use `logger.exception` when a traceback helps.
 
 ### Code
-- Python 3.11+, type hints on every public function, one import per line (ruff enforces the import style).
+- Python 3.11+, type hints on every public function (pyright checks them), imports sorted by ruff.
+- Silence pyright only for wrong third-party stubs, with `# pyright: ignore[rule]` and the reason on the same line.
 - New logic gets a pytest test in `tests/`, using fakes (`monkeypatch`, `tmp_path`) instead of the network.
 - New dependency: add it to `pyproject.toml`, then regenerate the lockfile
   (`pip freeze --exclude-editable > requirements.lock`) and say why in the commit.

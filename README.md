@@ -97,4 +97,4 @@ Planned: **auto-upload to TikTok / Shorts on several accounts**, an `upload/` pa
 - Only post clips you have the rights to, or from streamers who allow clipping. Parts of Twitch VODs muted for DMCA stay silent in the clips.
 - The facecam is detected once per VOD. If the streamer moves the cam or switches to a full-screen camera scene partway through, clips from those parts get the wrong crop. Gameplay is center-cropped, so text at the screen edges gets cut.
 - Upload is manual for now. Add the trending sound inside TikTok, since burning music in gets clips muted.
-- Development: `ruff check .` and `pytest -q`, also run by GitHub Actions on every push (Linux and macOS).
+- Development: run `pre-commit install` once (lint + format on every commit). `ruff check .`, `ruff format --check .`, `pyright` and `pytest -q` also run in GitHub Actions on every push (Linux and macOS).

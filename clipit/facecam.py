@@ -90,7 +90,8 @@ def find_facecam(url: str, duration: float, n: int = 40) -> tuple[float, float, 
 
     with ThreadPoolExecutor(8) as ex:
         frames = [f for f in ex.map(grab, np.linspace(0.05 * duration, 0.95 * duration, n)) if f is not None]
-    det = cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
+    cascades = cv2.data.haarcascades  # pyright: ignore[reportAttributeAccessIssue]  # exists, missing from cv2's stubs
+    det = cv2.CascadeClassifier(cascades + "haarcascade_frontalface_default.xml")
     boxes = [(i, *b) for i, f in enumerate(frames) for b in det.detectMultiScale(f, 1.1, 6, minSize=(24, 24))]
     face = cam_face(boxes, len(frames))
     return None if face is None else cam_box(frames, face)
