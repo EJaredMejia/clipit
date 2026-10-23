@@ -1,4 +1,3 @@
-import os
 import subprocess
 import sys
 
@@ -77,21 +76,19 @@ def test_default_ai_disables_tools(monkeypatch):
     assert trends and "--tools WebSearch WebFetch" in trends
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="the desktop bundles are Windows paths (%APPDATA%, backslashes)")
-def test_claude_found_in_either_desktop_bundle_newest_wins(monkeypatch, tmp_path):
+def test_claude_found_in_either_desktop_bundle_newest_wins(monkeypatch):
+    bundles = {"Claude-Data": [], r"\Claude\claude-code": []}  # glob results per bundle folder (Windows paths)
+    mtime = {"C:/local/claude.exe": 2.0, "C:/roaming/claude.exe": 1.0}
     monkeypatch.setattr(ai.shutil, "which", lambda _: None)
-    monkeypatch.setenv("APPDATA", str(tmp_path / "roaming"))
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path / "local"))
+    monkeypatch.setattr(ai.glob, "glob", lambda p: next(v for k, v in bundles.items() if k in p))
+    monkeypatch.setattr(ai.os.path, "getmtime", mtime.__getitem__)
     assert ai.default_ai() is None
-    new = tmp_path / "local/Claude-Data/claude_x/claude-code/2.1/abc/claude.exe"
-    new.parent.mkdir(parents=True)
-    new.write_text("")
-    assert str(new) in (ai.default_ai() or "")
-    old = tmp_path / "roaming/Claude/claude-code/2.0/def/claude.exe"
-    old.parent.mkdir(parents=True)
-    old.write_text("")
-    os.utime(old, (1, 1))
-    assert str(new) in (ai.default_ai() or "")
+    bundles["Claude-Data"].append("C:/local/claude.exe")  # newer desktop installs only
+    assert "C:/local/claude.exe" in (ai.default_ai() or "")
+    bundles[r"\Claude\claude-code"].append("C:/roaming/claude.exe")  # both: the newest file wins
+    assert "C:/local/claude.exe" in (ai.default_ai() or "")
+    mtime["C:/roaming/claude.exe"] = 3.0
+    assert "C:/roaming/claude.exe" in (ai.default_ai() or "")
 
 
 def test_ask_ai_runs_in_an_empty_folder():
