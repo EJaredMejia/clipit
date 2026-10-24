@@ -57,7 +57,7 @@ def get_chat(info: dict) -> list:
 
 
 def process_vod(
-    url: str, n_clips: int = 6, ai_cmd: str | None = None, whisper: str = "small", out_root: Path = ROOT / "out"
+    url: str, n_clips: int = 6, ai_cmd: str | None = None, whisper: str = "turbo", out_root: Path = ROOT / "out"
 ) -> tuple[Path, list[dict]]:
     """Make up to n_clips clips from a VOD. Returns (work folder, rendered clips). Raises ClipitError when it can't."""
     info = source.fetch_info(url)

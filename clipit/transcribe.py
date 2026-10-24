@@ -8,6 +8,8 @@ from pathlib import Path
 import numpy as np
 
 WORKERS = 2  # measured on 12 cores: 2 parallel windows are 1.5x faster, a 3rd adds nothing
+# Streamers talk to "chat" constantly; without this Whisper often writes "Chad". One word, so it can't steer the language.
+PROMPT = "Chat,"
 
 
 def transcribe(audio: Path, windows: list[tuple[int, int]], model_name: str) -> Iterator[list[dict]]:
@@ -42,7 +44,12 @@ def transcribe(audio: Path, windows: list[tuple[int, int]], model_name: str) -> 
             timeout=300,
         ).stdout
         segs, info = model.transcribe(
-            np.frombuffer(pcm, np.float32), language=lang, word_timestamps=True, vad_filter=True, condition_on_previous_text=False
+            np.frombuffer(pcm, np.float32),
+            language=lang,
+            word_timestamps=True,
+            vad_filter=True,
+            condition_on_previous_text=False,
+            initial_prompt=PROMPT,
         )
         segs = [
             {
