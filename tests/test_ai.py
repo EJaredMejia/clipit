@@ -27,9 +27,16 @@ def test_clean_drops_broken_clamps_and_sorts():
 
 
 def test_clean_forces_text_fields_to_capped_strings():
-    (c,) = ai.clean([{"start": 0, "end": 20, "title": ["x"] * 500, "hook": None, "caption": 7}], 100.0, 5)
+    (c,) = ai.clean([{"start": 0, "end": 20, "title": ["x"] * 500, "hook": None, "description": 7}], 100.0, 5)
     assert isinstance(c["title"], str) and len(c["title"]) == ai.TEXT_FIELDS["title"]
-    assert c["hook"] == "" and c["caption"] == "7" and c["sound"] == ""
+    assert c["hook"] == "" and c["description"] == "7" and c["sound"] == "" and c["hashtags"] == []
+
+
+def test_hashtags_are_checked_words_only():
+    tags = ["#Gaming", "gaming", "two words", "https://evil.example", "@someone", 5, {"x": 1}, "fútbol", "ok_1", "a", "b"]
+    assert ai.hashtags(tags) == ["Gaming", "5", "fútbol", "ok_1", "a"]  # deduped ignoring case, capped at 5
+    assert ai.hashtags("#twitch, #clips #twitch") == ["twitch", "clips"]  # small models answer with a string
+    assert ai.hashtags(None) == []
 
 
 def test_clean_trims_overlong_picks():

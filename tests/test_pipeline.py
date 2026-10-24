@@ -1,3 +1,5 @@
+import json
+
 import numpy as np
 import pytest
 
@@ -19,8 +21,8 @@ def stages(tmp_path, monkeypatch):
 
     def pick(cmd, info, cands, n, work):
         s = cands[0]["start"]
-        return [{"start": s, "end": s + 20.0, "title": "t", "hook": "h", "caption": "c", "trend": "", "sound": "",
-                 "score": 8.0, "why": ""}]  # fmt: skip
+        return [{"start": s, "end": s + 20.0, "title": "t", "hook": "h", "description": "d", "hashtags": ["gaming"],
+                 "trend": "", "sound": "", "score": 8.0, "why": ""}]  # fmt: skip
 
     loud = np.full(600, 50.0)
     loud[300] = 90.0
@@ -48,6 +50,40 @@ def test_audio_is_downloaded_once_and_only_when_a_stage_needs_it(stages):
     (work / "transcripts.json").unlink()  # partly cached: loudness kept, transcripts missing
     pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
     assert len(downloads) == 2
+
+
+def test_post_text_is_built_for_every_clip(stages):
+    _, out = stages
+    work, (clip,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
+    assert clip["caption"] == "d\n\n#gaming" and clip["youtube"] == "d\n\n#gaming #shorts"
+    assert "#gaming #shorts" in (work / "posts.md").read_text(encoding="utf-8")
+
+
+def test_picks_cached_before_descriptions_keep_their_caption(stages):
+    _, out = stages
+    work, _ = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
+    old = json.loads((work / "picks.json").read_text(encoding="utf-8"))
+    for c in old:
+        c["caption"] = "old caption #fyp"
+        for k in ("description", "hashtags", "streamer", "youtube"):
+            del c[k]
+    (work / "picks.json").write_text(json.dumps(old), encoding="utf-8")
+    _, (clip,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
+    assert clip["caption"] == "old caption #fyp" and clip["youtube"] == "old caption #fyp\n\n#shorts"
+    _, (again,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
+    assert again["caption"] == clip["caption"]  # rerunning on the rewritten cache doesn't stack anything
+
+    old[0]["caption"] = "x" * 2200  # an old caption at TikTok's whole limit leaves no room for the credit
+    (work / "picks.json").write_text(json.dumps(old), encoding="utf-8")
+    _, (long,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
+    assert long["description"] == "x" * pipeline.ai.TEXT_FIELDS["description"]
+
+
+def test_streamer_is_only_a_checked_twitch_login():
+    assert pipeline.streamer({"extractor": "twitch:vod", "uploader_id": "caseoh_"}) == "caseoh_"
+    assert pipeline.streamer({"extractor": "twitch:vod", "uploader_id": "x y\n#evil"}) == ""
+    assert pipeline.streamer({"extractor": "youtube", "uploader_id": "someone"}) == ""  # not a twitch.tv login
+    assert pipeline.streamer({"extractor": "twitch:vod"}) == ""
 
 
 def test_clip_file_changes_with_the_time_range():

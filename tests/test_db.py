@@ -14,6 +14,8 @@ CLIP = {
     "title": "t",
     "hook": "h",
     "caption": "c",
+    "youtube": "y",
+    "streamer": "s",
     "trend": "",
     "sound": "",
     "score": 8.0,
@@ -103,6 +105,42 @@ def test_migration_keeps_clips_saved_under_the_old_schema(tmp_path, monkeypatch)
     assert [tuple(r) for r in c.execute("SELECT id, title FROM clips")] == [(1, "new")]
     db.save_clips(c, "v1", [{**CLIP, "start": 60.0, "end": 80.0}])  # ids copied in by the migration aren't reused
     assert c.execute("SELECT id FROM clips").fetchone()[0] != 1
+
+
+def test_resaving_keeps_the_users_verdict_and_clips_they_kept_or_posted(conn):
+    db.record_manual(conn, "v1", "u")
+    a, b, c = CLIP, {**CLIP, "start": 30.0, "end": 50.0}, {**CLIP, "start": 60.0, "end": 80.0}
+    db.save_clips(conn, "v1", [a, b, c])
+    ids = dict(conn.execute("SELECT start_s, id FROM clips").fetchall())
+    assert db.set_verdict(conn, ids[1.0], "keep") and db.set_upload(conn, ids[30.0], "tiktok", "")
+    db.save_clips(conn, "v1", [{**a, "title": "re-rendered"}])  # a re-pick that drops b and c
+    rows = {r["start_s"]: r for r in conn.execute("SELECT start_s, title, verdict FROM clips")}
+    assert set(rows) == {1.0, 30.0}  # b was posted: kept; c was neither kept nor posted: gone
+    assert rows[1.0]["title"] == "re-rendered" and rows[1.0]["verdict"] == "keep"
+
+
+def test_verdicts_and_uploads(conn):
+    db.record_manual(conn, "v1", "https://www.twitch.tv/videos/1")
+    db.save_clips(conn, "v1", [{**CLIP, "streamer": ""}])
+    (cid,) = conn.execute("SELECT id FROM clips").fetchone()
+    assert not db.set_verdict(conn, cid + 1, "keep") and not db.set_upload(conn, cid + 1, "tiktok", "")
+    assert db.set_upload(conn, cid, "youtube", "https://youtu.be/x")
+    assert db.set_upload(conn, cid, "youtube", "https://youtu.be/y")  # marking it again updates the link
+    (clip,) = db.overview(conn)["clips"]
+    assert clip["uploads"]["youtube"]["url"] == "https://youtu.be/y" and clip["verdict"] is None
+    assert db.set_upload(conn, cid, "youtube", None) and db.overview(conn)["clips"][0]["uploads"] == {}
+    with pytest.raises(Exception, match="CHECK"):
+        db.set_verdict(conn, cid, "maybe")
+
+
+def test_overview_falls_back_to_the_vods_streamer(conn):
+    db.claim(conn, "v1", "u", "zackrawrr", "top", now=T0)
+    db.save_clips(conn, "v1", [{**CLIP, "streamer": ""}])  # clips saved before the streamer column existed
+    db.record_manual(conn, "v2", "u2")
+    db.save_clips(conn, "v2", [{**CLIP, "streamer": "caseoh_"}])
+    data = db.overview(conn)
+    assert {c["vod_id"]: c["streamer"] for c in data["clips"]} == {"v1": "zackrawrr", "v2": "caseoh_"}
+    assert {v["id"]: v["streamer"] for v in data["vods"]} == {"v1": "zackrawrr", "v2": "caseoh_"}
 
 
 def test_heartbeat_keeps_a_long_run_claimed(conn, monkeypatch):

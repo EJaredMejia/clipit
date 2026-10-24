@@ -118,21 +118,40 @@ def render(urls: list[str], clip: dict, words: list, out: Path, cam: list[float]
         tmp.unlink(missing_ok=True)
 
 
+def post_texts(clip: dict) -> tuple[str, str]:
+    """(TikTok caption, YouTube description): the AI's description, a credit to the streamer, then the hashtags.
+    The credit is added here, never by the AI, so injected chat can't make it tag or link someone else."""
+    login = clip["streamer"]
+    tags = ([login] if login else []) + [t for t in clip.get("hashtags", []) if t.lower() != login.lower()]
+    credit = f"Credit: twitch.tv/{login}" if login else ""
+    yt_tags = tags if "shorts" in map(str.lower, tags) else [*tags, "shorts"]
+
+    def text(hashtags: list[str]) -> str:
+        return "\n\n".join(filter(None, [clip["description"], credit, " ".join(f"#{t}" for t in hashtags)]))
+
+    return text(tags), text(yt_tags)
+
+
 def write_posts(path: Path, info: dict, url: str, picks: list[dict]) -> None:
-    """Human-readable copy of the picks: titles, captions and hashtags ready to paste."""
+    """Human-readable copy of the picks: titles and post text ready to paste."""
     md = [f"# Clips from: {info.get('title')}\n\n{url}\n"]
     for i, c in enumerate(picks, 1):
         md += [
             f"## {i}. {c.get('title')}  ({c['score']:g}/10)\n",
             f"- file: `{c['file']}`",
+            f"- streamer: {c['streamer'] or '-'}",
             f"- from VOD {mmss(c['start'])} to {mmss(c['end'])} ({c['end'] - c['start']:.0f}s)",
             f"- hook: {c.get('hook')}",
             f"- trend: {c.get('trend')}",
             f"- sound to add in-app: {c.get('sound') or '-'}",
             f"- why: {c.get('why')}\n",
-            "Caption:\n",
+            "TikTok caption:\n",
             "```",
-            str(c.get("caption")),
+            c["caption"],
+            "```\n",
+            "YouTube description:\n",
+            "```",
+            c["youtube"],
             "```\n",
         ]
     write_atomic(path, "\n".join(md))

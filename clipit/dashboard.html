@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>clip-it dashboard</title>
+<style>
+  :root {
+    color-scheme: light dark;
+    --bg: #f5f5f4; --surface: #fff; --text: #1c1917; --muted: #57534e; --line: #e7e5e4; --hover: #f0efed;
+    --keep: #166534; --keep-bg: #dcfce7; --skip: #991b1b; --skip-bg: #fee2e2; --warn: #92400e; --warn-bg: #fef3c7;
+    --link: #1d4ed8; --focus: #2563eb; --selected: #e0ecff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0c0a09; --surface: #1c1917; --text: #f5f5f4; --muted: #a8a29e; --line: #2e2a27; --hover: #26221f;
+      --keep: #86efac; --keep-bg: #14532d; --skip: #fca5a5; --skip-bg: #7f1d1d; --warn: #fcd34d; --warn-bg: #713f12;
+      --link: #93c5fd; --focus: #60a5fa; --selected: #1e3a5f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  a { color: var(--link); }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  button, input, select { font: inherit; color: inherit; }
+  button { cursor: pointer; }
+  h1, h2, h3 { margin: 0; line-height: 1.25; }
+
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 1.5rem; padding: 0.75rem 1rem;
+           background: var(--surface); border-bottom: 1px solid var(--line); }
+  h1 { font-size: 1.1rem; }
+  [role=tablist] { display: flex; gap: 0.25rem; }
+  [role=tab] { border: 0; background: none; padding: 0.375rem 0.75rem; border-radius: 6px; color: var(--muted); }
+  [role=tab][aria-selected=true] { background: var(--hover); color: var(--text); font-weight: 600; }
+  #status { margin: 0 0 0 auto; font-size: 0.85rem; color: var(--muted); }
+  #status.bad { color: var(--skip); font-weight: 600; }
+
+  main { padding: 1rem; max-width: 1400px; margin: 0 auto; }
+  #stats { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 0.75rem; }
+  .stat { display: flex; flex-direction: column; align-items: flex-start; flex: 1 1 6.5rem; padding: 0.5rem 0.75rem;
+          border: 1px solid var(--line); border-radius: 8px; background: var(--surface); text-align: left; }
+  .stat b { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+  .stat span { font-size: 0.85rem; color: var(--muted); }
+  .stat[aria-pressed=true] { border-color: var(--focus); box-shadow: inset 0 0 0 1px var(--focus); }
+
+  .toolbar { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; }
+  .toolbar input, .toolbar select, .upload input { padding: 0.375rem 0.5rem; border: 1px solid var(--line); border-radius: 6px;
+                                                    background: var(--surface); min-width: 0; }
+  .toolbar input { flex: 1 1 16rem; }
+  #count { color: var(--muted); font-size: 0.85rem; }
+
+  .split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(340px, 440px); gap: 1rem; align-items: start; }
+  #list { list-style: none; margin: 0; padding: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 8px;
+          overflow: hidden; }
+  #list li + li { border-top: 1px solid var(--line); }
+  .row { display: grid; grid-template-columns: 2.25rem minmax(0, 1fr) auto; gap: 0.75rem; align-items: center; width: 100%;
+         padding: 0.625rem 0.75rem; border: 0; background: none; text-align: left; }
+  .row:hover { background: var(--hover); }
+  .row[aria-current=true] { background: var(--selected); }
+  .score { display: grid; place-items: center; height: 2.25rem; border-radius: 6px; background: var(--hover); font-weight: 700;
+           font-variant-numeric: tabular-nums; }
+  .main { display: flex; flex-direction: column; min-width: 0; }
+  .title { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta { color: var(--muted); font-size: 0.85rem; }
+  .badges { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.25rem; }
+  .badge { padding: 0.125rem 0.5rem; border-radius: 999px; font-size: 0.75rem; font-weight: 600; white-space: nowrap;
+           background: var(--hover); color: var(--muted); }
+  .badge.keep, .badge.posted, .badge.done { background: var(--keep-bg); color: var(--keep); }
+  .badge.skip, .badge.failed { background: var(--skip-bg); color: var(--skip); }
+  .badge.processing { background: var(--warn-bg); color: var(--warn); }
+  .empty { padding: 2rem 1rem; color: var(--muted); text-align: center; }
+
+  #detail { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; padding: 1rem;
+            background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+  #player video { display: block; height: min(50vh, 560px); aspect-ratio: 9 / 16; max-width: 100%; margin: 0 auto 1rem;
+                  background: #000; border-radius: 6px; object-fit: contain; }
+  .detail-head { display: flex; gap: 0.5rem; align-items: flex-start; justify-content: space-between; }
+  #info h2 { font-size: 1.1rem; }
+  #info h3 { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin: 1.25rem 0 0.5rem; }
+  .label { font-weight: 600; min-width: 5.5rem; }
+  .group, .upload { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.75rem; }
+  .upload + .upload { margin-top: 0.5rem; }
+  .upload input { flex: 1 1 10rem; }
+  button.toggle, .upload button, .ghost { padding: 0.375rem 0.75rem; border: 1px solid var(--line); border-radius: 6px;
+                                          background: var(--surface); }
+  button.toggle:hover, .upload button:hover, .ghost:hover { background: var(--hover); }
+  .toggle.keep[aria-pressed=true] { background: var(--keep-bg); color: var(--keep); border-color: currentColor; font-weight: 600; }
+  .toggle.skip[aria-pressed=true] { background: var(--skip-bg); color: var(--skip); border-color: currentColor; font-weight: 600; }
+  .ghost { padding: 0.25rem 0.625rem; font-size: 0.85rem; }
+  .copy { margin-top: 0.75rem; }
+  .copy-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.25rem; }
+  pre { margin: 0; padding: 0.5rem 0.625rem; white-space: pre-wrap; overflow-wrap: anywhere; font: 0.85rem/1.45 ui-monospace, Consolas, monospace;
+        background: var(--bg); border: 1px solid var(--line); border-radius: 6px; }
+  details { margin-top: 1.25rem; }
+  summary { cursor: pointer; font-weight: 600; }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 0.75rem; margin: 0.5rem 0 0; }
+  dt { color: var(--muted); }
+  dd { margin: 0; }
+
+  .table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; }
+  th, td { padding: 0.5rem 0.75rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+  th { font-size: 0.8rem; color: var(--muted); font-weight: 600; }
+  tr:last-child td { border-bottom: 0; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .error { margin-top: 0.25rem; color: var(--skip); font-size: 0.85rem; overflow-wrap: anywhere; }
+
+  @media (max-width: 860px) {
+    .split { grid-template-columns: minmax(0, 1fr); }
+    #detail { position: static; max-height: none; order: -1; }
+    .split:not(.has-detail) #detail { display: none; }
+    .row { grid-template-columns: 2.25rem minmax(0, 1fr); }
+    .badges { grid-column: 2; justify-content: flex-start; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>clip-it</h1>
+  <nav role="tablist" aria-label="Sections">
+    <button role="tab" id="clips-tab" aria-selected="true" aria-controls="clips-panel">Clips</button>
+    <button role="tab" id="vods-tab" aria-selected="false" aria-controls="vods-panel">VODs</button>
+  </nav>
+  <p id="status" role="status">Loading…</p>
+</header>
+<main>
+  <section id="clips-panel" role="tabpanel" aria-labelledby="clips-tab">
+    <div id="stats" role="group" aria-label="Show clips"></div>
+    <div class="toolbar">
+      <input id="q" type="search" placeholder="Search titles, captions, streamers" aria-label="Search clips">
+      <select id="streamer" aria-label="Streamer"></select>
+      <select id="sort" aria-label="Sort">
+        <option value="new">Newest first</option>
+        <option value="score">Best AI score</option>
+        <option value="streamer">By streamer</option>
+      </select>
+      <span id="count"></span>
+    </div>
+    <div class="split" id="split">
+      <ul id="list" aria-label="Clips"></ul>
+      <aside id="detail" aria-label="Selected clip">
+        <div id="player"></div>
+        <div id="info"></div>
+      </aside>
+    </div>
+  </section>
+  <section id="vods-panel" role="tabpanel" aria-labelledby="vods-tab" hidden>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>VOD</th><th>Streamer</th><th>Status</th><th>Clips</th><th>Tier</th><th>Finished</th></tr></thead>
+        <tbody id="vods"></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<script src="/app.js"></script>
+</body>
+</html>
