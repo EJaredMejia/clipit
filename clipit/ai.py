@@ -45,11 +45,20 @@ Pick the {n} clips most likely to go viral. Rules:
 - End right on the payoff / punchline, or on a line that loops back into the start. No trailing filler.
 - Must make sense with zero stream context. Skip ad reads, waiting screens and quiet moments unless chat proves something big happened.
 - Fewer is fine if the candidates are weak. Never pad with boring clips.
+- Name the streamer in "hook" and "title", by the name fans call them (Asmongold, not his channel zackrawrr):
+  the streamer's name + a strong verb + something specific that happens. Name the other people in the clip too
+  (guests, other streamers). Never vague ("this guy", "insane moment", "wait for it", "you won't believe").
+  Good: "Kai Cenat Lets Rakai Take Over His Stream", "Asmongold Gets Roasted By His Own Chat".
+  Bad: "This Went Horribly Wrong", "The Funniest Moment Ever".
+- The hook is the viewer's only context with the sound off: say the concrete situation and stakes (what is at risk,
+  the game or place), not a feeling. Lead with the most dramatic true fact; a scare that turns out false is still
+  the hook.
+  Good: "xQc thinks his PC died mid-tournament". Bad: "he thought it was over" (over how? who?).
 - No links, @mentions of other accounts, or slurs in any text you write.
 - Hashtags: 3-5, mixing broad ones (gaming, twitch) with specific ones (the game, the meme). A credit line for the
   streamer and their hashtag are added for you.
 Answer with ONLY this JSON (no commentary). No emoji in "hook".
-{{"clips": [{{"start": 1234.5, "end": 1262.0, "title": "YouTube Shorts title, under 70 chars", "hook": "on-screen text for the first seconds, max 7 words", "description": "post text for TikTok and YouTube: 1-2 sentences that make people watch, no hashtags", "hashtags": ["3 to 5 hashtags, no # sign"], "trend": "trend or format this fits", "sound": "trending sound to add in-app, or empty", "score": 8, "why": "one line"}}]}}
+{{"name": "the name fans call the streamer", "clips": [{{"start": 1234.5, "end": 1262.0, "title": "YouTube Shorts title naming the streamer, under 70 chars", "hook": "on-screen text naming the streamer, max 8 words", "description": "post text for TikTok and YouTube: 1-2 sentences that make people watch, no hashtags", "hashtags": ["3 to 5 hashtags, no # sign"], "trend": "trend or format this fits", "sound": "trending sound to add in-app, or empty", "score": 8, "why": "one line"}}]}}
 
 <stream_data>
 Stream title: {title}
@@ -180,6 +189,19 @@ def clean(clips: object, duration: float, n: int) -> list[dict]:
     return best[:n]
 
 
+def name_streamer(picks: list[dict], *names: object) -> list[dict]:
+    """Viral clip titles lead with the streamer's name. The prompt asks for it; this makes sure of it.
+
+    names: the AI's choice (the name fans use) first, then fallbacks. The first plain short name wins.
+    """
+    name = next((str(n).strip() for n in names if re.fullmatch(r"[\w .'-]{2,30}", str(n or "").strip())), "")
+    for p in picks if name else []:
+        for k in ("hook", "title"):
+            if name.lower() not in p[k].lower():
+                p[k] = f"{name}: {p[k]}"[: TEXT_FIELDS[k]] if p[k] else name
+    return picks
+
+
 def pick_clips(cmd: str | None, info: dict, cands: list[dict], n: int, work: Path) -> list[dict]:
     """Ask the AI and validate its picks. The raw reply is kept in work/ai_reply.txt for debugging."""
     if not cmd:
@@ -188,7 +210,10 @@ def pick_clips(cmd: str | None, info: dict, cands: list[dict], n: int, work: Pat
     reply = ask_ai(cmd, build_prompt(info, cands, n, trends))
     write_atomic(work / "ai_reply.txt", reply)
     try:
-        picks = clean(extract_json(reply).get("clips", []), float(info["duration"]), n)
+        reply_json = extract_json(reply)
+        picks = name_streamer(
+            clean(reply_json.get("clips", []), float(info["duration"]), n), reply_json.get("name"), info.get("uploader")
+        )
     except (ValueError, AttributeError):
         raise ClipitError(f"AI reply wasn't valid JSON, see {work / 'ai_reply.txt'}") from None
     if not picks:

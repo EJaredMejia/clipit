@@ -1,7 +1,10 @@
 import json
+import shutil
+import subprocess
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -102,3 +105,66 @@ def test_video_ranges(site):
     assert call(f"{base}/media/{cid}", Range=f"bytes={len(VIDEO)}-")[0] == 416
     assert call(f"{base}/media/{outside}")[0] == 404  # a clip path pointing outside out/ is never served
     assert call(f"{base}/media/999")[0] == 404
+
+
+def test_reveal_opens_only_real_clip_files(site, monkeypatch):
+    base, _, (cid, outside) = site
+    opened = []
+    monkeypatch.setattr(dashboard, "reveal", opened.append)
+    assert call(base + "/api/reveal", {"clip": cid})[0] == 200
+    assert opened and opened[0].name == "01_a.mp4" and opened[0].is_file()
+    assert call(base + "/api/reveal", {"clip": outside})[0] == 404  # a db path pointing outside out/ is never opened
+    assert call(base + "/api/reveal", {"clip": 999})[0] == 404
+    assert call(base + "/api/reveal", {"clip": cid}, Origin="https://evil.example")[0] == 403
+    assert len(opened) == 1
+
+
+def test_reveal_selects_the_file_in_explorer(monkeypatch, tmp_path):
+    ran = []
+    monkeypatch.setattr(dashboard.sys, "platform", "win32")
+    monkeypatch.setattr(dashboard.subprocess, "run", lambda cmd, **kw: ran.append((cmd, kw)))
+    dashboard.reveal(tmp_path / "a b.mp4")
+    assert ran == [(f'explorer /select,"{tmp_path / "a b.mp4"}"', {"timeout": dashboard.REVEAL_TIMEOUT, "check": False})]
+
+
+def test_reveal_failures_are_errors_except_explorers_exit_code(site, monkeypatch, tmp_path):
+    ran = []
+    monkeypatch.setattr(dashboard.subprocess, "run", lambda cmd, **kw: ran.append(kw["check"]))
+    for platform, check in (("linux", True), ("darwin", True), ("win32", False)):
+        monkeypatch.setattr(dashboard.sys, "platform", platform)
+        dashboard.reveal(tmp_path / "a.mp4")
+        assert ran.pop() is check
+
+    def fail(cmd, **kw):
+        raise subprocess.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(dashboard.subprocess, "run", fail)
+    base, _, (cid, _) = site
+    assert call(base + "/api/reveal", {"clip": cid})[0] == 500  # the page shows an error, not "Opened"
+
+
+NODE = shutil.which("node")
+
+
+@pytest.mark.skipif(not NODE, reason="needs Node.js (CI installs it)")
+def test_review_deck_decide_and_undo(tmp_path):
+    """Runs dashboard.js itself under Node (tests/dashboard_deck.js) with scripted verdict saves."""
+    assert NODE  # the skipif above; pyright doesn't narrow through it
+    harness = (Path(__file__).parent / "dashboard_deck.js").read_text(encoding="utf-8")
+    prelude, scenarios = harness.split("// SCENARIOS\n")
+    page = (Path(dashboard.__file__).parent / "dashboard.js").read_text(encoding="utf-8")
+    (tmp_path / "deck.cjs").write_text(f"{prelude}\n{page}\n{scenarios}", encoding="utf-8")
+    r = subprocess.run([NODE, str(tmp_path / "deck.cjs")], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout.strip().splitlines()[-1])
+    for case in got.values():
+        assert case["ordered"] and case["pending"] == 0  # one verdict write at a time, none left marked pending
+
+    # Keep, Undo, Keep again with the first save failing late: the later Keep and its Undo entry survive
+    assert got["keepUndoKeep"] == {**got["keepUndoKeep"], "sent": ["keep", None, "keep"], "history": [1], "queue": [2]}
+    # a lone failed Keep: card back on top, nothing to undo
+    assert got["keepFails"]["history"] == [] and got["keepFails"]["queue"] == [1, 2]
+    # Undo's save fails: the Keep stays decided and undoable
+    assert got["undoFails"]["sent"] == ["keep", None] and got["undoFails"]["history"] == [1] and got["undoFails"]["queue"] == [2]
+    # quick Keep then Undo: saved in that order, card back on top
+    assert got["keepUndo"]["sent"] == ["keep", None] and got["keepUndo"]["history"] == [] and got["keepUndo"]["queue"] == [1, 2]
