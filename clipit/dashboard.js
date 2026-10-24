@@ -48,6 +48,9 @@ const link = (href, text) => (safeUrl(href) ? h("a", { href, target: "_blank", r
 const when = (iso) => (iso ? new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "–");
 const score = (s) => String(Number.isInteger(s) ? s : s.toFixed(1));
 const two = (n) => String(n).padStart(2, "0");
+const secs = (c) => `${Math.round(c.end_s - c.start_s)} s`;
+// a span, not a div: list rows put it inside a button
+const meta = (...parts) => h("span", { class: "meta" }, parts.map((p) => (typeof p === "string" ? h("span", {}, p) : p)));
 const hms = (s) => `${Math.floor(s / 3600)}:${two(Math.floor(s / 60) % 60)}:${two(Math.floor(s) % 60)}`;
 
 function atTime(url, s) {
@@ -121,8 +124,8 @@ function renderStats() {
             renderList();
           },
         },
-        h("b", {}, String(data.clips.filter(test).length)),
         h("span", {}, label),
+        h("b", {}, String(data.clips.filter(test).length)),
       ),
     ),
   );
@@ -159,12 +162,12 @@ function row(c) {
     h(
       "button",
       { type: "button", class: "row", "aria-current": c.id === selected ? "true" : false, onclick: () => select(c.id) },
-      h("span", { class: "score", title: "AI score out of 10" }, score(c.score)),
+      h("span", { class: c.score >= 8 ? "score hot" : "score", title: "AI score out of 10" }, score(c.score)),
       h(
         "span",
         { class: "main" },
         h("span", { class: "title" }, c.title || "(untitled)"),
-        h("span", { class: "meta" }, `${c.streamer || "unknown streamer"} · ${Math.round(c.end_s - c.start_s)} s · ${when(c.created_at)}`),
+        meta(h("b", {}, c.streamer || "unknown streamer"), secs(c), when(c.created_at)),
       ),
       h(
         "span",
@@ -215,14 +218,7 @@ function detail(c) {
       h("h2", {}, c.title || "(untitled)"),
       h("button", { type: "button", class: "ghost", "aria-label": "Close clip", onclick: () => select(null) }, "✕"),
     ),
-    h(
-      "p",
-      { class: "meta" },
-      streamer,
-      " · ",
-      link(atTime(c.vod_url, c.start_s), `VOD at ${hms(c.start_s)}`),
-      ` · ${Math.round(c.end_s - c.start_s)} s · AI score ${score(c.score)}/10`,
-    ),
+    meta(h("b", {}, streamer), link(atTime(c.vod_url, c.start_s), `VOD at ${hms(c.start_s)}`), secs(c), `AI score ${score(c.score)}/10`),
     h("div", { class: "group" }, h("span", { class: "label" }, "Video file"), fileTools(c)),
     h("p", { class: "meta path" }, `Saved in the output folder as ${c.file}`),
     h(
@@ -340,7 +336,7 @@ function renderDeck() {
   queue = queue.filter((id) => todo.has(id) || inflight.has(id)); // drop clips rated elsewhere (Clips tab, another window)
   const dealt = new Set(queue);
   queue.push(...shuffle([...todo].filter((id) => !dealt.has(id) && !inflight.has(id)))); // new clips join at random spots in the back
-  $("left").textContent = queue.length === 1 ? "1 clip to review" : `${queue.length} clips to review`;
+  $("left").replaceChildren(h("b", {}, String(queue.length)), queue.length === 1 ? " clip to review" : " clips to review");
   $("undo").disabled = !history.length;
   $("skip").disabled = $("keep").disabled = !queue.length;
 
@@ -356,6 +352,16 @@ function renderDeck() {
   flinging = false;
   $("tools").replaceChildren(
     ...(top ? [...fileTools(top), h("button", { type: "button", class: "ghost", onclick: () => openClips("all", top.id) }, "Details")] : []),
+  );
+  $("story").replaceChildren(
+    ...(top
+      ? [
+          h("h2", {}, top.title || "(untitled)"),
+          meta(h("b", {}, top.streamer || "unknown streamer"), secs(top), `AI score ${score(top.score)}/10`),
+          top.hook ? h("p", {}, h("span", { class: "hook", title: "On-screen text" }, top.hook)) : "",
+          top.why ? h("p", { class: "why" }, top.why) : "",
+        ]
+      : []),
   );
   if (!top) {
     const kept = data.clips.filter(VIEWS.ready[1]).length;
@@ -378,6 +384,7 @@ function card(c) {
   const keep = h("div", { class: "stamp keep" }, "KEEP");
   const skip = h("div", { class: "stamp skip" }, "SKIP");
   const sound = h("button", { type: "button", class: "sound" });
+  const bar = h("i");
   const el = h(
     "div",
     { class: "card top", tabindex: "0", "aria-label": `${c.title || "Untitled clip"}. Right arrow keeps it, left arrow skips it.` },
@@ -385,18 +392,10 @@ function card(c) {
     keep,
     skip,
     sound,
-    h(
-      "div",
-      { class: "card-info" },
-      h("span", { class: "title" }, c.title || "(untitled)"),
-      h("span", { class: "meta" }, `${c.streamer || "unknown streamer"} · ${Math.round(c.end_s - c.start_s)} s · AI ${score(c.score)}/10`),
-      c.hook ? h("span", { class: "meta" }, c.hook) : "",
-    ),
+    h("div", { class: "progress" }, bar),
   );
-  const showSound = () => {
-    sound.textContent = video.muted ? "🔇" : "🔊";
-    sound.setAttribute("aria-label", video.muted ? "Unmute" : "Mute");
-  };
+  video.addEventListener("timeupdate", () => (bar.style.transform = `scaleX(${video.currentTime / video.duration || 0})`));
+  const showSound = () => (sound.textContent = video.muted ? "Sound off" : "Sound on");
   sound.addEventListener("click", () => {
     muted = video.muted = !video.muted;
     showSound();
@@ -415,6 +414,7 @@ function card(c) {
   } else el.classList.add("paused");
 
   let x0 = null;
+  let t0 = 0;
   let dx = 0;
   const move = (x) => {
     dx = x;
@@ -425,6 +425,7 @@ function card(c) {
   el.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 || e.target.closest("button") || flinging) return;
     x0 = e.clientX;
+    t0 = e.timeStamp;
     dx = 0;
     el.setPointerCapture(e.pointerId);
     el.classList.add("dragging");
@@ -436,7 +437,8 @@ function card(c) {
     x0 = null;
     el.classList.remove("dragging");
     el.style.transition = "";
-    if (Math.abs(dx) > Math.min(120, el.offsetWidth / 3)) return fling(dx > 0 ? "keep" : "skip");
+    const flick = Math.abs(dx) > 40 && Math.abs(dx) / (e.timeStamp - t0) > 0.5; // a quick flick counts, however short
+    if (flick || Math.abs(dx) > Math.min(120, el.offsetWidth / 3)) return fling(dx > 0 ? "keep" : "skip");
     if (e.type === "pointerup" && Math.abs(dx) < 6) toggle(video); // a tap, not a drag
     move(0);
   };
@@ -451,16 +453,18 @@ function toggle(video) {
   else video.pause();
 }
 
-function fling(verdict) {
+// animate: false for keys, which are pressed over and over and should feel instant
+function fling(verdict, animate = true) {
   const el = $("deck").querySelector(".card.top");
   if (!el || flinging) return;
   flinging = true;
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return decide(verdict);
+  if (!animate || matchMedia("(prefers-reduced-motion: reduce)").matches) return decide(verdict);
   const sign = verdict === "keep" ? 1 : -1;
   el.move(sign * 100); // shows the stamp
-  el.style.transition = "transform 0.25s ease-in";
-  el.style.transform = `translateX(${sign * (innerWidth + el.offsetWidth)}px) rotate(${sign * 30}deg)`;
-  setTimeout(() => decide(verdict), 250);
+  el.style.transition = "transform 220ms var(--ease-out), opacity 220ms var(--ease-out)";
+  el.style.transform = `translateX(${sign * (innerWidth / 2 + el.offsetWidth)}px) rotate(${sign * 20}deg)`;
+  el.style.opacity = "0";
+  setTimeout(() => decide(verdict), 180);
 }
 
 async function decide(verdict) {
@@ -542,8 +546,8 @@ $("undo").addEventListener("click", undo);
 document.addEventListener("keydown", (e) => {
   if ($("review-panel").hidden || e.ctrlKey || e.metaKey || e.altKey || e.target.closest("input, select, textarea")) return;
   const video = $("deck").querySelector(".card.top video");
-  if (e.key === "ArrowRight") fling("keep");
-  else if (e.key === "ArrowLeft") fling("skip");
+  if (e.key === "ArrowRight") fling("keep", false);
+  else if (e.key === "ArrowLeft") fling("skip", false);
   else if (e.key === "z" || e.key === "Z" || e.key === "Backspace") undo();
   else if (e.key === " " && video && !e.target.closest("button")) toggle(video);
   else return;
