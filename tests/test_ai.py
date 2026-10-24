@@ -32,6 +32,27 @@ def test_clean_forces_text_fields_to_capped_strings():
     assert c["hook"] == "" and c["description"] == "7" and c["sound"] == "" and c["hashtags"] == []
 
 
+def test_name_streamer_adds_the_name_only_where_missing():
+    picks = [{"hook": "Gets roasted by chat", "title": "ASMONGOLD loses it"}, {"hook": "", "title": "x" * 100}]
+    got = ai.name_streamer(picks, "Asmongold", "zackrawrr")
+    assert got[0] == {"hook": "Asmongold: Gets roasted by chat", "title": "ASMONGOLD loses it"}
+    assert got[1]["hook"] == "Asmongold" and got[1]["title"].startswith("Asmongold: x")
+    assert len(got[1]["title"]) == ai.TEXT_FIELDS["title"]
+
+
+def test_name_streamer_falls_back_past_bad_names():
+    picks = [{"hook": "a", "title": "b"}]
+    assert ai.name_streamer(picks, "{\\an8}evil", None, "zackrawrr")[0]["hook"] == "zackrawrr: a"
+    assert ai.name_streamer([{"hook": "a", "title": "b"}], None, "")[0] == {"hook": "a", "title": "b"}
+
+
+def test_pick_clips_names_the_streamer(monkeypatch, tmp_path):
+    reply = '{"name": "Kai Cenat", "clips": [{"start": 0, "end": 30, "hook": "Lets Rakai stream", "title": "Rakai takes over"}]}'
+    monkeypatch.setattr(ai, "ask_ai", lambda cmd, prompt: reply)
+    (c,) = ai.pick_clips("fake", {"duration": 100, "uploader": "kaicenat"}, [], 3, tmp_path)
+    assert c["hook"] == "Kai Cenat: Lets Rakai stream" and c["title"] == "Kai Cenat: Rakai takes over"
+
+
 def test_hashtags_are_checked_words_only():
     tags = ["#Gaming", "gaming", "two words", "https://evil.example", "@someone", 5, {"x": 1}, "fútbol", "ok_1", "a", "b"]
     assert ai.hashtags(tags) == ["Gaming", "5", "fútbol", "ok_1", "a"]  # deduped ignoring case, capped at 5
