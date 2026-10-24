@@ -24,6 +24,7 @@ MAX_TRENDS_CHARS = 8000  # trends.md comes from the open web; cap what it can ad
 TEXT_FIELDS = {"title": 100, "hook": 80, "description": 1000, "trend": 200, "sound": 200, "why": 300}
 MAX_HASHTAGS = 5
 CLIP_LEN = (15, 60)  # seconds, as the prompt asks; longer picks are trimmed to 60 s (a window's first 60 s end on its peak)
+STREAMER = re.compile(r"(?:\b(?:the|this) |^)streamer\b", re.I)  # the subject unnamed; "streamers" is someone else
 ANSI = re.compile(r"\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07]*\x07|[@-Z\\-_])")  # terminal escape sequences
 
 PROMPT = """You are the editor behind a top TikTok / YouTube Shorts clip channel. Today is {date}.
@@ -45,9 +46,10 @@ Pick the {n} clips most likely to go viral. Rules:
 - End right on the payoff / punchline, or on a line that loops back into the start. No trailing filler.
 - Must make sense with zero stream context. Skip ad reads, waiting screens and quiet moments unless chat proves something big happened.
 - Fewer is fine if the candidates are weak. Never pad with boring clips.
-- Name the streamer in "hook" and "title", by the name fans call them (Asmongold, not his channel zackrawrr):
-  the streamer's name + a strong verb + something specific that happens. Name the other people in the clip too
-  (guests, other streamers). Never vague ("this guy", "insane moment", "wait for it", "you won't believe").
+- Name the streamer in "hook", "title" and "description", by the name fans call them (Asmongold, not his channel
+  zackrawrr): the streamer's name + a strong verb + something specific that happens. Never call them "the streamer",
+  "he" or "this guy" before naming them. Name the other people in the clip too (guests, other streamers, a chatter
+  by role). Never vague ("insane moment", "wait for it", "you won't believe").
   Good: "Kai Cenat Lets Rakai Take Over His Stream", "Asmongold Gets Roasted By His Own Chat".
   Bad: "This Went Horribly Wrong", "The Funniest Moment Ever".
 - The hook is the viewer's only context with the sound off: say the concrete situation and stakes (what is at risk,
@@ -58,7 +60,7 @@ Pick the {n} clips most likely to go viral. Rules:
 - Hashtags: 3-5, mixing broad ones (gaming, twitch) with specific ones (the game, the meme). A credit line for the
   streamer and their hashtag are added for you.
 Answer with ONLY this JSON (no commentary). No emoji in "hook".
-{{"name": "the name fans call the streamer", "clips": [{{"start": 1234.5, "end": 1262.0, "title": "YouTube Shorts title naming the streamer, under 70 chars", "hook": "on-screen text naming the streamer, max 8 words", "description": "post text for TikTok and YouTube: 1-2 sentences that make people watch, no hashtags", "hashtags": ["3 to 5 hashtags, no # sign"], "trend": "trend or format this fits", "sound": "trending sound to add in-app, or empty", "score": 8, "why": "one line"}}]}}
+{{"name": "the name fans call the streamer", "clips": [{{"start": 1234.5, "end": 1262.0, "title": "YouTube Shorts title naming the streamer, under 70 chars", "hook": "on-screen text naming the streamer, max 8 words", "description": "post text for TikTok and YouTube naming the streamer: 1-2 sentences that make people watch, no hashtags", "hashtags": ["3 to 5 hashtags, no # sign"], "trend": "trend or format this fits", "sound": "trending sound to add in-app, or empty", "score": 8, "why": "one line"}}]}}
 
 <stream_data>
 Stream title: {title}
@@ -190,15 +192,17 @@ def clean(clips: object, duration: float, n: int) -> list[dict]:
 
 
 def name_streamer(picks: list[dict], *names: object) -> list[dict]:
-    """Viral clip titles lead with the streamer's name. The prompt asks for it; this makes sure of it.
+    """Viral clip text names the streamer. The prompt asks for it; this makes sure of it in hook, title and description:
+    "Streamer begs fans" / "the streamer" become the name, other text without the name gets "Name: " in front.
 
     names: the AI's choice (the name fans use) first, then fallbacks. The first plain short name wins.
     """
     name = next((str(n).strip() for n in names if re.fullmatch(r"[\w .'-]{2,30}", str(n or "").strip())), "")
     for p in picks if name else []:
-        for k in ("hook", "title"):
+        for k in ("hook", "title", "description"):
             if name.lower() not in p[k].lower():
-                p[k] = f"{name}: {p[k]}"[: TEXT_FIELDS[k]] if p[k] else name
+                named = STREAMER.sub(name, p[k])
+                p[k] = (named if named != p[k] else f"{name}: {p[k]}" if p[k] else name)[: TEXT_FIELDS[k]]
     return picks
 
 

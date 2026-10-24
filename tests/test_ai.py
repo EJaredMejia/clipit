@@ -33,24 +33,56 @@ def test_clean_forces_text_fields_to_capped_strings():
 
 
 def test_name_streamer_adds_the_name_only_where_missing():
-    picks = [{"hook": "Gets roasted by chat", "title": "ASMONGOLD loses it"}, {"hook": "", "title": "x" * 100}]
+    picks = [
+        {"hook": "Gets roasted by chat", "title": "ASMONGOLD loses it", "description": "Asmongold reads chat."},
+        {"hook": "", "title": "x" * 100, "description": "He opens fan mail."},
+    ]
     got = ai.name_streamer(picks, "Asmongold", "zackrawrr")
-    assert got[0] == {"hook": "Asmongold: Gets roasted by chat", "title": "ASMONGOLD loses it"}
+    assert got[0] == {
+        "hook": "Asmongold: Gets roasted by chat",
+        "title": "ASMONGOLD loses it",
+        "description": "Asmongold reads chat.",
+    }
     assert got[1]["hook"] == "Asmongold" and got[1]["title"].startswith("Asmongold: x")
+    assert got[1]["description"] == "Asmongold: He opens fan mail."
     assert len(got[1]["title"]) == ai.TEXT_FIELDS["title"]
 
 
+def test_name_streamer_replaces_streamer_with_the_name():
+    picks = [
+        {
+            "hook": "the streamer's worst day",
+            "title": "Streamer begs fans to STOP sending him weird gifts",
+            "description": "A stranger corners The Streamer to pitch an app. Other streamers laugh.",
+        }
+    ]
+    (got,) = ai.name_streamer(picks, "Kai Cenat")
+    assert got == {
+        "hook": "Kai Cenat's worst day",
+        "title": "Kai Cenat begs fans to STOP sending him weird gifts",
+        "description": "A stranger corners Kai Cenat to pitch an app. Other streamers laugh.",
+    }
+
+
+def test_name_streamer_leaves_other_streamers_alone():
+    (got,) = ai.name_streamer([{"hook": "Streamers react", "title": "a streamer raids", "description": ""}], "xQc")
+    assert got == {"hook": "xQc: Streamers react", "title": "xQc: a streamer raids", "description": "xQc"}
+
+
 def test_name_streamer_falls_back_past_bad_names():
-    picks = [{"hook": "a", "title": "b"}]
-    assert ai.name_streamer(picks, "{\\an8}evil", None, "zackrawrr")[0]["hook"] == "zackrawrr: a"
-    assert ai.name_streamer([{"hook": "a", "title": "b"}], None, "")[0] == {"hook": "a", "title": "b"}
+    picks = [{"hook": "a", "title": "b", "description": "c"}]
+    assert ai.name_streamer(picks, "{\an8}evil", None, "zackrawrr")[0]["hook"] == "zackrawrr: a"
+    unnamed = {"hook": "a", "title": "b", "description": "c"}
+    assert ai.name_streamer([dict(unnamed)], None, "")[0] == unnamed
 
 
 def test_pick_clips_names_the_streamer(monkeypatch, tmp_path):
     reply = '{"name": "Kai Cenat", "clips": [{"start": 0, "end": 30, "hook": "Lets Rakai stream", "title": "Rakai takes over"}]}'
+    reply = reply.replace('"title"', '"description": "The streamer hands over.", "title"')
     monkeypatch.setattr(ai, "ask_ai", lambda cmd, prompt: reply)
     (c,) = ai.pick_clips("fake", {"duration": 100, "uploader": "kaicenat"}, [], 3, tmp_path)
     assert c["hook"] == "Kai Cenat: Lets Rakai stream" and c["title"] == "Kai Cenat: Rakai takes over"
+    assert c["description"] == "Kai Cenat hands over."
 
 
 def test_hashtags_are_checked_words_only():
