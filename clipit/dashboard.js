@@ -16,6 +16,7 @@ const SORTS = {
   streamer: (a, b) => a.streamer.localeCompare(b.streamer) || b.score - a.score,
 };
 const POLL_MS = 5000;
+const FETCH_MS = 15000; // every request has a deadline, so a stalled server shows an error instead of hanging
 
 const $ = (id) => document.getElementById(id);
 let data = { vods: [], clips: [] };
@@ -26,7 +27,7 @@ let shown = { id: null, file: null, key: "" }; // what the detail panel renders 
 const drafts = {}; // post links typed but not saved yet, by "clipId:platform"
 let queue = []; // review deck: unreviewed clip ids in random order, queue[0] is the card on top
 const history = []; // ids decided in the deck this visit, newest last, for undo
-const inflight = new Set(); // ids whose verdict is being saved: a poll that raced the save mustn't re-deal them
+const inflight = new Map(); // id -> verdict writes pending: a poll that raced the save mustn't re-deal or drop them
 let deckShown = null; // clip id of the top card now on screen
 let muted = false;
 let flinging = false;
@@ -72,7 +73,7 @@ function setStatus(text, bad = false) {
 async function load() {
   if (document.hidden) return; // a background tab doesn't need fresh data
   try {
-    const r = await fetch("/api/data", { headers: etag ? { "If-None-Match": etag } : {} });
+    const r = await fetch("/api/data", { headers: etag ? { "If-None-Match": etag } : {}, signal: AbortSignal.timeout(FETCH_MS) });
     if (r.status !== 304) {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       data = await r.json();
@@ -91,6 +92,7 @@ async function save(path, body) {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
+      signal: AbortSignal.timeout(FETCH_MS),
     });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
   } catch (e) {
@@ -99,6 +101,14 @@ async function save(path, body) {
   }
   await load();
   return true;
+}
+
+// Verdict writes go out one at a time, in order: a quick Keep then Undo must land as Keep then Undo.
+let verdicts = Promise.resolve();
+function saveVerdict(clip, verdict) {
+  const done = verdicts.then(() => save("/api/verdict", { clip, verdict }));
+  verdicts = done;
+  return done;
 }
 
 function render() {
@@ -244,7 +254,7 @@ function detail(c) {
             type: "button",
             class: `toggle ${v}`,
             "aria-pressed": String(c.verdict === v),
-            onclick: () => save("/api/verdict", { clip: c.id, verdict: c.verdict === v ? null : v }),
+            onclick: () => saveVerdict(c.id, c.verdict === v ? null : v),
           },
           label,
         ),
@@ -286,13 +296,17 @@ function upload(c, platform, name) {
       return;
     }
     const order = visible().map((x) => x.id);
+    const list = listState();
     if (await save("/api/upload", { clip: c.id, platform, url })) {
       delete drafts[key]; // a failed save keeps the link
-      advanceFrom(c.id, order);
+      // only if the user is still on this clip and this list: a slow save mustn't replace what they opened since
+      if (selected === c.id && listState() === list) advanceFrom(c.id, order);
     }
   };
   return h("form", { class: "upload", onsubmit: submit }, input, h("button", { type: "submit" }, `Mark posted on ${name}`));
 }
+
+const listState = () => [view, $("q").value, $("streamer").value, $("sort").value].join("\n");
 
 // After posting, a clip that left the list (e.g. Ready to post) hands over to the next one, so posting is a run.
 function advanceFrom(id, order) {
@@ -330,6 +344,7 @@ function fileTools(c) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ clip: c.id }),
+        signal: AbortSignal.timeout(FETCH_MS),
       });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       show.textContent = "Opened";
@@ -465,11 +480,18 @@ function card(c) {
     el.style.transition = "";
     const flick = Math.abs(dx) > 40 && Math.abs(dx) / (e.timeStamp - t0) > 0.5; // a quick flick counts, however short
     if (flick || Math.abs(dx) > Math.min(120, el.offsetWidth / 3)) return fling(dx > 0 ? "keep" : "skip");
-    if (e.type === "pointerup" && Math.abs(dx) < 6) toggle(video); // a tap, not a drag
+    if (Math.abs(dx) < 6) toggle(video); // a tap, not a drag
     move(0);
   };
   el.addEventListener("pointerup", release);
-  el.addEventListener("pointercancel", release);
+  el.addEventListener("pointercancel", () => {
+    // the browser took the gesture over (a scroll): put the card back, never rate it
+    if (x0 === null) return;
+    x0 = null;
+    el.classList.remove("dragging");
+    el.style.transition = "";
+    move(0);
+  });
   el.move = move;
   return el;
 }
@@ -493,16 +515,24 @@ function fling(verdict, animate = true) {
   setTimeout(() => decide(verdict), 180);
 }
 
+// A clip can have a Keep and its Undo pending at once: count its writes, so the first to finish doesn't unmark it.
+function pending(id, n) {
+  const left = (inflight.get(id) || 0) + n;
+  if (left > 0) inflight.set(id, left);
+  else inflight.delete(id);
+}
+
 async function decide(verdict) {
   const id = queue.shift();
   history.push(id);
-  inflight.add(id);
+  pending(id, 1);
   renderDeck();
-  const ok = await save("/api/verdict", { clip: id, verdict });
-  inflight.delete(id);
+  const ok = await saveVerdict(id, verdict);
+  pending(id, -1);
   if (!ok) {
-    history.pop();
-    queue.unshift(id); // back on top, the status bar says why
+    const i = history.lastIndexOf(id); // this clip's entry: the reviewer may have decided others since
+    if (i >= 0) history.splice(i, 1);
+    if (!queue.includes(id)) queue.unshift(id); // back on top, the status bar says why
     renderDeck();
   }
 }
@@ -510,13 +540,14 @@ async function decide(verdict) {
 async function undo() {
   if (flinging || !history.length) return; // mid-fling, decide() is about to take queue[0]
   const id = history.pop();
-  inflight.add(id);
+  pending(id, 1);
   queue.unshift(id);
   renderDeck();
-  const ok = await save("/api/verdict", { clip: id, verdict: null });
-  inflight.delete(id);
+  const ok = await saveVerdict(id, null);
+  pending(id, -1);
   if (!ok) {
-    queue.splice(queue.indexOf(id), 1);
+    const i = queue.indexOf(id);
+    if (i >= 0) queue.splice(i, 1);
     history.push(id);
     renderDeck();
   }

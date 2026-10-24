@@ -1,4 +1,5 @@
 import json
+import subprocess
 import threading
 import urllib.error
 import urllib.request
@@ -122,3 +123,19 @@ def test_reveal_selects_the_file_in_explorer(monkeypatch, tmp_path):
     monkeypatch.setattr(dashboard.subprocess, "run", lambda cmd, **kw: ran.append((cmd, kw)))
     dashboard.reveal(tmp_path / "a b.mp4")
     assert ran == [(f'explorer /select,"{tmp_path / "a b.mp4"}"', {"timeout": dashboard.REVEAL_TIMEOUT, "check": False})]
+
+
+def test_reveal_failures_are_errors_except_explorers_exit_code(site, monkeypatch, tmp_path):
+    ran = []
+    monkeypatch.setattr(dashboard.subprocess, "run", lambda cmd, **kw: ran.append(kw["check"]))
+    for platform, check in (("linux", True), ("darwin", True), ("win32", False)):
+        monkeypatch.setattr(dashboard.sys, "platform", platform)
+        dashboard.reveal(tmp_path / "a.mp4")
+        assert ran.pop() is check
+
+    def fail(cmd, **kw):
+        raise subprocess.CalledProcessError(1, cmd)
+
+    monkeypatch.setattr(dashboard.subprocess, "run", fail)
+    base, _, (cid, _) = site
+    assert call(base + "/api/reveal", {"clip": cid})[0] == 500  # the page shows an error, not "Opened"

@@ -108,7 +108,9 @@
   .keys { margin: 2rem 0 0; color: var(--muted); font-size: 0.85rem; line-height: 2; }
   /* nothing to review: the deck's buttons and side column go away, the next step takes the stage */
   .review.empty { grid-template-columns: minmax(0, 32rem); }
-  .review.empty #side, .review.empty .deck-actions { display: none; }
+  /* Undo stays while there is something to undo: the last card's decision must stay reversible */
+  .review.empty #side, .review.empty #skip, .review.empty #keep, .review.empty #undo:disabled { display: none; }
+  .review.empty .deck-actions { justify-content: flex-start; margin-top: 0; }
   .done-card { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; padding: 3rem 0; color: var(--muted); }
   .done-card h2 { font: 700 2rem/1.1 var(--cond); color: var(--text); }
   .done-card p { margin: 0 0 0.75rem; font-size: 1.05rem; }

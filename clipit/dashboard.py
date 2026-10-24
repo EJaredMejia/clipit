@@ -99,7 +99,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send(404, b'{"error": "no video"}')
             try:
                 reveal(path)
-            except (OSError, subprocess.TimeoutExpired) as e:
+            except (OSError, subprocess.SubprocessError) as e:  # not found, timed out, or exited with an error
                 logger.warning("couldn't open the folder of %s: %s", path, e)
                 return self.send(500, b'{"error": "could not open the folder"}')
             found = True
@@ -190,7 +190,8 @@ def reveal(path: Path) -> None:
         cmd = ["open", "-R", str(path)]
     else:
         cmd = ["xdg-open", str(path.parent)]  # no portable "select this file" on Linux: open its folder
-    subprocess.run(cmd, timeout=REVEAL_TIMEOUT, check=False)  # explorer exits 1 even when it worked
+    # explorer exits 1 even when it worked, so only its exit code is ignored; open / xdg-open failures are errors
+    subprocess.run(cmd, timeout=REVEAL_TIMEOUT, check=sys.platform != "win32")
 
 
 def valid_url(url: object) -> bool:
