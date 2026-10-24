@@ -50,6 +50,10 @@ Pick the {n} clips most likely to go viral. Rules:
   (guests, other streamers). Never vague ("this guy", "insane moment", "wait for it", "you won't believe").
   Good: "Kai Cenat Lets Rakai Take Over His Stream", "Asmongold Gets Roasted By His Own Chat".
   Bad: "This Went Horribly Wrong", "The Funniest Moment Ever".
+- The hook is the viewer's only context with the sound off: say the concrete situation and stakes (what is at risk,
+  the game or place), not a feeling. Lead with the most dramatic true fact; a scare that turns out false is still
+  the hook.
+  Good: "xQc thinks his PC died mid-tournament". Bad: "he thought it was over" (over how? who?).
 - No links, @mentions of other accounts, or slurs in any text you write.
 - Hashtags: 3-5, mixing broad ones (gaming, twitch) with specific ones (the game, the meme). A credit line for the
   streamer and their hashtag are added for you.
