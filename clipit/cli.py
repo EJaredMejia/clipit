@@ -48,7 +48,7 @@ def main() -> None:
         default=ai.default_trends_ai(),
         help="command for --refresh-trends; needs web search (default: Claude Code with web tools only)",
     )
-    ap.add_argument("--whisper", default="small", help="faster-whisper model: tiny, base, small (default), medium, turbo")
+    ap.add_argument("--whisper", default="turbo", help="faster-whisper model: tiny, base, small, medium, turbo (default)")
     ap.add_argument("--out", type=Path, default=ROOT / "out", help="working files, clips, logs and the database")
     ap.add_argument(
         "--refresh-trends", action="store_true", help="have the AI research current TikTok/Shorts trends into trends.md"

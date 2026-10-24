@@ -108,7 +108,7 @@ It only listens on your own machine (127.0.0.1) and refuses requests from other 
 | `-n`, `--clips N` | `6` | Clips per VOD. |
 | `--ai CMD` | Claude Code, all tools disabled | The AI that picks clips: any CLI that reads a prompt on stdin and prints the answer. **Don't give this command tools**: its prompt contains Twitch chat written by strangers. |
 | `--trends-ai CMD` | Claude Code, web tools only | The AI for `--refresh-trends`, which needs web search. |
-| `--whisper MODEL` | `small` | Transcription model: `tiny`, `base`, `small`, `medium` or `turbo`. Bigger is more accurate but slower. |
+| `--whisper MODEL` | `turbo` | Transcription model: `tiny`, `base`, `small`, `medium` or `turbo`. Bigger is more accurate but slower. |
 | `--out DIR` | `out` | Where working files, clips, logs and the database go. |
 | `--refresh-trends` | | Research current trends into `trends.md`. |
 | `--poll` | | Pick live streamers and clip their latest finished VOD. |

@@ -15,6 +15,7 @@ def test_parallel_windows_keep_order_and_the_first_windows_language(monkeypatch)
             pass
 
         def transcribe(self, pcm, language, **kw):
+            assert kw["initial_prompt"] == "Chat,"  # keeps "chat" from becoming "Chad"
             langs.append(language)
             a = int(pcm[0])
             time.sleep(0.05 if a == 10 else 0)  # the 2nd window finishes after the 3rd
