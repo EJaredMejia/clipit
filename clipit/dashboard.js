@@ -4,11 +4,11 @@
 
 const PLATFORMS = { tiktok: "TikTok", youtube: "YouTube" };
 const VIEWS = {
-  all: ["All clips", () => true],
+  ready: ["Ready to post", (c) => c.verdict === "keep" && posted(c) < Object.keys(PLATFORMS).length],
   review: ["To review", (c) => !c.verdict],
-  ready: ["Kept, not posted", (c) => c.verdict === "keep" && posted(c) < Object.keys(PLATFORMS).length],
   posted: ["Posted", (c) => posted(c) > 0],
   skip: ["Skipped", (c) => c.verdict === "skip"],
+  all: ["All", () => true],
 };
 const SORTS = {
   new: (a, b) => b.created_at.localeCompare(a.created_at) || a.idx - b.idx,
@@ -20,7 +20,7 @@ const POLL_MS = 5000;
 const $ = (id) => document.getElementById(id);
 let data = { vods: [], clips: [] };
 let etag = "";
-let view = "all";
+let view = "ready"; // the Clips tab is where kept clips get posted
 let selected = null; // clip id
 let shown = { id: null, file: null, key: "" }; // what the detail panel renders now, so polling doesn't redraw it for nothing
 const drafts = {}; // post links typed but not saved yet, by "clipId:platform"
@@ -48,6 +48,7 @@ const link = (href, text) => (safeUrl(href) ? h("a", { href, target: "_blank", r
 const when = (iso) => (iso ? new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "–");
 const score = (s) => String(Number.isInteger(s) ? s : s.toFixed(1));
 const two = (n) => String(n).padStart(2, "0");
+const day = (iso) => new Date(iso).toLocaleDateString([], { month: "short", day: "numeric" });
 const secs = (c) => `${Math.round(c.end_s - c.start_s)} s`;
 // a span, not a div: list rows put it inside a button
 const meta = (...parts) => h("span", { class: "meta" }, parts.map((p) => (typeof p === "string" ? h("span", {}, p) : p)));
@@ -78,7 +79,7 @@ async function load() {
       etag = r.headers.get("ETag") || "";
       render();
     }
-    setStatus("Live");
+    setStatus(""); // only say something when something is wrong
   } catch {
     setStatus("Can't reach the dashboard. Is clipit --dashboard still running?", true);
   }
@@ -139,13 +140,17 @@ function renderStreamers() {
   pick.value = names.includes(was) ? was : "";
 }
 
-function renderList() {
+function visible() {
   const q = $("q").value.trim().toLowerCase();
   const who = $("streamer").value;
-  const rows = data.clips
+  return data.clips
     .filter((c) => VIEWS[view][1](c) && (!who || c.streamer === who))
     .filter((c) => !q || `${c.title} ${c.caption} ${c.streamer}`.toLowerCase().includes(q))
     .sort(SORTS[$("sort").value]);
+}
+
+function renderList() {
+  const rows = visible();
   $("count").textContent = `${rows.length} of ${data.clips.length} clips`;
   $("list").replaceChildren(...rows.map(row));
   if (!rows.length) {
@@ -167,12 +172,12 @@ function row(c) {
         "span",
         { class: "main" },
         h("span", { class: "title" }, c.title || "(untitled)"),
-        meta(h("b", {}, c.streamer || "unknown streamer"), secs(c), when(c.created_at)),
+        meta(h("b", {}, c.streamer || "unknown streamer"), secs(c), day(c.created_at)),
       ),
       h(
         "span",
         { class: "badges" },
-        h("span", { class: `badge ${c.verdict || ""}` }, verdict || "New"),
+        view === "all" ? h("span", { class: `badge ${c.verdict || ""}` }, verdict || "New") : "", // other views imply it
         Object.entries(PLATFORMS)
           .filter(([p]) => c.uploads[p])
           .map(([, name]) => h("span", { class: "badge posted" }, `✓ ${name}`)),
@@ -219,12 +224,19 @@ function detail(c) {
       h("button", { type: "button", class: "ghost", "aria-label": "Close clip", onclick: () => select(null) }, "✕"),
     ),
     meta(h("b", {}, streamer), link(atTime(c.vod_url, c.start_s), `VOD at ${hms(c.start_s)}`), secs(c), `AI score ${score(c.score)}/10`),
-    h("div", { class: "group" }, h("span", { class: "label" }, "Video file"), fileTools(c)),
-    h("p", { class: "meta path" }, `Saved in the output folder as ${c.file}`),
+    h("div", { class: "file" }, fileTools(c), h("span", { class: "path" }, c.file)),
+    // one block per platform, in the order you post: copy the text, upload the file, mark it posted
+    h("h3", {}, "TikTok"),
+    copy("Caption", c.caption),
+    upload(c, "tiktok", "TikTok"),
+    h("h3", {}, "YouTube Shorts"),
+    copy("Title", c.title),
+    copy("Description", c.youtube || c.caption), // clips made before descriptions only have the caption
+    upload(c, "youtube", "YouTube"),
     h(
       "div",
-      { class: "group", role: "group", "aria-label": "Worth posting?" },
-      h("span", { class: "label" }, "Worth it?"),
+      { class: "group verdict", role: "group", "aria-label": "Worth posting?" },
+      h("span", { class: "label" }, "Worth posting?"),
       [["keep", "Keep"], ["skip", "Skip"]].map(([v, label]) =>
         h(
           "button",
@@ -238,12 +250,6 @@ function detail(c) {
         ),
       ),
     ),
-    h("h3", {}, "Posted"),
-    Object.entries(PLATFORMS).map(([p, name]) => upload(c, p, name)),
-    h("h3", {}, "Post text"),
-    copy("YouTube title", c.title),
-    copy("YouTube description", c.youtube || c.caption), // clips made before descriptions only have the caption
-    copy("TikTok caption", c.caption),
     notes.length
       ? h("details", {}, h("summary", {}, "Why the AI picked it"), h("dl", {}, notes.map(([k, v]) => [h("dt", {}, k), h("dd", {}, v)])))
       : "",
@@ -255,9 +261,8 @@ function upload(c, platform, name) {
   if (done) {
     return h(
       "div",
-      { class: "upload" },
-      h("span", { class: "label" }, name),
-      h("span", {}, `✓ Posted ${when(done.at)}`, done.url ? [" · ", link(done.url, "open post")] : ""),
+      { class: "upload done" },
+      h("span", {}, `Posted on ${name}, ${when(done.at)}`, done.url ? [". ", link(done.url, "Open the post")] : ""),
       h("button", { type: "button", class: "ghost", onclick: () => save("/api/upload", { clip: c.id, platform, url: null }) }, "Undo"),
     );
   }
@@ -280,9 +285,24 @@ function upload(c, platform, name) {
       input.reportValidity();
       return;
     }
-    if (await save("/api/upload", { clip: c.id, platform, url })) delete drafts[key]; // a failed save keeps the link
+    const order = visible().map((x) => x.id);
+    if (await save("/api/upload", { clip: c.id, platform, url })) {
+      delete drafts[key]; // a failed save keeps the link
+      advanceFrom(c.id, order);
+    }
   };
-  return h("form", { class: "upload", onsubmit: submit }, h("span", { class: "label" }, name), input, h("button", { type: "submit" }, "Mark posted"));
+  return h("form", { class: "upload", onsubmit: submit }, input, h("button", { type: "submit" }, `Mark posted on ${name}`));
+}
+
+// After posting, a clip that left the list (e.g. Ready to post) hands over to the next one, so posting is a run.
+function advanceFrom(id, order) {
+  const inView = (x) => {
+    const c = data.clips.find((y) => y.id === x);
+    return c && VIEWS[view][1](c);
+  };
+  if (inView(id)) return;
+  const i = order.indexOf(id);
+  select([...order.slice(i + 1), ...order.slice(0, i).reverse()].find(inView) ?? null);
 }
 
 function copy(label, text) {
@@ -301,8 +321,7 @@ function copy(label, text) {
   return h("div", { class: "copy" }, h("div", { class: "copy-head" }, h("span", { class: "label" }, label), button), pre);
 }
 
-// Download saves the clip through the browser (works from any device); Show in folder asks the server to open
-// Explorer on the PC running clipit, with the file selected, so it can be dragged into an upload page.
+// Asks the server to open Explorer on the PC running clipit with the file selected, ready to drag into an upload page.
 function fileTools(c) {
   const show = h("button", { type: "button", class: "ghost" }, "Show in folder");
   show.addEventListener("click", async () => {
@@ -319,8 +338,7 @@ function fileTools(c) {
     }
     setTimeout(() => (show.textContent = "Show in folder"), 2000);
   });
-  const name = c.file.split("/").pop();
-  return [h("a", { class: "ghost", href: `/media/${c.id}?f=${encodeURIComponent(c.file)}`, download: name }, "Download"), show];
+  return show;
 }
 
 function shuffle(a) {
@@ -336,7 +354,7 @@ function renderDeck() {
   queue = queue.filter((id) => todo.has(id) || inflight.has(id)); // drop clips rated elsewhere (Clips tab, another window)
   const dealt = new Set(queue);
   queue.push(...shuffle([...todo].filter((id) => !dealt.has(id) && !inflight.has(id)))); // new clips join at random spots in the back
-  $("left").replaceChildren(h("b", {}, String(queue.length)), queue.length === 1 ? " clip to review" : " clips to review");
+  $("left").textContent = `${queue.length} left to review`;
   $("undo").disabled = !history.length;
   $("skip").disabled = $("keep").disabled = !queue.length;
 
@@ -350,15 +368,15 @@ function renderDeck() {
   }
   deckShown = top ? top.id : null;
   flinging = false;
+  $("review").classList.toggle("empty", !top);
   $("tools").replaceChildren(
-    ...(top ? [...fileTools(top), h("button", { type: "button", class: "ghost", onclick: () => openClips("all", top.id) }, "Details")] : []),
+    ...(top ? [fileTools(top), h("button", { type: "button", class: "ghost", onclick: () => openClips("all", top.id) }, "Open details")] : []),
   );
   $("story").replaceChildren(
     ...(top
       ? [
           h("h2", {}, top.title || "(untitled)"),
           meta(h("b", {}, top.streamer || "unknown streamer"), secs(top), `AI score ${score(top.score)}/10`),
-          top.hook ? h("p", {}, h("span", { class: "hook", title: "On-screen text" }, top.hook)) : "",
           top.why ? h("p", { class: "why" }, top.why) : "",
         ]
       : []),
@@ -369,9 +387,17 @@ function renderDeck() {
       h(
         "div",
         { class: "done-card" },
-        h("b", {}, data.clips.length ? "All caught up" : "No clips yet"),
-        data.clips.length ? `${kept} kept clip${kept === 1 ? "" : "s"} waiting to be posted.` : "Run clipit on a VOD, or clipit --poll.",
-        kept ? h("button", { type: "button", class: "ghost", onclick: () => openClips("ready") }, "See kept clips") : "",
+        h("h2", {}, data.clips.length ? "Nothing left to review" : "No clips yet"),
+        h(
+          "p",
+          {},
+          data.clips.length
+            ? kept
+              ? `${kept} kept clip${kept === 1 ? " is" : "s are"} ready to post.`
+              : "New clips show up here as clipit makes them."
+            : "Run clipit on a VOD, or clipit --poll.",
+        ),
+        kept ? h("button", { type: "button", class: "primary", onclick: () => openClips("ready") }, `Post ${kept === 1 ? "it" : `the ${kept} clips`}`) : "",
       ),
     );
     return;
@@ -498,10 +524,14 @@ async function undo() {
 
 function openClips(v, id = null) {
   view = v;
+  selected = id;
   showTab($("clips-tab"));
   renderStats();
-  select(id);
+  select(id ?? firstOnWide());
 }
+
+// On a wide screen the Clips tab opens on its first clip, so there's never an empty detail panel to stare at.
+const firstOnWide = () => (matchMedia("(max-width: 860px)").matches ? null : (visible()[0]?.id ?? null));
 
 function renderVods() {
   const clips = {};
@@ -537,6 +567,8 @@ function showTab(tab) {
     $(t.getAttribute("aria-controls")).hidden = t !== tab;
   }
   for (const v of document.querySelectorAll("[role=tabpanel][hidden] video")) v.pause();
+  window.history.replaceState(null, "", `#${tab.id.replace(/-tab$/, "")}`); // a reload comes back to this tab
+  if (tab.id === "clips-tab" && selected === null) select(firstOnWide());
 }
 
 for (const tab of document.querySelectorAll("[role=tab]")) tab.addEventListener("click", () => showTab(tab));
@@ -558,4 +590,6 @@ $("streamer").addEventListener("change", renderList);
 $("sort").addEventListener("change", renderList);
 document.addEventListener("visibilitychange", load);
 setInterval(load, POLL_MS);
-load();
+const start = document.getElementById(`${location.hash.slice(1)}-tab`);
+if (start?.getAttribute("role") === "tab") showTab(start);
+load().then(() => !$("clips-panel").hidden && selected === null && select(firstOnWide()));
