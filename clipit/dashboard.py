@@ -1,7 +1,7 @@
 """The local dashboard: every VOD and clip, playable, with your keep/skip call and where each clip was posted.
 
 A standard-library HTTP server on 127.0.0.1. The page polls /api/data and saves through /api/verdict and /api/upload;
-every database read and write goes through clipit.db.
+every database read and write goes through clipit.db. /api/reveal opens a clip's folder in the file manager.
 
 Security: other websites open in the same browser can send requests to localhost. So every request must carry our own
 Host (stops DNS rebinding), and writes must be JSON from our own Origin (a cross-site JSON POST needs a CORS
@@ -15,6 +15,8 @@ import http.server
 import json
 import re
 import sqlite3
+import subprocess
+import sys
 import webbrowser
 from pathlib import Path
 
@@ -26,6 +28,7 @@ CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; 
 CHUNK = 1 << 20  # video bytes per range response: short responses keep a paused player from holding a thread open
 MAX_BODY = 4096
 MAX_URL = 500
+REVEAL_TIMEOUT = 15
 
 
 def make_server(out: Path, port: int) -> http.server.ThreadingHTTPServer:
@@ -91,6 +94,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/upload" and req.get("platform") in db.PLATFORMS and valid_url(req.get("url")):
             with self.conn() as conn:
                 found = db.set_upload(conn, clip, req["platform"], req.get("url"))
+        elif self.path == "/api/reveal":
+            if not (path := self.clip_path(clip)):
+                return self.send(404, b'{"error": "no video"}')
+            try:
+                reveal(path)
+            except (OSError, subprocess.TimeoutExpired) as e:
+                logger.warning("couldn't open the folder of %s: %s", path, e)
+                return self.send(500, b'{"error": "could not open the folder"}')
+            found = True
         else:
             return self.send(400, b'{"error": "bad request"}')
         self.send(200 if found else 404, b'{"ok": true}' if found else b'{"error": "no such clip"}')
@@ -119,11 +131,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def conn(self) -> contextlib.closing[sqlite3.Connection]:
         return contextlib.closing(db.connect(self.out / "clipit.db"))  # one per request: connections can't cross threads
 
-    def video(self, clip_id: int) -> None:
+    def clip_path(self, clip_id: int) -> Path | None:
+        """The clip's video file, None when it's missing or its db path points outside out/."""
         with self.conn() as conn:
             file = db.clip_file(conn, clip_id)
         path = (self.out / file).resolve() if file else None
-        if not path or not path.is_relative_to(self.out) or not path.is_file():  # the db's path, still never outside out/
+        return path if path and path.is_relative_to(self.out) and path.is_file() else None
+
+    def video(self, clip_id: int) -> None:
+        if not (path := self.clip_path(clip_id)):
             return self.send(404, b'{"error": "no video"}')
         size = path.stat().st_size
         m = re.fullmatch(r"bytes=(\d*)-(\d*)", self.headers.get("Range", "").strip())
@@ -163,6 +179,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+
+def reveal(path: Path) -> None:
+    """Open the file manager on this PC with the file selected, ready to drag into an upload page."""
+    if sys.platform == "win32":
+        # a string, not a list: explorer only parses /select,"path" with the quotes after the comma (paths can't hold ")
+        cmd: str | list[str] = f'explorer /select,"{path}"'
+    elif sys.platform == "darwin":
+        cmd = ["open", "-R", str(path)]
+    else:
+        cmd = ["xdg-open", str(path.parent)]  # no portable "select this file" on Linux: open its folder
+    subprocess.run(cmd, timeout=REVEAL_TIMEOUT, check=False)  # explorer exits 1 even when it worked
 
 
 def valid_url(url: object) -> bool:

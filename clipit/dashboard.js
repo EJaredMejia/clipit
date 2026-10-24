@@ -223,6 +223,8 @@ function detail(c) {
       link(atTime(c.vod_url, c.start_s), `VOD at ${hms(c.start_s)}`),
       ` · ${Math.round(c.end_s - c.start_s)} s · AI score ${score(c.score)}/10`,
     ),
+    h("div", { class: "group" }, h("span", { class: "label" }, "Video file"), fileTools(c)),
+    h("p", { class: "meta path" }, `Saved in the output folder as ${c.file}`),
     h(
       "div",
       { class: "group", role: "group", "aria-label": "Worth posting?" },
@@ -303,6 +305,28 @@ function copy(label, text) {
   return h("div", { class: "copy" }, h("div", { class: "copy-head" }, h("span", { class: "label" }, label), button), pre);
 }
 
+// Download saves the clip through the browser (works from any device); Show in folder asks the server to open
+// Explorer on the PC running clipit, with the file selected, so it can be dragged into an upload page.
+function fileTools(c) {
+  const show = h("button", { type: "button", class: "ghost" }, "Show in folder");
+  show.addEventListener("click", async () => {
+    try {
+      const r = await fetch("/api/reveal", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clip: c.id }),
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      show.textContent = "Opened";
+    } catch (e) {
+      setStatus(`Couldn't open the folder (${e.message})`, true);
+    }
+    setTimeout(() => (show.textContent = "Show in folder"), 2000);
+  });
+  const name = c.file.split("/").pop();
+  return [h("a", { class: "ghost", href: `/media/${c.id}?f=${encodeURIComponent(c.file)}`, download: name }, "Download"), show];
+}
+
 function shuffle(a) {
   for (let i = a.length - 1; i > 0; i--) {
     const j = Math.floor(Math.random() * (i + 1));
@@ -318,7 +342,7 @@ function renderDeck() {
   queue.push(...shuffle([...todo].filter((id) => !dealt.has(id) && !inflight.has(id)))); // new clips join at random spots in the back
   $("left").textContent = queue.length === 1 ? "1 clip to review" : `${queue.length} clips to review`;
   $("undo").disabled = !history.length;
-  $("skip").disabled = $("keep").disabled = $("details").disabled = !queue.length;
+  $("skip").disabled = $("keep").disabled = !queue.length;
 
   const top = data.clips.find((c) => c.id === queue[0]);
   const next = data.clips.find((c) => c.id === queue[1]);
@@ -330,6 +354,9 @@ function renderDeck() {
   }
   deckShown = top ? top.id : null;
   flinging = false;
+  $("tools").replaceChildren(
+    ...(top ? [...fileTools(top), h("button", { type: "button", class: "ghost", onclick: () => openClips("all", top.id) }, "Details")] : []),
+  );
   if (!top) {
     const kept = data.clips.filter(VIEWS.ready[1]).length;
     $("deck").replaceChildren(
@@ -512,7 +539,6 @@ for (const tab of document.querySelectorAll("[role=tab]")) tab.addEventListener(
 $("skip").addEventListener("click", () => fling("skip"));
 $("keep").addEventListener("click", () => fling("keep"));
 $("undo").addEventListener("click", undo);
-$("details").addEventListener("click", () => openClips("all", queue[0]));
 document.addEventListener("keydown", (e) => {
   if ($("review-panel").hidden || e.ctrlKey || e.metaKey || e.altKey || e.target.closest("input, select, textarea")) return;
   const video = $("deck").querySelector(".card.top video");

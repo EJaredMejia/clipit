@@ -102,3 +102,23 @@ def test_video_ranges(site):
     assert call(f"{base}/media/{cid}", Range=f"bytes={len(VIDEO)}-")[0] == 416
     assert call(f"{base}/media/{outside}")[0] == 404  # a clip path pointing outside out/ is never served
     assert call(f"{base}/media/999")[0] == 404
+
+
+def test_reveal_opens_only_real_clip_files(site, monkeypatch):
+    base, _, (cid, outside) = site
+    opened = []
+    monkeypatch.setattr(dashboard, "reveal", opened.append)
+    assert call(base + "/api/reveal", {"clip": cid})[0] == 200
+    assert opened and opened[0].name == "01_a.mp4" and opened[0].is_file()
+    assert call(base + "/api/reveal", {"clip": outside})[0] == 404  # a db path pointing outside out/ is never opened
+    assert call(base + "/api/reveal", {"clip": 999})[0] == 404
+    assert call(base + "/api/reveal", {"clip": cid}, Origin="https://evil.example")[0] == 403
+    assert len(opened) == 1
+
+
+def test_reveal_selects_the_file_in_explorer(monkeypatch, tmp_path):
+    ran = []
+    monkeypatch.setattr(dashboard.sys, "platform", "win32")
+    monkeypatch.setattr(dashboard.subprocess, "run", lambda cmd, **kw: ran.append((cmd, kw)))
+    dashboard.reveal(tmp_path / "a b.mp4")
+    assert ran == [(f'explorer /select,"{tmp_path / "a b.mp4"}"', {"timeout": dashboard.REVEAL_TIMEOUT, "check": False})]
