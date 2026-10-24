@@ -1,8 +1,10 @@
 import json
+import shutil
 import subprocess
 import threading
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 
@@ -139,3 +141,29 @@ def test_reveal_failures_are_errors_except_explorers_exit_code(site, monkeypatch
     monkeypatch.setattr(dashboard.subprocess, "run", fail)
     base, _, (cid, _) = site
     assert call(base + "/api/reveal", {"clip": cid})[0] == 500  # the page shows an error, not "Opened"
+
+
+NODE = shutil.which("node")
+
+
+@pytest.mark.skipif(not NODE, reason="needs Node.js (CI installs it)")
+def test_review_deck_decide_and_undo(tmp_path):
+    """Runs dashboard.js itself under Node (tests/dashboard_deck.js) with scripted verdict saves."""
+    harness = (Path(__file__).parent / "dashboard_deck.js").read_text(encoding="utf-8")
+    prelude, scenarios = harness.split("// SCENARIOS\n")
+    page = (Path(dashboard.__file__).parent / "dashboard.js").read_text(encoding="utf-8")
+    (tmp_path / "deck.cjs").write_text(f"{prelude}\n{page}\n{scenarios}", encoding="utf-8")
+    r = subprocess.run([NODE, str(tmp_path / "deck.cjs")], capture_output=True, text=True, timeout=60)
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout.strip().splitlines()[-1])
+    for case in got.values():
+        assert case["ordered"] and case["pending"] == 0  # one verdict write at a time, none left marked pending
+
+    # Keep, Undo, Keep again with the first save failing late: the later Keep and its Undo entry survive
+    assert got["keepUndoKeep"] == {**got["keepUndoKeep"], "sent": ["keep", None, "keep"], "history": [1], "queue": [2]}
+    # a lone failed Keep: card back on top, nothing to undo
+    assert got["keepFails"]["history"] == [] and got["keepFails"]["queue"] == [1, 2]
+    # Undo's save fails: the Keep stays decided and undoable
+    assert got["undoFails"]["sent"] == ["keep", None] and got["undoFails"]["history"] == [1] and got["undoFails"]["queue"] == [2]
+    # quick Keep then Undo: saved in that order, card back on top
+    assert got["keepUndo"]["sent"] == ["keep", None] and got["keepUndo"]["history"] == [] and got["keepUndo"]["queue"] == [1, 2]
