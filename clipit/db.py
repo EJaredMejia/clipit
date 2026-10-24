@@ -225,7 +225,7 @@ def overview(conn: sqlite3.Connection) -> dict:
     for r in conn.execute("SELECT clip_id, platform, url, uploaded_at FROM uploads"):
         uploads.setdefault(r["clip_id"], {})[r["platform"]] = {"url": r["url"], "at": r["uploaded_at"]}
     clips = conn.execute(
-        """SELECT c.id, c.vod_id, c.idx, c.start_s, c.end_s, c.title, c.hook, c.caption, c.youtube, c.trend, c.sound,
+        """SELECT c.id, c.vod_id, c.idx, c.file, c.start_s, c.end_s, c.title, c.hook, c.caption, c.youtube, c.trend, c.sound,
                   c.score, c.why, c.verdict, c.created_at, v.url AS vod_url,
                   COALESCE(NULLIF(c.streamer, ''), v.login, '') AS streamer
            FROM clips c JOIN vods v ON v.id = c.vod_id ORDER BY c.created_at DESC, c.idx"""

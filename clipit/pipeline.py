@@ -127,7 +127,8 @@ def process_vod(
     words = [w for segs in tr.values() for s in segs for w in s["words"]]
     rendered, login = [], streamer(info)
     for i, c in enumerate(picks, 1):
-        c.setdefault("description", c.get("caption", ""))  # picks.json cached before descriptions existed
+        # picks.json cached before descriptions existed; capped like a new one, so credit + hashtags still fit TikTok's limit
+        c.setdefault("description", c.get("caption", "")[: ai.TEXT_FIELDS["description"]])
         c["idx"], c["file"], c["streamer"] = i, clip_file(i, c), login
         c["caption"], c["youtube"] = render.post_texts(c)
         out = work / c["file"]

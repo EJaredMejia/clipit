@@ -73,6 +73,11 @@ def test_picks_cached_before_descriptions_keep_their_caption(stages):
     _, (again,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
     assert again["caption"] == clip["caption"]  # rerunning on the rewritten cache doesn't stack anything
 
+    old[0]["caption"] = "x" * 2200  # an old caption at TikTok's whole limit leaves no room for the credit
+    (work / "picks.json").write_text(json.dumps(old), encoding="utf-8")
+    _, (long,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
+    assert long["description"] == "x" * pipeline.ai.TEXT_FIELDS["description"]
+
 
 def test_streamer_is_only_a_checked_twitch_login():
     assert pipeline.streamer({"extractor": "twitch:vod", "uploader_id": "caseoh_"}) == "caseoh_"

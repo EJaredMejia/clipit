@@ -22,7 +22,7 @@ let data = { vods: [], clips: [] };
 let etag = "";
 let view = "all";
 let selected = null; // clip id
-let shown = { id: null, key: "" }; // what the detail panel renders now, so polling doesn't redraw it for nothing
+let shown = { id: null, file: null, key: "" }; // what the detail panel renders now, so polling doesn't redraw it for nothing
 const drafts = {}; // post links typed but not saved yet, by "clipId:platform"
 
 function h(tag, attrs = {}, ...kids) {
@@ -85,9 +85,10 @@ async function save(path, body) {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
   } catch (e) {
     setStatus(`Couldn't save (${e.message})`, true);
-    return;
+    return false;
   }
   await load();
+  return true;
 }
 
 function render() {
@@ -183,15 +184,17 @@ function renderDetail() {
   if (!c) {
     $("player").replaceChildren();
     $("info").replaceChildren(h("p", { class: "empty" }, "Pick a clip to watch it, rate it and copy its post text."));
-    shown = { id: null, key: "" };
+    shown = { id: null, file: null, key: "" };
     return;
   }
   const key = JSON.stringify(c);
   if (shown.id === c.id && shown.key === key) return; // unchanged: keep the focus and anything typed
-  if (shown.id !== c.id) {
-    $("player").replaceChildren(h("video", { src: `/media/${c.id}`, controls: true, preload: "metadata", playsinline: true }));
+  if (shown.id !== c.id || shown.file !== c.file) {
+    // a re-render can give the same clip a new file: the query makes the browser fetch it instead of its cached copy
+    const src = `/media/${c.id}?f=${encodeURIComponent(c.file)}`;
+    $("player").replaceChildren(h("video", { src, controls: true, preload: "metadata", playsinline: true }));
   }
-  shown = { id: c.id, key };
+  shown = { id: c.id, file: c.file, key };
   $("info").replaceChildren(...detail(c).flat());
 }
 
@@ -264,7 +267,7 @@ function upload(c, platform, name) {
       e.target.setCustomValidity("");
     },
   });
-  const submit = (e) => {
+  const submit = async (e) => {
     e.preventDefault();
     const url = input.value.trim();
     if (url && !safeUrl(url)) {
@@ -272,8 +275,7 @@ function upload(c, platform, name) {
       input.reportValidity();
       return;
     }
-    delete drafts[key];
-    save("/api/upload", { clip: c.id, platform, url });
+    if (await save("/api/upload", { clip: c.id, platform, url })) delete drafts[key]; // a failed save keeps the link
   };
   return h("form", { class: "upload", onsubmit: submit }, h("span", { class: "label" }, name), input, h("button", { type: "submit" }, "Mark posted"));
 }
