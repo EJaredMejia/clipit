@@ -26,7 +26,7 @@ let selected = null; // clip id
 let shown = { id: null, file: null, key: "" }; // what the detail panel renders now, so polling doesn't redraw it for nothing
 const drafts = {}; // post links typed but not saved yet, by "clipId:platform"
 let queue = []; // review deck: unreviewed clip ids in random order, queue[0] is the card on top
-const history = []; // ids decided in the deck this visit, newest last, for undo
+const history = []; // {id} per decision made in the deck this visit, newest last, for undo
 const inflight = new Map(); // id -> verdict writes pending: a poll that raced the save mustn't re-deal or drop them
 let deckShown = null; // clip id of the top card now on screen
 let muted = false;
@@ -524,22 +524,25 @@ function pending(id, n) {
 
 async function decide(verdict) {
   const id = queue.shift();
-  history.push(id);
+  const entry = { id }; // its own object: a failed save removes exactly this decision, never a later one for the same clip
+  history.push(entry);
   pending(id, 1);
   renderDeck();
   const ok = await saveVerdict(id, verdict);
   pending(id, -1);
-  if (!ok) {
-    const i = history.lastIndexOf(id); // this clip's entry: the reviewer may have decided others since
-    if (i >= 0) history.splice(i, 1);
-    if (!queue.includes(id)) queue.unshift(id); // back on top, the status bar says why
+  const i = history.indexOf(entry);
+  if (!ok && i >= 0) {
+    // still the reviewer's latest word on this clip (not undone since): take it back and put the card on top
+    history.splice(i, 1);
+    if (!queue.includes(id)) queue.unshift(id); // the status bar says why
     renderDeck();
   }
 }
 
 async function undo() {
   if (flinging || !history.length) return; // mid-fling, decide() is about to take queue[0]
-  const id = history.pop();
+  const entry = history.pop();
+  const { id } = entry;
   pending(id, 1);
   queue.unshift(id);
   renderDeck();
@@ -548,7 +551,7 @@ async function undo() {
   if (!ok) {
     const i = queue.indexOf(id);
     if (i >= 0) queue.splice(i, 1);
-    history.push(id);
+    history.push(entry);
     renderDeck();
   }
 }
