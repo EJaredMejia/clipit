@@ -24,6 +24,12 @@ let view = "all";
 let selected = null; // clip id
 let shown = { id: null, file: null, key: "" }; // what the detail panel renders now, so polling doesn't redraw it for nothing
 const drafts = {}; // post links typed but not saved yet, by "clipId:platform"
+let queue = []; // review deck: unreviewed clip ids in random order, queue[0] is the card on top
+const history = []; // ids decided in the deck this visit, newest last, for undo
+const inflight = new Set(); // ids whose verdict is being saved: a poll that raced the save mustn't re-deal them
+let deckShown = null; // clip id of the top card now on screen
+let muted = false;
+let flinging = false;
 
 function h(tag, attrs = {}, ...kids) {
   const el = document.createElement(tag);
@@ -92,6 +98,7 @@ async function save(path, body) {
 }
 
 function render() {
+  renderDeck();
   renderStats();
   renderStreamers();
   renderList();
@@ -296,6 +303,175 @@ function copy(label, text) {
   return h("div", { class: "copy" }, h("div", { class: "copy-head" }, h("span", { class: "label" }, label), button), pre);
 }
 
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function renderDeck() {
+  const todo = new Set(data.clips.filter((c) => !c.verdict).map((c) => c.id));
+  queue = queue.filter((id) => todo.has(id) || inflight.has(id)); // drop clips rated elsewhere (Clips tab, another window)
+  const dealt = new Set(queue);
+  queue.push(...shuffle([...todo].filter((id) => !dealt.has(id) && !inflight.has(id)))); // new clips join at random spots in the back
+  $("left").textContent = queue.length === 1 ? "1 clip to review" : `${queue.length} clips to review`;
+  $("undo").disabled = !history.length;
+  $("skip").disabled = $("keep").disabled = $("details").disabled = !queue.length;
+
+  const top = data.clips.find((c) => c.id === queue[0]);
+  const next = data.clips.find((c) => c.id === queue[1]);
+  const back = next ? h("div", { class: "card back", "aria-hidden": "true" }) : null;
+  if (top && top.id === deckShown) {
+    $("deck").querySelector(".back")?.remove();
+    if (back) $("deck").prepend(back);
+    return; // same card on top: don't restart its video on every poll
+  }
+  deckShown = top ? top.id : null;
+  flinging = false;
+  if (!top) {
+    const kept = data.clips.filter(VIEWS.ready[1]).length;
+    $("deck").replaceChildren(
+      h(
+        "div",
+        { class: "done-card" },
+        h("b", {}, data.clips.length ? "All caught up" : "No clips yet"),
+        data.clips.length ? `${kept} kept clip${kept === 1 ? "" : "s"} waiting to be posted.` : "Run clipit on a VOD, or clipit --poll.",
+        kept ? h("button", { type: "button", class: "ghost", onclick: () => openClips("ready") }, "See kept clips") : "",
+      ),
+    );
+    return;
+  }
+  $("deck").replaceChildren(...[back, card(top)].filter(Boolean));
+}
+
+function card(c) {
+  const video = h("video", { src: `/media/${c.id}?f=${encodeURIComponent(c.file)}`, loop: true, playsinline: true, preload: "auto" });
+  const keep = h("div", { class: "stamp keep" }, "KEEP");
+  const skip = h("div", { class: "stamp skip" }, "SKIP");
+  const sound = h("button", { type: "button", class: "sound" });
+  const el = h(
+    "div",
+    { class: "card top", tabindex: "0", "aria-label": `${c.title || "Untitled clip"}. Right arrow keeps it, left arrow skips it.` },
+    video,
+    keep,
+    skip,
+    sound,
+    h(
+      "div",
+      { class: "card-info" },
+      h("span", { class: "title" }, c.title || "(untitled)"),
+      h("span", { class: "meta" }, `${c.streamer || "unknown streamer"} · ${Math.round(c.end_s - c.start_s)} s · AI ${score(c.score)}/10`),
+      c.hook ? h("span", { class: "meta" }, c.hook) : "",
+    ),
+  );
+  const showSound = () => {
+    sound.textContent = video.muted ? "🔇" : "🔊";
+    sound.setAttribute("aria-label", video.muted ? "Unmute" : "Mute");
+  };
+  sound.addEventListener("click", () => {
+    muted = video.muted = !video.muted;
+    showSound();
+  });
+  video.addEventListener("play", () => el.classList.remove("paused"));
+  video.addEventListener("pause", () => el.classList.add("paused"));
+  video.muted = muted;
+  showSound();
+  if (!$("review-panel").hidden) {
+    video.play().catch(() => {
+      // the browser blocks autoplay with sound until the page has been clicked: start muted instead
+      muted = video.muted = true;
+      showSound();
+      video.play().catch(() => el.classList.add("paused"));
+    });
+  } else el.classList.add("paused");
+
+  let x0 = null;
+  let dx = 0;
+  const move = (x) => {
+    dx = x;
+    el.style.transform = `translateX(${x}px) rotate(${x / 18}deg)`;
+    keep.style.opacity = String(Math.min(1, Math.max(0, x / 100)));
+    skip.style.opacity = String(Math.min(1, Math.max(0, -x / 100)));
+  };
+  el.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 || e.target.closest("button") || flinging) return;
+    x0 = e.clientX;
+    dx = 0;
+    el.setPointerCapture(e.pointerId);
+    el.classList.add("dragging");
+    el.style.transition = "none";
+  });
+  el.addEventListener("pointermove", (e) => x0 !== null && move(e.clientX - x0));
+  const release = (e) => {
+    if (x0 === null) return;
+    x0 = null;
+    el.classList.remove("dragging");
+    el.style.transition = "";
+    if (Math.abs(dx) > Math.min(120, el.offsetWidth / 3)) return fling(dx > 0 ? "keep" : "skip");
+    if (e.type === "pointerup" && Math.abs(dx) < 6) toggle(video); // a tap, not a drag
+    move(0);
+  };
+  el.addEventListener("pointerup", release);
+  el.addEventListener("pointercancel", release);
+  el.move = move;
+  return el;
+}
+
+function toggle(video) {
+  if (video.paused) video.play().catch(() => {});
+  else video.pause();
+}
+
+function fling(verdict) {
+  const el = $("deck").querySelector(".card.top");
+  if (!el || flinging) return;
+  flinging = true;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return decide(verdict);
+  const sign = verdict === "keep" ? 1 : -1;
+  el.move(sign * 100); // shows the stamp
+  el.style.transition = "transform 0.25s ease-in";
+  el.style.transform = `translateX(${sign * (innerWidth + el.offsetWidth)}px) rotate(${sign * 30}deg)`;
+  setTimeout(() => decide(verdict), 250);
+}
+
+async function decide(verdict) {
+  const id = queue.shift();
+  history.push(id);
+  inflight.add(id);
+  renderDeck();
+  const ok = await save("/api/verdict", { clip: id, verdict });
+  inflight.delete(id);
+  if (!ok) {
+    history.pop();
+    queue.unshift(id); // back on top, the status bar says why
+    renderDeck();
+  }
+}
+
+async function undo() {
+  if (flinging || !history.length) return; // mid-fling, decide() is about to take queue[0]
+  const id = history.pop();
+  inflight.add(id);
+  queue.unshift(id);
+  renderDeck();
+  const ok = await save("/api/verdict", { clip: id, verdict: null });
+  inflight.delete(id);
+  if (!ok) {
+    queue.splice(queue.indexOf(id), 1);
+    history.push(id);
+    renderDeck();
+  }
+}
+
+function openClips(v, id = null) {
+  view = v;
+  showTab($("clips-tab"));
+  renderStats();
+  select(id);
+}
+
 function renderVods() {
   const clips = {};
   for (const c of data.clips) clips[c.vod_id] = (clips[c.vod_id] || 0) + 1;
@@ -324,14 +500,29 @@ function renderVods() {
   if (!data.vods.length) $("vods").append(h("tr", {}, h("td", { colspan: "6", class: "empty" }, "No VODs yet.")));
 }
 
-for (const tab of document.querySelectorAll("[role=tab]")) {
-  tab.addEventListener("click", () => {
-    for (const t of document.querySelectorAll("[role=tab]")) {
-      t.setAttribute("aria-selected", String(t === tab));
-      $(t.getAttribute("aria-controls")).hidden = t !== tab;
-    }
-  });
+function showTab(tab) {
+  for (const t of document.querySelectorAll("[role=tab]")) {
+    t.setAttribute("aria-selected", String(t === tab));
+    $(t.getAttribute("aria-controls")).hidden = t !== tab;
+  }
+  for (const v of document.querySelectorAll("[role=tabpanel][hidden] video")) v.pause();
 }
+
+for (const tab of document.querySelectorAll("[role=tab]")) tab.addEventListener("click", () => showTab(tab));
+$("skip").addEventListener("click", () => fling("skip"));
+$("keep").addEventListener("click", () => fling("keep"));
+$("undo").addEventListener("click", undo);
+$("details").addEventListener("click", () => openClips("all", queue[0]));
+document.addEventListener("keydown", (e) => {
+  if ($("review-panel").hidden || e.ctrlKey || e.metaKey || e.altKey || e.target.closest("input, select, textarea")) return;
+  const video = $("deck").querySelector(".card.top video");
+  if (e.key === "ArrowRight") fling("keep");
+  else if (e.key === "ArrowLeft") fling("skip");
+  else if (e.key === "z" || e.key === "Z" || e.key === "Backspace") undo();
+  else if (e.key === " " && video && !e.target.closest("button")) toggle(video);
+  else return;
+  e.preventDefault();
+});
 $("q").addEventListener("input", renderList);
 $("streamer").addEventListener("change", renderList);
 $("sort").addEventListener("change", renderList);

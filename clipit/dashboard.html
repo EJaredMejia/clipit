@@ -105,6 +105,37 @@
   td.num { text-align: right; font-variant-numeric: tabular-nums; }
   .error { margin-top: 0.25rem; color: var(--skip); font-size: 0.85rem; overflow-wrap: anywhere; }
 
+  #review-panel { max-width: 520px; margin: 0 auto; }
+  .deck-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.75rem; color: var(--muted); font-size: 0.9rem; }
+  #deck { display: grid; place-items: center; min-height: min(68vh, 640px); }
+  #deck > * { grid-area: 1 / 1; }
+  .card { position: relative; height: min(68vh, 640px); aspect-ratio: 9 / 16; max-width: 100%; border-radius: 14px; overflow: hidden;
+          background: #000; box-shadow: 0 10px 30px rgb(0 0 0 / 0.25); touch-action: pan-y; user-select: none; cursor: grab;
+          transition: transform 0.2s ease-out; }
+  .card.dragging { cursor: grabbing; }
+  .card.back { transform: scale(0.94) translateY(14px); opacity: 0.55; pointer-events: none; box-shadow: none; }
+  .card video { display: block; width: 100%; height: 100%; object-fit: cover; pointer-events: none; }
+  .card.paused::after { content: "▶"; position: absolute; inset: 0; display: grid; place-items: center; font-size: 3.5rem;
+                        color: rgb(255 255 255 / 0.85); background: rgb(0 0 0 / 0.2); pointer-events: none; }
+  .stamp { position: absolute; top: 3.75rem; padding: 0.125rem 0.75rem; border: 3px solid; border-radius: 8px; font-size: 1.75rem;
+           font-weight: 800; letter-spacing: 0.08em; background: rgb(0 0 0 / 0.35); opacity: 0; pointer-events: none; }
+  .stamp.keep { left: 1rem; color: #4ade80; transform: rotate(-12deg); }
+  .stamp.skip { right: 1rem; color: #f87171; transform: rotate(12deg); }
+  .sound { position: absolute; top: 0.75rem; right: 0.75rem; z-index: 1; width: 2.5rem; height: 2.5rem; border: 0; border-radius: 50%;
+           background: rgb(0 0 0 / 0.5); color: #fff; }
+  .card-info { position: absolute; inset: auto 0 0 0; display: flex; flex-direction: column; gap: 0.25rem; padding: 3rem 1rem 1rem;
+               color: #fff; background: linear-gradient(transparent, rgb(0 0 0 / 0.85)); pointer-events: none; }
+  .card-info .title { white-space: normal; font-size: 1.1rem; }
+  .card-info .meta { color: rgb(255 255 255 / 0.8); }
+  .deck-actions { display: flex; justify-content: center; align-items: center; gap: 1.25rem; margin-top: 1rem; }
+  .big { width: 4rem; height: 4rem; border: 2px solid currentColor; border-radius: 50%; background: var(--surface); font-size: 1.5rem; }
+  .big:hover:not(:disabled) { background: var(--hover); }
+  .big.keep { color: var(--keep); }
+  .big.skip { color: var(--skip); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  .hint { margin: 0.75rem 0 0; text-align: center; color: var(--muted); font-size: 0.85rem; }
+  .done-card { display: flex; flex-direction: column; align-items: center; gap: 0.75rem; padding: 2rem; text-align: center; color: var(--muted); }
+
   @media (max-width: 860px) {
     .split { grid-template-columns: minmax(0, 1fr); }
     #detail { position: static; max-height: none; order: -1; }
@@ -118,13 +149,24 @@
 <header>
   <h1>clip-it</h1>
   <nav role="tablist" aria-label="Sections">
-    <button role="tab" id="clips-tab" aria-selected="true" aria-controls="clips-panel">Clips</button>
+    <button role="tab" id="review-tab" aria-selected="true" aria-controls="review-panel">Review</button>
+    <button role="tab" id="clips-tab" aria-selected="false" aria-controls="clips-panel">Clips</button>
     <button role="tab" id="vods-tab" aria-selected="false" aria-controls="vods-panel">VODs</button>
   </nav>
   <p id="status" role="status">Loading…</p>
 </header>
 <main>
-  <section id="clips-panel" role="tabpanel" aria-labelledby="clips-tab">
+  <section id="review-panel" role="tabpanel" aria-labelledby="review-tab">
+    <div class="deck-top"><span id="left">Loading…</span><button type="button" class="ghost" id="details">Details</button></div>
+    <div id="deck" aria-live="polite"></div>
+    <div class="deck-actions">
+      <button type="button" class="big skip" id="skip" aria-label="Skip (left arrow)">✕</button>
+      <button type="button" class="ghost" id="undo">Undo</button>
+      <button type="button" class="big keep" id="keep" aria-label="Keep (right arrow)">♥</button>
+    </div>
+    <p class="hint">Swipe or drag the clip: right keeps it, left skips it. Keys: ← → to decide, Z to undo, Space to play or pause.</p>
+  </section>
+  <section id="clips-panel" role="tabpanel" aria-labelledby="clips-tab" hidden>
     <div id="stats" role="group" aria-label="Show clips"></div>
     <div class="toolbar">
       <input id="q" type="search" placeholder="Search titles, captions, streamers" aria-label="Search clips">
