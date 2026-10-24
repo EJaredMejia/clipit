@@ -149,6 +149,7 @@ NODE = shutil.which("node")
 @pytest.mark.skipif(not NODE, reason="needs Node.js (CI installs it)")
 def test_review_deck_decide_and_undo(tmp_path):
     """Runs dashboard.js itself under Node (tests/dashboard_deck.js) with scripted verdict saves."""
+    assert NODE  # the skipif above; pyright doesn't narrow through it
     harness = (Path(__file__).parent / "dashboard_deck.js").read_text(encoding="utf-8")
     prelude, scenarios = harness.split("// SCENARIOS\n")
     page = (Path(dashboard.__file__).parent / "dashboard.js").read_text(encoding="utf-8")
