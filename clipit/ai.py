@@ -24,7 +24,8 @@ MAX_TRENDS_CHARS = 8000  # trends.md comes from the open web; cap what it can ad
 TEXT_FIELDS = {"title": 100, "hook": 80, "description": 1000, "trend": 200, "sound": 200, "why": 300}
 MAX_HASHTAGS = 5
 CLIP_LEN = (15, 60)  # seconds, as the prompt asks; longer picks are trimmed to 60 s (a window's first 60 s end on its peak)
-STREAMER = re.compile(r"(?:\b(?:the|this) |^)streamer\b", re.I)  # the subject unnamed; "streamers" is someone else
+# a leading "Streamer" is the unnamed subject; later ones may be someone else, "streamers" always are
+STREAMER = re.compile(r"^(?:the |this )?streamer\b", re.I)
 ANSI = re.compile(r"\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07]*\x07|[@-Z\\-_])")  # terminal escape sequences
 
 PROMPT = """You are the editor behind a top TikTok / YouTube Shorts clip channel. Today is {date}.
@@ -193,7 +194,7 @@ def clean(clips: object, duration: float, n: int) -> list[dict]:
 
 def name_streamer(picks: list[dict], *names: object) -> list[dict]:
     """Viral clip text names the streamer. The prompt asks for it; this makes sure of it in hook, title and description:
-    "Streamer begs fans" / "the streamer" become the name, other text without the name gets "Name: " in front.
+    a leading "Streamer begs fans" / "The streamer" becomes the name, other text without the name gets "Name: " in front.
 
     names: the AI's choice (the name fans use) first, then fallbacks. The first plain short name wins.
     """
@@ -201,7 +202,7 @@ def name_streamer(picks: list[dict], *names: object) -> list[dict]:
     for p in picks if name else []:
         for k in ("hook", "title", "description"):
             if name.lower() not in p[k].lower():
-                named = STREAMER.sub(name, p[k])
+                named = STREAMER.sub(name, p[k], count=1)
                 p[k] = (named if named != p[k] else f"{name}: {p[k]}" if p[k] else name)[: TEXT_FIELDS[k]]
     return picks
 

@@ -53,20 +53,21 @@ def test_name_streamer_replaces_streamer_with_the_name():
         {
             "hook": "the streamer's worst day",
             "title": "Streamer begs fans to STOP sending him weird gifts",
-            "description": "A stranger corners The Streamer to pitch an app. Other streamers laugh.",
+            "description": "THE STREAMER reacts to the streamer's apology. Other streamers laugh.",
         }
     ]
     (got,) = ai.name_streamer(picks, "Kai Cenat")
     assert got == {
         "hook": "Kai Cenat's worst day",
         "title": "Kai Cenat begs fans to STOP sending him weird gifts",
-        "description": "A stranger corners Kai Cenat to pitch an app. Other streamers laugh.",
+        "description": "Kai Cenat reacts to the streamer's apology. Other streamers laugh.",
     }
 
 
 def test_name_streamer_leaves_other_streamers_alone():
-    (got,) = ai.name_streamer([{"hook": "Streamers react", "title": "a streamer raids", "description": ""}], "xQc")
-    assert got == {"hook": "xQc: Streamers react", "title": "xQc: a streamer raids", "description": "xQc"}
+    picks = [{"hook": "Streamers react", "title": "He watches the streamer cry", "description": ""}]
+    (got,) = ai.name_streamer(picks, "xQc")
+    assert got == {"hook": "xQc: Streamers react", "title": "xQc: He watches the streamer cry", "description": "xQc"}
 
 
 def test_name_streamer_falls_back_past_bad_names():
