@@ -42,15 +42,17 @@ VODs to process; `cli.py` is the only place that parses flags, sets up logging, 
 | `render.py` | captions, ffmpeg render, `posts.md` |
 | `util.py` | logging, shell helpers with timeouts, atomic writes, `ClipitError` |
 | `dashboard.py` | `--dashboard`: local HTTP server (127.0.0.1) for `dashboard.html` / `dashboard.js`, reads and writes via `db.py` |
+| `youtube.py` | `--youtube-login` and `--upload`: posts kept clips to YouTube Shorts, records each post in `uploads` |
 
-Planned: auto-upload to TikTok / Shorts on several accounts, as an `upload/` package that reads the `clips` table and
-records each post in the `uploads` table (today filled by hand from the dashboard), with accounts as a new table.
+Planned: auto-upload to TikTok, and to several accounts per platform (accounts as a new table). TikTok posts are
+recorded by hand from the dashboard until then.
 
 | Data | Where it lives |
 |---|---|
 | State shared across runs (which VODs are done, clips, later uploads and accounts) | SQLite, `out/clipit.db`, only through `clipit/db.py` |
 | Per-VOD working files (audio, chat, transcripts, AI reply, renders) | `out/<vod-id>/`, a cache that is safe to delete |
 | Logs | `out/logs/clipit.log` (rotating) |
+| YouTube OAuth client and login token | `~/.clipit/`, never in the repo or `out/` |
 
 ## Rules
 
@@ -69,6 +71,15 @@ records each post in the `uploads` table (today filled by hand from the dashboar
   never a stuck process. `util.sh` requires one. For streamed reads (`Popen`), use a watchdog timer that kills the process.
 - ffmpeg inputs that are URLs get `util.REMOTE` (the protocol whitelist).
 - The Twitch GQL API is unofficial. Expect it to change, and fail loudly (`ClipitError`, logged warnings), never silently.
+
+### Posting
+- Post only through a platform's official API, never by automating its website: that's what gets channels banned.
+- Automatic posting takes only clips the user marked Keep, a few a day (`youtube.PER_DAY`, `youtube.GAP`). The
+  dashboard's "Post to YouTube now" is the user posting by hand, like uploading in YouTube Studio: any clip, no pacing,
+  but it counts toward the pace of the automatic posts.
+- Each upload is claimed in `uploads` before it's sent (`db.claim_upload`, `db.claim_clip_upload`), so a clip is never
+  posted twice, even by overlapping runs. An upload that broke off after the video started going up may exist, so
+  it's never retried automatically.
 
 ### Untrusted input
 Stream titles, chat, transcripts, VOD metadata, web pages and **everything the AI returns** come from strangers.

@@ -166,3 +166,76 @@ def test_small_done_since_counts_recent_successes_only(conn):
         db.finish(conn, vid, error=err, now=T0)
     assert db.small_done_since(conn, T0 - datetime.timedelta(hours=1)) == 1
     assert db.small_done_since(conn, T0 + datetime.timedelta(hours=1)) == 0
+
+
+def kept_clips(conn, n: int) -> list[int]:
+    """n clips the user kept, oldest first."""
+    db.record_manual(conn, "v1", "u")
+    db.save_clips(conn, "v1", [{**CLIP, "idx": i, "start": 100.0 * i, "end": 100.0 * i + 20} for i in range(n)])
+    ids = [r[0] for r in conn.execute("SELECT id FROM clips ORDER BY idx")]
+    for i, cid in enumerate(ids):
+        db.set_verdict(conn, cid, "keep")
+        conn.execute("UPDATE clips SET created_at = ? WHERE id = ?", ((T0 + datetime.timedelta(minutes=i)).isoformat(), cid))
+    return ids
+
+
+def test_claim_upload_posts_the_newest_kept_clips_at_the_paced_rate(conn):
+    a, b, skipped, unreviewed, c = kept_clips(conn, 5)
+    db.set_verdict(conn, skipped, "skip")
+    db.set_verdict(conn, unreviewed, None)
+    h = datetime.timedelta(hours=1)
+
+    def claim(at):
+        row = db.claim_upload(conn, "youtube", 2, 4 * h, now=T0 + at)
+        return row and row["id"]
+
+    assert claim(0 * h) == c
+    assert claim(1 * h) is None  # too soon after the last post, even while it's still uploading
+    assert claim(4 * h) == b
+    assert claim(8 * h) is None  # 2 posts in the last 24 hours already
+    assert claim(25 * h) == a
+    assert claim(50 * h) is None  # everything kept is posted
+    assert db.claim_upload(conn, "tiktok", 2, 4 * h, now=T0) is not None  # each platform has its own queue
+
+
+def test_failed_uploads_retry_after_a_wait_then_give_up(conn):
+    (cid,) = kept_clips(conn, 1)
+    t = T0
+    for _ in range(db.MAX_ATTEMPTS):
+        assert db.claim_upload(conn, "youtube", 3, datetime.timedelta(hours=4), now=t)
+        db.fail_upload(conn, cid, "youtube", "boom")
+        assert db.overview(conn)["clips"][0]["uploads"] == {}  # a failed upload isn't shown as posted
+        assert not db.claim_upload(conn, "youtube", 3, datetime.timedelta(hours=4), now=t + db.RETRY_AFTER / 2)
+        t += db.RETRY_AFTER * 2
+    assert not db.claim_upload(conn, "youtube", 3, datetime.timedelta(hours=4), now=t)  # out of attempts
+    assert db.set_upload(conn, cid, "youtube", "https://youtu.be/x")  # the user posted it by hand
+    assert db.overview(conn)["clips"][0]["uploads"]["youtube"]["url"] == "https://youtu.be/x"
+
+
+def test_an_upload_that_never_finished_is_reported(conn):
+    (cid,) = kept_clips(conn, 1)
+    assert db.claim_upload(conn, "youtube", 3, datetime.timedelta(hours=4), now=T0)
+    assert db.stuck_uploads(conn, "youtube", T0 - datetime.timedelta(hours=1)) == []  # still running
+    assert db.stuck_uploads(conn, "youtube", T0 + datetime.timedelta(hours=1)) == [cid]
+    db.set_upload(conn, cid, "youtube", "https://youtu.be/x")
+    assert db.stuck_uploads(conn, "youtube", T0 + datetime.timedelta(hours=1)) == []
+
+
+def test_the_users_edits_survive_a_rerender(conn):
+    db.record_manual(conn, "v1", "u")
+    db.save_clips(conn, "v1", [CLIP])
+    (cid,) = conn.execute("SELECT id FROM clips").fetchone()
+    assert db.set_text(conn, cid, "title", "my title") and not db.set_text(conn, cid + 1, "title", "x")
+    db.save_clips(conn, "v1", [{**CLIP, "title": "AI title", "youtube": "AI description", "score": 9.0}])
+    row = conn.execute("SELECT title, youtube, score FROM clips").fetchone()
+    assert tuple(row) == ("my title", "y", 9.0)  # all post text is the user's now; the rest still updates
+    with pytest.raises(ValueError):
+        db.set_text(conn, cid, "file", "../x")
+
+
+def test_editing_an_old_clip_keeps_the_caption_it_showed_as_description(conn):
+    db.record_manual(conn, "v1", "u")
+    db.save_clips(conn, "v1", [{**CLIP, "youtube": ""}])  # made before YouTube descriptions existed
+    (cid,) = conn.execute("SELECT id FROM clips").fetchone()
+    db.set_text(conn, cid, "title", "new")
+    assert tuple(conn.execute("SELECT title, youtube FROM clips").fetchone()) == ("new", "c")

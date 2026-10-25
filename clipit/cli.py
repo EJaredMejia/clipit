@@ -6,6 +6,8 @@ clipit --refresh-trends
 clipit --poll              (clip the latest VODs of big + smaller live streamers; run it on a timer)
 clipit --poll --dry-run    (only show which VODs it would clip)
 clipit --dashboard         (browse every VOD and clip, mark clips keep/skip and posted)
+clipit --youtube-login     (once: sign in to the YouTube channel to post to)
+clipit --poll --upload     (also post the newest clip you kept to YouTube Shorts, a few a day)
 """
 
 import argparse
@@ -16,7 +18,7 @@ import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from clipit import ai, dashboard, db, poll
+from clipit import ai, dashboard, db, poll, youtube
 from clipit.pipeline import process_vod
 from clipit.util import ROOT, ClipitError, log, logger
 
@@ -65,11 +67,18 @@ def main() -> None:
     ap.add_argument("--dry-run", action="store_true", help="--poll: only print which VODs would be clipped")
     ap.add_argument("--dashboard", action="store_true", help="open the local dashboard of every VOD and clip")
     ap.add_argument("--port", type=int, default=8765, help="--dashboard: port on 127.0.0.1 (default 8765)")
+    ap.add_argument("--youtube-login", action="store_true", help="sign in to the YouTube channel to post to (once)")
+    ap.add_argument(
+        "--upload",
+        action="store_true",
+        help=f"post the newest clip you marked Keep to YouTube Shorts, at most {youtube.PER_DAY} a day and "
+        f"{youtube.GAP.seconds // 3600} hours apart. Add it to the --poll timer",
+    )
     a = ap.parse_args()
     if isinstance(sys.stdout, io.TextIOWrapper):  # not when stdout was swapped (tests, some service wrappers)
         sys.stdout.reconfigure(errors="replace")  # emoji in stream titles crash cp1252 consoles
-    if not a.url and not a.refresh_trends and not a.poll and not a.dashboard:
-        ap.error("pass a VOD url (or --poll / --refresh-trends / --dashboard)")
+    if not any((a.url, a.refresh_trends, a.poll, a.dashboard, a.youtube_login, a.upload)):
+        ap.error("pass a VOD url (or --poll / --upload / --youtube-login / --refresh-trends / --dashboard)")
     if (a.url or a.poll) and not shutil.which("ffmpeg"):
         sys.exit("ffmpeg not found on PATH")
     setup_logging(a.out)
@@ -81,6 +90,15 @@ def main() -> None:
             log("researching current trends (web search)...")
             ai.refresh_trends(a.trends_ai)
             log(f"wrote {ai.TRENDS}")
+        if a.youtube_login:
+            youtube.login()
+        if a.upload and a.dry_run:
+            log("dry run: not posting to YouTube")
+        elif a.upload:
+            try:
+                youtube.upload_next(conn, a.out)
+            except Exception:  # logged, and retried on a later run: the rest of this run (polling) still happens
+                logger.exception("YouTube upload failed")
         if a.url:
             work, clips = process_vod(a.url, a.clips, a.ai, a.whisper, a.out)
             db.record_manual(conn, work.name, a.url)
