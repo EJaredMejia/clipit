@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from clipit import dashboard, db
+from clipit import dashboard, db, youtube
 
 CLIP = {"idx": 1, "file": "v1/clips/01_a.mp4", "start": 1.0, "end": 20.0, "title": "<img src=x onerror=alert(1)>",
         "hook": "h", "caption": "c", "youtube": "y", "streamer": "s", "trend": "", "sound": "", "score": 8.0, "why": ""}  # fmt: skip
@@ -168,3 +168,41 @@ def test_review_deck_decide_and_undo(tmp_path):
     assert got["undoFails"]["sent"] == ["keep", None] and got["undoFails"]["history"] == [1] and got["undoFails"]["queue"] == [2]
     # quick Keep then Undo: saved in that order, card back on top
     assert got["keepUndo"]["sent"] == ["keep", None] and got["keepUndo"]["history"] == [] and got["keepUndo"]["queue"] == [1, 2]
+
+
+def test_post_to_youtube_from_the_page(site, monkeypatch, tmp_path):
+    base, conn, (cid, outside) = site
+    monkeypatch.setattr(youtube, "TOKEN", tmp_path / "missing.json")
+    status, _, body = call(base + "/api/youtube", {"clip": cid})
+    assert status == 500 and b"youtube-login" in body  # the page tells the user how to fix it
+    sent = []
+    monkeypatch.setattr(youtube, "_credentials", lambda: "creds")
+    posted = {"id": "abc", "snippet": {"channelTitle": "ch"}, "status": {"privacyStatus": "public"}}
+    monkeypatch.setattr(youtube, "_upload", lambda creds, video, body: sent.append(video) or posted)
+    status, _, body = call(base + "/api/youtube", {"clip": cid})
+    assert status == 200 and json.loads(body) == {"url": "https://youtube.com/shorts/abc"}
+    assert db.overview(conn)["clips"][0]["uploads"]["youtube"]["status"] == "done"
+    assert call(base + "/api/youtube", {"clip": cid})[0] == 409  # never posted twice
+    assert call(base + "/api/youtube", {"clip": 999})[0] == 409
+    status, _, body = call(base + "/api/youtube", {"clip": outside})
+    assert status == 500 and b"outside" in body  # a db path pointing outside out/ is never sent
+    assert call(base + "/api/youtube", {"clip": outside}, Origin="https://evil.example")[0] == 403
+    assert [p.name for p in sent] == ["01_a.mp4"]
+
+
+def test_post_text_edits(site):
+    base, conn, (cid, _) = site
+    assert call(base + "/api/text", {"clip": cid, "field": "youtube", "text": "é" * 5000})[0] == 200  # a full description
+    assert call(base + "/api/text", {"clip": cid, "field": "title", "text": "New <title>"})[0] == 200
+    clip = db.overview(conn)["clips"][0]
+    assert clip["title"] == "New <title>" and clip["youtube"] == "é" * 5000
+    for bad in (
+        {"field": "title", "text": "   "},
+        {"field": "title", "text": "x" * 101},
+        {"field": "file", "text": "../secret.txt"},
+        {"field": "caption", "text": 5},
+    ):
+        assert call(base + "/api/text", {"clip": cid, **bad})[0] == 400
+    assert call(base + "/api/text", {"clip": 999, "field": "title", "text": "t"})[0] == 404
+    assert call(base + "/api/text", {"clip": cid, "field": "title", "text": "t"}, Origin="https://evil.example")[0] == 403
+    assert db.overview(conn)["clips"][0]["title"] == "New <title>"

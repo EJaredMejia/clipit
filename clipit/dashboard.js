@@ -17,6 +17,7 @@ const SORTS = {
 };
 const POLL_MS = 5000;
 const FETCH_MS = 15000; // every request has a deadline, so a stalled server shows an error instead of hanging
+const POST_MS = 15 * 60000; // posting to YouTube sends the whole video from this PC
 
 const $ = (id) => document.getElementById(id);
 let data = { vods: [], clips: [] };
@@ -190,7 +191,11 @@ function row(c) {
         view === "all" ? h("span", { class: `badge ${c.verdict || ""}` }, verdict || "New") : "", // other views imply it
         Object.entries(PLATFORMS)
           .filter(([p]) => c.uploads[p])
-          .map(([, name]) => h("span", { class: "badge posted" }, `✓ ${name}`)),
+          .map(([p, name]) =>
+            c.uploads[p].status === "uploading"
+              ? h("span", { class: "badge processing" }, `Uploading to ${name}`)
+              : h("span", { class: "badge posted" }, `✓ ${name}`),
+          ),
       ),
     ),
   );
@@ -237,11 +242,12 @@ function detail(c) {
     h("div", { class: "file" }, fileTools(c), h("span", { class: "path" }, c.file)),
     // one block per platform, in the order you post: copy the text, upload the file, mark it posted
     h("h3", {}, "TikTok"),
-    copy("Caption", c.caption),
+    editable(c, "caption", "Caption", c.caption, 2200, "tiktok"),
     upload(c, "tiktok", "TikTok"),
     h("h3", {}, "YouTube Shorts"),
-    copy("Title", c.title),
-    copy("Description", c.youtube || c.caption), // clips made before descriptions only have the caption
+    editable(c, "title", "Title", c.title, 100, "youtube"),
+    editable(c, "youtube", "Description", c.youtube || c.caption, 5000, "youtube"), // old clips only have the caption
+    postNow(c),
     upload(c, "youtube", "YouTube"),
     h(
       "div",
@@ -268,12 +274,25 @@ function detail(c) {
 
 function upload(c, platform, name) {
   const done = c.uploads[platform];
+  const undo = () =>
+    h("button", { type: "button", class: "ghost", onclick: () => save("/api/upload", { clip: c.id, platform, url: null }) }, "Undo");
+  if (done && done.status === "uploading") {
+    // an upload this old belongs to a run that died (youtube.STUCK): the user has to check whether it went up
+    const stuck = Date.now() - Date.parse(done.at) > 2 * 3600e3;
+    return h(
+      "div",
+      { class: "upload busy", role: "status" },
+      stuck
+        ? [h("span", {}, `The upload to ${name} that started ${when(done.at)} never finished. Check YouTube Studio: undo to post it again.`), undo()]
+        : h("span", {}, `Uploading to ${name}… started ${when(done.at)}. It keeps going if you leave this page, as long as the dashboard runs.`),
+    );
+  }
   if (done) {
     return h(
       "div",
       { class: "upload done" },
       h("span", {}, `Posted on ${name}, ${when(done.at)}`, done.url ? [". ", link(done.url, "Open the post")] : ""),
-      h("button", { type: "button", class: "ghost", onclick: () => save("/api/upload", { clip: c.id, platform, url: null }) }, "Undo"),
+      undo(),
     );
   }
   const key = `${c.id}:${platform}`;
@@ -319,20 +338,73 @@ function advanceFrom(id, order) {
   select([...order.slice(i + 1), ...order.slice(0, i).reverse()].find(inView) ?? null);
 }
 
-function copy(label, text) {
-  const button = h("button", { type: "button", class: "ghost" }, "Copy");
-  const pre = h("pre", {}, text || "–");
-  button.addEventListener("click", async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      button.textContent = "Copied";
-    } catch {
-      getSelection().selectAllChildren(pre); // clipboard blocked (some embedded browsers): select it for Ctrl+C
-      button.textContent = "Press Ctrl+C";
-    }
-    setTimeout(() => (button.textContent = "Copy"), 2000);
+// Post text the user can edit and copy. Saved edits are theirs: a re-render of the clip never overwrites them.
+function editable(c, field, label, text, max, platform) {
+  const key = `${c.id}:text:${field}`; // post-link drafts use "id:platform"
+  const box = h("textarea", { rows: field === "title" ? 2 : 5, maxlength: String(max), "aria-label": label });
+  box.value = drafts[key] ?? text;
+  const count = h("span", { class: "count" });
+  const saveButton = h("button", { type: "button", class: "ghost" }, "Save");
+  const copyButton = h("button", { type: "button", class: "ghost" }, "Copy");
+  const sync = () => {
+    count.textContent = `${box.value.length}/${max}`;
+    saveButton.disabled = box.value === text || (field === "title" && !box.value.trim());
+  };
+  sync();
+  box.addEventListener("input", () => {
+    drafts[key] = box.value; // survives the redraws polling makes until it's saved
+    sync();
   });
-  return h("div", { class: "copy" }, h("div", { class: "copy-head" }, h("span", { class: "label" }, label), button), pre);
+  saveButton.addEventListener("click", async () => {
+    saveButton.disabled = true;
+    if (await save("/api/text", { clip: c.id, field, text: box.value })) delete drafts[key];
+    else sync();
+  });
+  copyButton.addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText(box.value);
+      copyButton.textContent = "Copied";
+    } catch {
+      box.select(); // clipboard blocked (some embedded browsers): select it for Ctrl+C
+      copyButton.textContent = "Press Ctrl+C";
+    }
+    setTimeout(() => (copyButton.textContent = "Copy"), 2000);
+  });
+  const live = c.uploads[platform] && c.uploads[platform].status === "done";
+  return h(
+    "div",
+    { class: "copy" },
+    h("div", { class: "copy-head" }, h("span", { class: "label" }, label), count, saveButton, copyButton),
+    box,
+    live ? h("p", { class: "hint" }, `Already posted: saving here doesn't change the ${PLATFORMS[platform]} post.`) : "",
+  );
+}
+
+// Posts the clip to the channel clipit --youtube-login signed in to, through the server (the code --upload runs).
+function postNow(c) {
+  if (c.uploads.youtube) return "";
+  const button = h("button", { type: "button", class: "primary" }, "Post to YouTube now");
+  button.addEventListener("click", async () => {
+    if (!confirm("Post this clip publicly on your YouTube channel now?")) return;
+    button.disabled = true;
+    button.textContent = "Posting…";
+    setTimeout(load, 1000); // show the uploading state now, not at the next poll
+    try {
+      const r = await fetch("/api/youtube", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clip: c.id }),
+        signal: AbortSignal.timeout(POST_MS),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || `HTTP ${r.status}`);
+    } catch (e) {
+      alert(`Couldn't post to YouTube: ${e.message}`); // stays up until read: a status line would be cleared by the next poll
+      button.disabled = false;
+      button.textContent = "Post to YouTube now";
+    }
+    await load();
+  });
+  return h("div", { class: "group" }, button);
 }
 
 // Asks the server to open Explorer on the PC running clipit with the file selected, ready to drag into an upload page.

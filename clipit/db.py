@@ -85,7 +85,19 @@ MIGRATIONS = [
         PRIMARY KEY (clip_id, platform)
     );
     """,
+    # Automatic uploads: a row is claimed as 'uploading' before the video is sent, so a clip is never posted twice.
+    # Rows marked by hand in the dashboard are 'done'.
+    """
+    ALTER TABLE uploads ADD COLUMN status TEXT NOT NULL DEFAULT 'done' CHECK (status IN ('uploading', 'done', 'failed'));
+    ALTER TABLE uploads ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+    ALTER TABLE uploads ADD COLUMN error TEXT;
+    """,
+    # The user edited the post text in the dashboard: a re-render or re-pick must not overwrite it.
+    """
+    ALTER TABLE clips ADD COLUMN edited INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
+TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")
 
 STALE_CLAIM = datetime.timedelta(minutes=30)  # a 'processing' row not refreshed for this long was a crashed run
@@ -208,7 +220,8 @@ def save_clips(conn: sqlite3.Connection, vod_id: str, clips: list[dict]) -> None
                    VALUES (:vod_id, :idx, :file, :start, :end, :title, :hook, :caption, :youtube, :streamer, :trend, :sound,
                            :score, :why, :now)
                    ON CONFLICT (vod_id, start_s, end_s) DO UPDATE SET idx = excluded.idx, file = excluded.file,
-                       title = excluded.title, hook = excluded.hook, caption = excluded.caption, youtube = excluded.youtube,
+                       title = IIF(edited, title, excluded.title), hook = excluded.hook,
+                       caption = IIF(edited, caption, excluded.caption), youtube = IIF(edited, youtube, excluded.youtube),
                        streamer = excluded.streamer, trend = excluded.trend, sound = excluded.sound, score = excluded.score,
                        why = excluded.why""",
                 {**c, "vod_id": vod_id, "now": now},
@@ -222,8 +235,8 @@ def save_clips(conn: sqlite3.Connection, vod_id: str, clips: list[dict]) -> None
 def overview(conn: sqlite3.Connection) -> dict:
     """Every VOD and every clip with where it was posted, newest first: what the dashboard shows."""
     uploads: dict[int, dict] = {}
-    for r in conn.execute("SELECT clip_id, platform, url, uploaded_at FROM uploads"):
-        uploads.setdefault(r["clip_id"], {})[r["platform"]] = {"url": r["url"], "at": r["uploaded_at"]}
+    for r in conn.execute("SELECT clip_id, platform, url, uploaded_at, status FROM uploads WHERE status != 'failed'"):
+        uploads.setdefault(r["clip_id"], {})[r["platform"]] = {"url": r["url"], "at": r["uploaded_at"], "status": r["status"]}
     clips = conn.execute(
         """SELECT c.id, c.vod_id, c.idx, c.file, c.start_s, c.end_s, c.title, c.hook, c.caption, c.youtube, c.trend, c.sound,
                   c.score, c.why, c.verdict, c.created_at, v.url AS vod_url,
@@ -252,6 +265,13 @@ def set_verdict(conn: sqlite3.Connection, clip_id: int, verdict: str | None) -> 
     return conn.execute("UPDATE clips SET verdict = ? WHERE id = ?", (verdict, clip_id)).rowcount == 1
 
 
+def set_text(conn: sqlite3.Connection, clip_id: int, field: str, text: str) -> bool:
+    """The user's own title / YouTube description / TikTok caption, kept from then on. False when there's no such clip."""
+    if field not in TEXT_FIELDS:
+        raise ValueError(f"not an editable field: {field}")
+    return conn.execute(f"UPDATE clips SET {field} = ?, edited = 1 WHERE id = ?", (text, clip_id)).rowcount == 1  # noqa: S608 (field is checked above)
+
+
 def set_upload(conn: sqlite3.Connection, clip_id: int, platform: str, url: str | None) -> bool:
     """Record the clip as posted on platform (url: the post, '' when unknown); url None un-marks it.
     False when there's no such clip."""
@@ -261,12 +281,91 @@ def set_upload(conn: sqlite3.Connection, clip_id: int, platform: str, url: str |
     try:
         conn.execute(
             """INSERT INTO uploads (clip_id, platform, url, uploaded_at) VALUES (?, ?, ?, ?)
-               ON CONFLICT (clip_id, platform) DO UPDATE SET url = excluded.url""",
+               ON CONFLICT (clip_id, platform) DO UPDATE SET url = excluded.url, status = 'done', error = NULL,
+                   uploaded_at = CASE WHEN status = 'done' THEN uploaded_at ELSE excluded.uploaded_at END""",
             (clip_id, platform, url, utcnow().isoformat()),
         )
     except sqlite3.IntegrityError:  # the clip doesn't exist (the platform is checked by the caller and the schema)
         return False
     return True
+
+
+def claim_upload(conn: sqlite3.Connection, platform: str, per_day: int, gap: datetime.timedelta, now=None) -> sqlite3.Row | None:
+    """Atomically take the newest clip the user kept that isn't on platform yet, if the pacing allows: at most per_day
+    posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
+    The upload then ends with set_upload (posted) or fail_upload (retried later, up to MAX_ATTEMPTS)."""
+    now = now or utcnow()
+    conn.execute("BEGIN IMMEDIATE")  # two overlapping runs must not both post, nor both see room in the pacing
+    try:
+        n, last = conn.execute(
+            "SELECT count(*), max(uploaded_at) FROM uploads WHERE platform = ? AND status != 'failed' AND uploaded_at >= ?",
+            (platform, (now - datetime.timedelta(days=1)).isoformat()),
+        ).fetchone()
+        clip = None
+        if n < per_day and (last is None or now - _ts(last) >= gap):
+            clip = conn.execute(
+                """SELECT c.id, c.file, c.title, c.youtube, c.caption FROM clips c
+                   LEFT JOIN uploads u ON u.clip_id = c.id AND u.platform = ?
+                   WHERE c.verdict = 'keep'
+                     AND (u.clip_id IS NULL OR (u.status = 'failed' AND u.attempts < ? AND u.uploaded_at < ?))
+                   ORDER BY c.created_at DESC, c.idx LIMIT 1""",
+                (platform, MAX_ATTEMPTS, (now - RETRY_AFTER).isoformat()),
+            ).fetchone()
+        if clip:
+            _take_upload(conn, clip["id"], platform, now)
+        conn.execute("COMMIT")
+        return clip
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def claim_clip_upload(conn: sqlite3.Connection, clip_id: int, platform: str, now=None) -> sqlite3.Row | None:
+    """Atomically take one clip for upload because the user asked for it: kept or not, whatever the pacing.
+    None when there's no such clip, or it's posted or being posted already."""
+    now = now or utcnow()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        clip = conn.execute(
+            """SELECT c.id, c.file, c.title, c.youtube, c.caption FROM clips c
+               LEFT JOIN uploads u ON u.clip_id = c.id AND u.platform = ?
+               WHERE c.id = ? AND (u.clip_id IS NULL OR u.status = 'failed')""",
+            (platform, clip_id),
+        ).fetchone()
+        if clip:
+            _take_upload(conn, clip_id, platform, now)
+        conn.execute("COMMIT")
+        return clip
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def _take_upload(conn: sqlite3.Connection, clip_id: int, platform: str, now: datetime.datetime) -> None:
+    conn.execute(
+        """INSERT INTO uploads (clip_id, platform, uploaded_at, status, attempts) VALUES (?, ?, ?, 'uploading', 1)
+           ON CONFLICT (clip_id, platform) DO UPDATE SET status = 'uploading', attempts = attempts + 1, error = NULL,
+               uploaded_at = excluded.uploaded_at""",
+        (clip_id, platform, now.isoformat()),
+    )
+
+
+def fail_upload(conn: sqlite3.Connection, clip_id: int, platform: str, error: str) -> None:
+    conn.execute(
+        "UPDATE uploads SET status = 'failed', error = ? WHERE clip_id = ? AND platform = ? AND status = 'uploading'",
+        (error, clip_id, platform),
+    )
+
+
+def stuck_uploads(conn: sqlite3.Connection, platform: str, before: datetime.datetime) -> list[int]:
+    """Clips claimed for upload before `before` that never finished: the run died mid-upload, so the post may exist."""
+    return [
+        r[0]
+        for r in conn.execute(
+            "SELECT clip_id FROM uploads WHERE platform = ? AND status = 'uploading' AND uploaded_at < ?",
+            (platform, before.isoformat()),
+        )
+    ]
 
 
 def small_done_since(conn: sqlite3.Connection, since: datetime.datetime) -> int:

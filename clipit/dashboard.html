@@ -172,6 +172,13 @@
   .upload.done { padding: 0.55rem 0.75rem; border-radius: 8px; background: var(--keep-bg); color: var(--keep); font-weight: 600; }
   .upload.done a { color: inherit; }
   .upload.done .ghost { margin-left: auto; padding: 0.2rem 0.6rem; font-size: 0.8rem; }
+  .upload.busy { padding: 0.55rem 0.75rem; border-radius: 8px; background: var(--warn-bg); color: var(--warn); font-weight: 600; }
+  .upload.busy .ghost { margin-left: auto; padding: 0.2rem 0.6rem; font-size: 0.8rem; }
+  textarea { display: block; width: 100%; box-sizing: border-box; resize: vertical; padding: 0.6rem 0.75rem;
+             font: 0.875rem/1.5 var(--body); color: inherit; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+  .copy-head .count { margin-left: auto; margin-right: 0.5rem; color: var(--muted); font-size: 0.8rem; }
+  .copy-head .ghost + .ghost { margin-left: 0.35rem; }
+  .hint { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.8rem; }
   .verdict { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid var(--line); }
   .verdict .label { margin-right: auto; color: var(--muted); }
   .toggle.keep[aria-pressed=true] { background: var(--keep-bg); color: var(--keep); border-color: currentColor; }

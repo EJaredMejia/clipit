@@ -1,7 +1,9 @@
 """The local dashboard: every VOD and clip, playable, with your keep/skip call and where each clip was posted.
 
-A standard-library HTTP server on 127.0.0.1. The page polls /api/data and saves through /api/verdict and /api/upload;
-every database read and write goes through clipit.db. /api/reveal opens a clip's folder in the file manager.
+A standard-library HTTP server on 127.0.0.1. The page polls /api/data and saves through /api/verdict, /api/upload and
+/api/text (the user's edits to the post text);
+every database read and write goes through clipit.db. /api/reveal opens a clip's folder in the file manager, and
+/api/youtube posts a clip to YouTube Shorts right away (clipit.youtube, the same code --upload runs).
 
 Security: other websites open in the same browser can send requests to localhost. So every request must carry our own
 Host (stops DNS rebinding), and writes must be JSON from our own Origin (a cross-site JSON POST needs a CORS
@@ -20,13 +22,13 @@ import sys
 import webbrowser
 from pathlib import Path
 
-from clipit import db
+from clipit import db, youtube
 from clipit.util import ClipitError, log, logger
 
 STATIC = {"/": ("dashboard.html", "text/html"), "/app.js": ("dashboard.js", "text/javascript")}
 CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
 CHUNK = 1 << 20  # video bytes per range response: short responses keep a paused player from holding a thread open
-MAX_BODY = 4096
+MAX_BODY = 32768  # a 5,000-character description, in UTF-8 and JSON escaped
 MAX_URL = 500
 REVEAL_TIMEOUT = 15
 
@@ -94,6 +96,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/upload" and req.get("platform") in db.PLATFORMS and valid_url(req.get("url")):
             with self.conn() as conn:
                 found = db.set_upload(conn, clip, req["platform"], req.get("url"))
+        elif self.path == "/api/text" and valid_text(req.get("field"), req.get("text")):
+            with self.conn() as conn:
+                found = db.set_text(conn, clip, req["field"], req["text"])
         elif self.path == "/api/reveal":
             if not (path := self.clip_path(clip)):
                 return self.send(404, b'{"error": "no video"}')
@@ -103,6 +108,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 logger.warning("couldn't open the folder of %s: %s", path, e)
                 return self.send(500, b'{"error": "could not open the folder"}')
             found = True
+        elif self.path == "/api/youtube":
+            try:
+                with self.conn() as conn:
+                    url = youtube.upload_clip(conn, clip, self.out)
+            except Exception as e:  # the page shows the message; the traceback goes to the log
+                logger.exception("posting clip %d to YouTube failed", clip)
+                return self.send(500, json.dumps({"error": str(e)[:500]}).encode())
+            if not url:
+                return self.send(409, b'{"error": "this clip is already posted to YouTube, or being posted"}')
+            return self.send(200, json.dumps({"url": url}).encode())
         else:
             return self.send(400, b'{"error": "bad request"}')
         self.send(200 if found else 404, b'{"ok": true}' if found else b'{"error": "no such clip"}')
@@ -192,6 +207,17 @@ def reveal(path: Path) -> None:
         cmd = ["xdg-open", str(path.parent)]  # no portable "select this file" on Linux: open its folder
     # explorer exits 1 even when it worked, so only its exit code is ignored; open / xdg-open failures are errors
     subprocess.run(cmd, timeout=REVEAL_TIMEOUT, check=sys.platform != "win32")
+
+
+def valid_text(field: object, text: object) -> bool:
+    """Post text the user typed: an editable field, within the platform's limit; a title can't be empty."""
+    return (
+        isinstance(field, str)
+        and field in db.TEXT_FIELDS
+        and isinstance(text, str)
+        and len(text) <= db.TEXT_FIELDS[field]
+        and (field != "title" or bool(text.strip()))
+    )
 
 
 def valid_url(url: object) -> bool:

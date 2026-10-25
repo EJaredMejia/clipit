@@ -14,6 +14,7 @@ a local model through Ollama, or any other AI CLI.
 - **Facecam layout.** Finds the streamer's webcam overlay and stacks it above the gameplay.
 - **Light on bandwidth.** Downloads only the audio to find moments (about 360 MB for 4 hours instead of 12 GB of video), then only the seconds of video it renders.
 - **Dashboard.** Watch every clip in your browser, mark it keep or skip, record where you posted it, and see which VODs failed and why.
+- **Post to YouTube Shorts.** The clips you keep go up on your channel through YouTube's official API, a few a day.
 
 ## Requirements
 
@@ -100,6 +101,34 @@ runs in the background.
 
 It only listens on your own machine (127.0.0.1) and refuses requests from other websites.
 
+### Post to YouTube Shorts
+
+Clipit posts the clips you marked **Keep** in the dashboard to your channel, through YouTube's official API: newest
+first, public, at most 3 a day and at least 4 hours apart. Clips you skipped or haven't reviewed are never posted.
+
+Set up once (free, about 15 minutes):
+
+1. In the [Google Cloud console](https://console.cloud.google.com), create a project and enable **YouTube Data API v3**.
+2. In **Google Auth Platform**, set up the consent screen as **External**, add the scope
+   `https://www.googleapis.com/auth/youtube.upload` and add your Google account as a test user.
+3. Click **Publish app** so it says **In production**. While it's in Testing, Google ends the login every 7 days and
+   posting stops. You don't need Google's verification to use it yourself: click through the "Google hasn't verified
+   this app" warning when you sign in.
+4. In **Clients**, create a **Desktop app** client, download its JSON and save it as `~/.clipit/youtube_client.json`
+   (Windows: `C:\Users\<you>\.clipit\youtube_client.json`).
+5. Run `clipit --youtube-login` and pick the channel to post to. The login is saved in `~/.clipit/youtube_token.json`.
+   Keep both files private: anyone with them can post to your channel.
+
+To post one clip right away, open it in the dashboard and click **Post to YouTube now**. That post counts toward the
+pace of the automatic ones.
+
+Then add `--upload` to the timer: `clipit --poll --upload`. Each run posts at most one clip, and only when one is due.
+Posted clips show in the dashboard with their link. A failed upload is retried on a later run, up to 3 times at least
+an hour apart, and the error is in `out/logs/clipit.log`.
+
+To keep the channel safe, don't raise the pace, don't post the same clip on several channels, and only post clips you
+have the rights to: three copyright strikes delete a channel.
+
 ### Options
 
 | Option | Default | Description |
@@ -118,6 +147,8 @@ It only listens on your own machine (127.0.0.1) and refuses requests from other 
 | `--dry-run` | | With `--poll`: only print which VODs would be clipped. |
 | `--dashboard` | | Open the dashboard in your browser. |
 | `--port N` | `8765` | With `--dashboard`: the port on 127.0.0.1. |
+| `--youtube-login` | | Sign in to the YouTube channel to post to. Once. |
+| `--upload` | | Post the newest clip you kept to YouTube Shorts, if one is due. |
 
 ## Output
 
@@ -151,12 +182,13 @@ Every step is cached in `out/<vod-id>/`, so reruns are fast. Delete `picks.json`
 - Only post clips you have the rights to, or from streamers who allow clipping. Parts of Twitch VODs muted for DMCA stay silent in the clips.
 - Webcam layouts are found from 40 frames across the VOD, so a layout used for under ~1/8 of the stream may be missed; clips from it get the blurred layout. A full-screen camera scene also gets the blurred layout.
 - Gameplay is center-cropped, so text at the screen edges gets cut.
-- Uploading is manual for now: mark clips posted in the dashboard. Add the trending sound inside TikTok, since burning music in gets clips muted.
+- Posting to TikTok is manual for now: mark clips posted in the dashboard. Add the trending sound inside TikTok, since burning music in gets clips muted.
 
 ## Roadmap
 
 - [ ] Publish to TikTok, on one or more accounts
-- [ ] Publish to YouTube Shorts, on one or more channels
+- [x] Publish to YouTube Shorts
+- [ ] Publish to more than one YouTube channel
 
 The publish commands will read the clips to post from the `clips` table in `out/clipit.db` and record each post in `uploads`.
 

@@ -12,6 +12,8 @@ dependencies = [
     "faster-whisper>=1.2",
     "numpy>=2",
     "opencv-python-headless>=4.8,<5",  # 5.x dropped the bundled Haar face detector
+    "google-api-python-client>=2",     # YouTube uploads through the official API (resumable, retried)
+    "google-auth-oauthlib>=1",         # the one-time browser sign-in for YouTube
 ]
 
 [project.optional-dependencies]
