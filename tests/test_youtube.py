@@ -62,3 +62,45 @@ def test_without_a_login_nothing_is_claimed(conn, tmp_path, monkeypatch):
     with pytest.raises(ClipitError, match="youtube-login"):
         youtube.upload_next(conn, tmp_path)
     assert conn.execute("SELECT count(*) FROM uploads").fetchone()[0] == 0
+
+
+def test_an_upload_that_may_be_up_is_never_retried_on_its_own(conn, tmp_path, monkeypatch):
+    def broke_off(*_):
+        raise youtube.MaybePosted("connection reset")
+
+    monkeypatch.setattr(youtube, "_upload", broke_off)
+    with pytest.raises(youtube.MaybePosted):
+        youtube.upload_next(conn, tmp_path)
+    assert tuple(conn.execute("SELECT status, attempts FROM uploads").fetchone()) == ("failed", db.MAX_ATTEMPTS)
+    monkeypatch.setattr(youtube, "_upload", lambda *_: VIDEO)
+    assert youtube.upload_next(conn, tmp_path) is None  # not even after the retry wait
+    (cid,) = conn.execute("SELECT id FROM clips").fetchone()
+    assert youtube.upload_clip(conn, cid, tmp_path)  # the user can still post it by hand, after checking
+
+
+def test_a_description_the_user_emptied_stays_empty(conn, tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr(youtube, "_upload", lambda creds, video, body: sent.append(body) or VIDEO)
+    (cid,) = conn.execute("SELECT id FROM clips").fetchone()
+    db.set_text(conn, cid, "youtube", "")
+    youtube.upload_next(conn, tmp_path)
+    assert sent[0]["snippet"]["description"] == ""
+
+
+def test_only_an_upload_that_started_sending_counts_as_maybe_posted(monkeypatch, tmp_path):
+    class Request:
+        resumable_uri: str | None = None
+
+        def execute(self, num_retries):
+            raise OSError("connection reset")
+
+    request = Request()
+    api = type("Api", (), {"videos": lambda self: self, "insert": lambda self, **kw: request})()
+    monkeypatch.setattr(youtube, "build", lambda *a, **k: api)
+    monkeypatch.setattr(youtube, "MediaFileUpload", lambda *a, **k: None)
+    with pytest.raises(OSError) as e:  # failed before YouTube opened an upload session: nothing went up
+        youtube._upload(youtube.Credentials(token=None), tmp_path / "v.mp4", {})
+    assert not isinstance(e.value, youtube.MaybePosted)
+    request.resumable_uri = "https://www.googleapis.com/upload/youtube/v3/videos?upload_id=x"
+    with pytest.raises(youtube.MaybePosted):
+        youtube._upload(youtube.Credentials(token=None), tmp_path / "v.mp4", {})

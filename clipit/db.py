@@ -239,7 +239,7 @@ def overview(conn: sqlite3.Connection) -> dict:
         uploads.setdefault(r["clip_id"], {})[r["platform"]] = {"url": r["url"], "at": r["uploaded_at"], "status": r["status"]}
     clips = conn.execute(
         """SELECT c.id, c.vod_id, c.idx, c.file, c.start_s, c.end_s, c.title, c.hook, c.caption, c.youtube, c.trend, c.sound,
-                  c.score, c.why, c.verdict, c.created_at, v.url AS vod_url,
+                  c.score, c.why, c.verdict, c.edited, c.created_at, v.url AS vod_url,
                   COALESCE(NULLIF(c.streamer, ''), v.login, '') AS streamer
            FROM clips c JOIN vods v ON v.id = c.vod_id ORDER BY c.created_at DESC, c.idx"""
     )
@@ -269,7 +269,9 @@ def set_text(conn: sqlite3.Connection, clip_id: int, field: str, text: str) -> b
     """The user's own title / YouTube description / TikTok caption, kept from then on. False when there's no such clip."""
     if field not in TEXT_FIELDS:
         raise ValueError(f"not an editable field: {field}")
-    return conn.execute(f"UPDATE clips SET {field} = ?, edited = 1 WHERE id = ?", (text, clip_id)).rowcount == 1  # noqa: S608 (field is checked above)
+    # an old clip's empty description meant "use the caption": keep showing that, since an edited clip's text is taken as is
+    sql = f"UPDATE clips SET youtube = IIF(youtube = '', caption, youtube), {field} = ?, edited = 1 WHERE id = ?"  # noqa: S608 (field is checked above)
+    return conn.execute(sql, (text, clip_id)).rowcount == 1
 
 
 def set_upload(conn: sqlite3.Connection, clip_id: int, platform: str, url: str | None) -> bool:
@@ -290,7 +292,9 @@ def set_upload(conn: sqlite3.Connection, clip_id: int, platform: str, url: str |
     return True
 
 
-def claim_upload(conn: sqlite3.Connection, platform: str, per_day: int, gap: datetime.timedelta, now=None) -> sqlite3.Row | None:
+def claim_upload(
+    conn: sqlite3.Connection, platform: str, per_day: int, gap: datetime.timedelta, now: datetime.datetime | None = None
+) -> sqlite3.Row | None:
     """Atomically take the newest clip the user kept that isn't on platform yet, if the pacing allows: at most per_day
     posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
     The upload then ends with set_upload (posted) or fail_upload (retried later, up to MAX_ATTEMPTS)."""
@@ -304,7 +308,7 @@ def claim_upload(conn: sqlite3.Connection, platform: str, per_day: int, gap: dat
         clip = None
         if n < per_day and (last is None or now - _ts(last) >= gap):
             clip = conn.execute(
-                """SELECT c.id, c.file, c.title, c.youtube, c.caption FROM clips c
+                """SELECT c.id, c.file, c.title, c.youtube, c.caption, c.edited FROM clips c
                    LEFT JOIN uploads u ON u.clip_id = c.id AND u.platform = ?
                    WHERE c.verdict = 'keep'
                      AND (u.clip_id IS NULL OR (u.status = 'failed' AND u.attempts < ? AND u.uploaded_at < ?))
@@ -320,14 +324,16 @@ def claim_upload(conn: sqlite3.Connection, platform: str, per_day: int, gap: dat
         raise
 
 
-def claim_clip_upload(conn: sqlite3.Connection, clip_id: int, platform: str, now=None) -> sqlite3.Row | None:
+def claim_clip_upload(
+    conn: sqlite3.Connection, clip_id: int, platform: str, now: datetime.datetime | None = None
+) -> sqlite3.Row | None:
     """Atomically take one clip for upload because the user asked for it: kept or not, whatever the pacing.
     None when there's no such clip, or it's posted or being posted already."""
     now = now or utcnow()
     conn.execute("BEGIN IMMEDIATE")
     try:
         clip = conn.execute(
-            """SELECT c.id, c.file, c.title, c.youtube, c.caption FROM clips c
+            """SELECT c.id, c.file, c.title, c.youtube, c.caption, c.edited FROM clips c
                LEFT JOIN uploads u ON u.clip_id = c.id AND u.platform = ?
                WHERE c.id = ? AND (u.clip_id IS NULL OR u.status = 'failed')""",
             (platform, clip_id),
@@ -350,10 +356,12 @@ def _take_upload(conn: sqlite3.Connection, clip_id: int, platform: str, now: dat
     )
 
 
-def fail_upload(conn: sqlite3.Connection, clip_id: int, platform: str, error: str) -> None:
+def fail_upload(conn: sqlite3.Connection, clip_id: int, platform: str, error: str, retry: bool = True) -> None:
+    """retry False: never claimed automatically again (the post may exist); the user can still post it by hand."""
     conn.execute(
-        "UPDATE uploads SET status = 'failed', error = ? WHERE clip_id = ? AND platform = ? AND status = 'uploading'",
-        (error, clip_id, platform),
+        """UPDATE uploads SET status = 'failed', error = ?, attempts = IIF(?, attempts, MAX(attempts, ?))
+           WHERE clip_id = ? AND platform = ? AND status = 'uploading'""",
+        (error, retry, MAX_ATTEMPTS, clip_id, platform),
     )
 
 

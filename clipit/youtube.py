@@ -40,8 +40,10 @@ def login() -> None:
     creds = flow.run_local_server(port=0, timeout_seconds=600, prompt="consent")
     if not creds.refresh_token:
         raise ClipitError("Google returned no refresh token: run clipit --youtube-login again")
-    HOME.mkdir(mode=0o700, exist_ok=True)
+    HOME.mkdir(exist_ok=True)
+    HOME.chmod(0o700)  # owner only, also when the user made the folder: the token (and its temp file) live inside it
     write_atomic(TOKEN, creds.to_json())
+    TOKEN.chmod(0o600)  # on Windows both only toggle read-only; the folder sits in the user's own profile there
     log(f"logged in to YouTube, token saved in {TOKEN}")
 
 
@@ -54,7 +56,8 @@ def metadata(clip: sqlite3.Row) -> dict:
     return {
         "snippet": {
             "title": " ".join(text(clip["title"]).split())[:100] or "Stream clip",
-            "description": text(clip["youtube"] or clip["caption"]),  # clips made before descriptions only have the caption
+            # clips made before descriptions only have the caption; once the user edits, an empty one is their choice
+            "description": text(clip["youtube"] if clip["edited"] else clip["youtube"] or clip["caption"]),
             "categoryId": "20",  # Gaming
         },
         "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False},
@@ -91,8 +94,8 @@ def _post(conn: sqlite3.Connection, creds: Credentials, clip: sqlite3.Row, out: 
         if not video_file.is_relative_to(out.resolve()):  # never send a local file that isn't one of our clips
             raise ClipitError(f"clip file {clip['file']} is outside {out}")
         video = _upload(creds, video_file, metadata(clip))
-    except Exception as e:  # recorded so it's retried on a later run, up to db.MAX_ATTEMPTS
-        db.fail_upload(conn, clip["id"], "youtube", f"{type(e).__name__}: {e}"[:1000])
+    except Exception as e:  # retried on a later run (up to db.MAX_ATTEMPTS), unless the video may already be up
+        db.fail_upload(conn, clip["id"], "youtube", f"{type(e).__name__}: {e}"[:1000], retry=not isinstance(e, MaybePosted))
         raise
     url = f"https://youtube.com/shorts/{video['id']}"
     db.set_upload(conn, clip["id"], "youtube", url)
@@ -116,9 +119,19 @@ def _credentials() -> Credentials:
     return creds
 
 
+class MaybePosted(ClipitError):
+    """The upload broke off after the video started going up: YouTube may have it, so it's never retried on its own."""
+
+
 def _upload(creds: Credentials, video: Path, body: dict) -> dict:
     # build() makes its own HTTP client with a 60 s socket timeout, and reads the API description bundled with the library
     youtube = build("youtube", "v3", credentials=creds)
     media = MediaFileUpload(str(video), mimetype="video/mp4", resumable=True)
-    # retries resume the same upload session, so a retry never posts the video twice
-    return youtube.videos().insert(part="snippet,status", body=body, media_body=media).execute(num_retries=3)
+    request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
+    try:
+        # retries resume the same upload session, so a retry inside this call never posts the video twice
+        return request.execute(num_retries=3)
+    except Exception as e:
+        if request.resumable_uri:  # the session was open: the video may be up even though no answer came back
+            raise MaybePosted(f"the upload broke off, so it may be on YouTube: check YouTube Studio ({e})") from e
+        raise

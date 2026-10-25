@@ -45,6 +45,8 @@ function h(tag, attrs = {}, ...kids) {
 }
 
 const posted = (c) => Object.keys(c.uploads).length;
+// clips made before descriptions only have the caption; once the user edits, an empty description is their choice
+const description = (c) => (c.edited ? c.youtube : c.youtube || c.caption);
 const safeUrl = (u) => (/^https?:\/\/\S+$/i.test(u || "") ? u : null);
 const link = (href, text) => (safeUrl(href) ? h("a", { href, target: "_blank", rel: "noopener noreferrer" }, text) : text);
 const when = (iso) => (iso ? new Date(iso).toLocaleString([], { dateStyle: "medium", timeStyle: "short" }) : "–");
@@ -246,7 +248,7 @@ function detail(c) {
     upload(c, "tiktok", "TikTok"),
     h("h3", {}, "YouTube Shorts"),
     editable(c, "title", "Title", c.title, 100, "youtube"),
-    editable(c, "youtube", "Description", c.youtube || c.caption, 5000, "youtube"), // old clips only have the caption
+    editable(c, "youtube", "Description", description(c), 5000, "youtube"),
     postNow(c),
     upload(c, "youtube", "YouTube"),
     h(
@@ -385,6 +387,11 @@ function postNow(c) {
   if (c.uploads.youtube) return "";
   const button = h("button", { type: "button", class: "primary" }, "Post to YouTube now");
   button.addEventListener("click", async () => {
+    const saved = { title: c.title, youtube: description(c) };
+    if (Object.entries(saved).some(([f, text]) => (drafts[`${c.id}:text:${f}`] ?? text) !== text)) {
+      alert("Save your title and description changes first: the post uses the saved text.");
+      return;
+    }
     if (!confirm("Post this clip publicly on your YouTube channel now?")) return;
     button.disabled = true;
     button.textContent = "Posting…";

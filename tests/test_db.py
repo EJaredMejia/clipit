@@ -231,3 +231,11 @@ def test_the_users_edits_survive_a_rerender(conn):
     assert tuple(row) == ("my title", "y", 9.0)  # all post text is the user's now; the rest still updates
     with pytest.raises(ValueError):
         db.set_text(conn, cid, "file", "../x")
+
+
+def test_editing_an_old_clip_keeps_the_caption_it_showed_as_description(conn):
+    db.record_manual(conn, "v1", "u")
+    db.save_clips(conn, "v1", [{**CLIP, "youtube": ""}])  # made before YouTube descriptions existed
+    (cid,) = conn.execute("SELECT id FROM clips").fetchone()
+    db.set_text(conn, cid, "title", "new")
+    assert tuple(conn.execute("SELECT title, youtube FROM clips").fetchone()) == ("new", "c")
