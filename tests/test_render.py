@@ -52,6 +52,25 @@ def test_other_streamers_do_not_get_the_faze_hashtag():
         assert "#stableronaldo" not in text
 
 
+@pytest.mark.parametrize("streamer", ["kaicenat", "KaiCenat"])
+@pytest.mark.parametrize("hashtags", [[], ["gaming"], ["AMP", "rakai", "amp", "RaKai", "gaming"]])
+@pytest.mark.parametrize("description", ["A wild moment.", "A wild #AMP #rakai moment."])
+def test_kaicenat_descriptions_always_include_amp_and_rakai_once(streamer, hashtags, description):
+    for text in render.post_texts({"description": description, "streamer": streamer, "hashtags": hashtags}):
+        assert text.split().count("#amp") == 1
+        assert text.split().count("#RaKai") == 1
+        assert text.lower().split().count("#amp") == 1
+        assert text.lower().split().count("#rakai") == 1
+        assert f"Credit: twitch.tv/{streamer}" in text
+
+
+@pytest.mark.parametrize("streamer", ["caseoh_", "lacy", "", "kaicenatfan"])
+def test_other_streamers_do_not_get_kaicenat_hashtags(streamer):
+    for text in render.post_texts({"description": "wow", "streamer": streamer, "hashtags": ["gaming"]}):
+        assert "#amp" not in text.lower()
+        assert "#rakai" not in text.lower()
+
+
 def test_helpers():
     assert util.mmss(3725) == "1:02:05"
     assert util.slug("He RAGE quit!!") == "he-rage-quit"

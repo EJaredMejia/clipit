@@ -148,6 +148,10 @@ def post_texts(clip: dict) -> tuple[str, str]:
     login = clip["streamer"]
     tags = ([login] if login else []) + [t for t in clip.get("hashtags", []) if t.lower() != login.lower()]
     description = clip["description"]
+    if login.lower() == "kaicenat":
+        tags = [t for t in tags if t.lower() not in {"amp", "rakai"}]
+        tags.extend(["amp", "RaKai"])
+        description = re.sub(r"\s*#(?:amp|rakai)\b", "", description, flags=re.IGNORECASE).strip()
     if login.lower() in FAZE_STREAMERS or login.lower().startswith("faze"):
         # Enforce this in code even when the AI omits it or returns a differently cased duplicate.
         tags = [t for t in tags if t.lower() != "stableronaldo"]
