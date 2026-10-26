@@ -134,6 +134,30 @@ test("after a save the page shows the description the server stored, not one it 
   expect([shown.caption, shown.youtube]).toEqual(["New caption", ""]);
 });
 
+test("saves of two fields that overlap both show, whichever finishes first", async () => {
+  const server = { ...clip(1), title: "Old title", youtube: "Old description", caption: "Caption" };
+  const waiting: Record<string, () => void> = {};
+  set({ data: { vods: [], clips: [{ ...server }] }, etag: "" });
+  vi.stubGlobal("fetch", async (url: string, opts: RequestInit) => {
+    if (url === "/api/data") return json({ vods: [], clips: [{ ...server }] });
+    const { field, text } = JSON.parse(String(opts.body));
+    await new Promise<void>((done) => (waiting[text] = done)); // the test decides when the server answers
+    Object.assign(server, { youtube: server.youtube || server.caption, [field]: text, edited: 1 });
+    return json({ ok: true });
+  });
+  const answer = async (text: string) => (await vi.waitFor(() => waiting[text] ?? Promise.reject(new Error(`${text} not sent`))))();
+  setDraft("1:text:title", "New title");
+  const title = saveText(1, "title");
+  setDraft("1:text:youtube", "New description"); // typed while the title is still saving
+  const youtube = saveText(1, "youtube");
+  await answer("New description");
+  expect(await youtube).toBe(true);
+  await answer("New title"); // the title's save finishes last
+  expect(await title).toBe(true);
+  const shown = useClipit.getState().data.clips[0];
+  expect([shown.title, shown.youtube]).toEqual(["New title", "New description"]);
+});
+
 test("a failed save keeps the draft and says so, and the next save sends it", async () => {
   const { sent } = textServer();
   setDraft("1:text:youtube", "Keep on failure");
