@@ -118,6 +118,22 @@ test("a saved edit stays in the field even when the refresh after it fails", asy
   expect(useClipit.getState().data.clips[0].title).toBe("New title"); // what the field shows once the draft is gone
 });
 
+test("after a save the page shows the description the server stored, not one it made up", async () => {
+  // db.set_text fills an empty description from the caption as it was *before* the save: both empty, it stays empty
+  const server = { ...clip(1), caption: "", youtube: "" };
+  set({ data: { vods: [], clips: [server] }, etag: "" });
+  vi.stubGlobal("fetch", async (url: string, opts: RequestInit) => {
+    if (url === "/api/data") return json({ vods: [], clips: [server] });
+    const { field, text } = JSON.parse(String(opts.body));
+    Object.assign(server, { youtube: server.youtube || server.caption, [field]: text, edited: 1 });
+    return json({ ok: true });
+  });
+  setDraft("1:text:caption", "New caption");
+  expect(await saveText(1, "caption")).toBe(true);
+  const shown = useClipit.getState().data.clips[0];
+  expect([shown.caption, shown.youtube]).toEqual(["New caption", ""]);
+});
+
 test("a failed save keeps the draft and says so, and the next save sends it", async () => {
   const { sent } = textServer();
   setDraft("1:text:youtube", "Keep on failure");

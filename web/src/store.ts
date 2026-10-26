@@ -250,18 +250,17 @@ export function saveText(clip: number, field: string): Promise<boolean> {
           return false;
         }
         say("Saving…");
+        // what db.set_text will store, worked out from the clip as it is *before* the save (an empty description
+        // takes the old caption), so it doesn't matter whether the refresh after the save worked
+        const before = clipOf(get().data.clips, clip);
+        const stored = before && { youtube: before.youtube || before.caption, [field]: text, edited: 1 };
         if (!(await save("/api/text", { clip, field, text }))) {
           say("Couldn't save — edit or leave the field to retry");
           return false;
         }
-        // The server has it: show it now, as db.set_text stored it, so a refresh that failed (or a hidden tab that
-        // skipped it) can't put the old text back in the field and get it saved over the edit.
-        set((s) => ({
-          data: {
-            ...s.data,
-            clips: s.data.clips.map((x) => (x.id === clip ? { ...x, youtube: x.youtube || x.caption, [field]: text, edited: 1 } : x)),
-          },
-        }));
+        // The server has it: show it now, so a refresh that failed (or a hidden tab that skipped it) can't put the old
+        // text back in the field and get it saved over the edit.
+        if (stored) set((s) => ({ data: { ...s.data, clips: s.data.clips.map((x) => (x.id === clip ? { ...x, ...stored } : x)) } }));
         if (get().drafts[key] === text) dropDraft(key);
       }
       say("Saved automatically");
