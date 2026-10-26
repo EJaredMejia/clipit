@@ -72,7 +72,7 @@ def main() -> None:
         "--upload",
         action="store_true",
         help=f"post the newest clip you marked Keep to YouTube Shorts, at most {youtube.PER_DAY} a day and "
-        f"{youtube.GAP.seconds // 3600} hours apart. Add it to the --poll timer",
+        f"{youtube.GAP.seconds // 3600}h apart. Add it to the --poll timer",
     )
     a = ap.parse_args()
     if isinstance(sys.stdout, io.TextIOWrapper):  # not when stdout was swapped (tests, some service wrappers)

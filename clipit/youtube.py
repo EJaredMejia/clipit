@@ -27,7 +27,7 @@ CLIENT = HOME / "youtube_client.json"
 TOKEN = HOME / "youtube_token.json"
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]  # posting only: it can't read or manage the channel
 PER_DAY = 3
-GAP = datetime.timedelta(hours=4)
+GAP = datetime.timedelta(hours=1)
 STUCK = datetime.timedelta(hours=2)  # an upload still unfinished this long after it started belongs to a run that died
 
 

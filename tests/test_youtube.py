@@ -1,6 +1,8 @@
+import datetime
+
 import pytest
 
-from clipit import db, youtube
+from clipit import cli, db, youtube
 from clipit.util import ClipitError
 
 CLIP = {
@@ -104,3 +106,50 @@ def test_only_an_upload_that_started_sending_counts_as_maybe_posted(monkeypatch,
     request.resumable_uri = "https://www.googleapis.com/upload/youtube/v3/videos?upload_id=x"
     with pytest.raises(youtube.MaybePosted):
         youtube._upload(youtube.Credentials(token=None), tmp_path / "v.mp4", {})
+
+
+def test_hourly_uploads_wait_a_full_hour_and_keep_the_rolling_daily_limit(conn, tmp_path, monkeypatch):
+    now = [datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)]
+    start = now[0]
+    monkeypatch.setattr(db, "utcnow", lambda: now[0])
+    monkeypatch.setattr(youtube, "utcnow", lambda: now[0])
+    db.save_clips(
+        conn,
+        "v1",
+        [
+            {**CLIP, "idx": i + 2, "file": f"v1/clips/{i + 2:02d}_a.mp4", "start": 100.0 * i + 100, "end": 100.0 * i + 120}
+            for i in range(3)
+        ],
+    )
+    for row in conn.execute("SELECT id FROM clips"):
+        db.set_verdict(conn, row[0], "keep")
+    sent = []
+
+    def upload(creds, video, body):
+        sent.append(video)
+        return {**VIDEO, "id": f"post{len(sent)}"}
+
+    monkeypatch.setattr(youtube, "_upload", upload)
+    assert youtube.upload_next(conn, tmp_path) == "https://youtube.com/shorts/post1"
+    now[0] = start + datetime.timedelta(minutes=59, seconds=59)
+    assert youtube.upload_next(conn, tmp_path) is None
+    now[0] = start + datetime.timedelta(hours=1)
+    assert youtube.upload_next(conn, tmp_path) == "https://youtube.com/shorts/post2"
+    now[0] = start + datetime.timedelta(hours=2)
+    assert youtube.upload_next(conn, tmp_path) == "https://youtube.com/shorts/post3"
+    now[0] = start + datetime.timedelta(hours=3)
+    assert youtube.upload_next(conn, tmp_path) is None  # the fourth kept clip must wait for daily capacity
+    assert len(sent) == 3
+    now[0] = start + datetime.timedelta(hours=24, seconds=1)
+    assert youtube.upload_next(conn, tmp_path) == "https://youtube.com/shorts/post4"
+    assert len(set(sent)) == 4  # each eligible clip is sent once
+
+
+def test_upload_help_describes_the_hourly_interval(monkeypatch, capsys):
+    monkeypatch.setattr(cli.ai, "default_ai", lambda: None)
+    monkeypatch.setattr(cli.ai, "default_trends_ai", lambda: None)
+    monkeypatch.setattr(cli.sys, "argv", ["clipit", "--help"])
+    with pytest.raises(SystemExit) as result:
+        cli.main()
+    assert result.value.code == 0
+    assert "1h apart" in " ".join(capsys.readouterr().out.split())
