@@ -2,7 +2,7 @@
 // Nothing here waits a fixed time or a fixed number of ticks: how long a save's follow-up work takes differs between
 // machines (CI caught one). Tests await the actions themselves, or vi.waitFor the request they expect.
 import { afterEach, expect, test, vi } from "vitest";
-import { type Clip, deal, decide, flushTexts, saveText, set, setDraft, startFling, textStatus, undo, useClipit } from "./store";
+import { type Clip, deal, decide, description, flushTexts, saveText, set, setDraft, startFling, textStatus, undo, useClipit } from "./store";
 
 const drafts = () => useClipit.getState().drafts;
 
@@ -116,6 +116,15 @@ test("a saved edit stays in the field even when the refresh after it fails", asy
   expect(await saving).toBe(true);
   expect("1:text:title" in drafts()).toBe(false);
   expect(useClipit.getState().data.clips[0].title).toBe("New title"); // what the field shows once the draft is gone
+});
+
+test("an older clip keeps showing its description after a save whose refresh fails", async () => {
+  // its description is empty and shows the caption; db.set_text stores that caption as the description on any save
+  set({ data: { vods: [], clips: [{ ...clip(1), caption: "The caption", youtube: "", edited: 0 }] }, etag: "" });
+  vi.stubGlobal("fetch", async (url: string) => (url === "/api/data" ? Promise.reject(new Error("down")) : json({ ok: true })));
+  setDraft("1:text:title", "New title");
+  expect(await saveText(1, "title")).toBe(true);
+  expect(description(useClipit.getState().data.clips[0])).toBe("The caption");
 });
 
 test("after a save the page shows the description the server stored, not one it made up", async () => {

@@ -259,8 +259,10 @@ export function saveText(clip: number, field: string): Promise<boolean> {
         }
         // The server has it. Show the saved field now, *then* refresh: if the refresh fails (or a hidden tab skips
         // it) the field still shows what was saved, not old text that could get saved over the edit; when it works,
-        // the server's data replaces this, so overlapping saves of other fields can't be undone by it.
-        set((s) => ({ data: { ...s.data, clips: s.data.clips.map((x) => (x.id === clip ? { ...x, [field]: text, edited: 1 } : x)) } }));
+        // the server's data replaces this, so overlapping saves of other fields can't be undone by it. Like
+        // db.set_text, an empty description takes the caption (the one before this save): it only ever fills a blank.
+        const saved = (x: Clip) => ({ ...x, youtube: x.youtube || x.caption, [field]: text, edited: 1 });
+        set((s) => ({ data: { ...s.data, clips: s.data.clips.map((x) => (x.id === clip ? saved(x) : x)) } }));
         await load();
         if (get().drafts[key] === text) dropDraft(key);
       }
