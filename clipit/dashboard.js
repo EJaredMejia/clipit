@@ -25,6 +25,7 @@ let etag = "";
 let view = "ready"; // the Clips tab is where kept clips get posted
 let selected = null; // clip id
 let shown = { id: null, file: null, key: "" }; // what the detail panel renders now, so polling doesn't redraw it for nothing
+const textWrites = new Map(); // one ordered autosave per clip field
 const drafts = {}; // post links typed but not saved yet, by "clipId:platform"
 let queue = []; // review deck: unreviewed clip ids in random order, queue[0] is the card on top
 const history = []; // {id} per decision made in the deck this visit, newest last, for undo
@@ -219,6 +220,7 @@ function renderDetail() {
     shown = { id: null, file: null, key: "" };
     return;
   }
+  if (shown.id === c.id && $("info").contains(document.activeElement) && document.activeElement?.tagName === "TEXTAREA") return;
   const key = JSON.stringify(c);
   if (shown.id === c.id && shown.key === key) return; // unchanged: keep the focus and anything typed
   if (shown.id !== c.id || shown.file !== c.file) {
@@ -340,28 +342,56 @@ function advanceFrom(id, order) {
   select([...order.slice(i + 1), ...order.slice(0, i).reverse()].find(inView) ?? null);
 }
 
+// Keep the latest draft until its exact value has reached the database. New input during a save is sent next.
+function saveText(clip, field) {
+  const key = `${clip}:text:${field}`;
+  let state = textWrites.get(key);
+  if (!state) {
+    state = { running: null, notify: () => {} };
+    textWrites.set(key, state);
+  }
+  if (state.running) return state.running;
+  state.running = Promise.resolve().then(async () => {
+    while (key in drafts) {
+      const text = drafts[key];
+      if (field === "title" && !text.trim()) {
+        state.notify("Title is required");
+        return false;
+      }
+      state.notify("Saving…");
+      if (!(await save("/api/text", { clip, field, text }))) {
+        state.notify("Couldn't save — edit or leave the field to retry");
+        return false;
+      }
+      if (drafts[key] === text) delete drafts[key];
+    }
+    state.notify("Saved automatically");
+    return true;
+  }).finally(() => { state.running = null; });
+  return state.running;
+}
+
 // Post text the user can edit and copy. Saved edits are theirs: a re-render of the clip never overwrites them.
 function editable(c, field, label, text, max, platform) {
   const key = `${c.id}:text:${field}`; // post-link drafts use "id:platform"
   const box = h("textarea", { rows: field === "title" ? 2 : 5, maxlength: String(max), "aria-label": label });
   box.value = drafts[key] ?? text;
   const count = h("span", { class: "count" });
-  const saveButton = h("button", { type: "button", class: "ghost" }, "Save");
+  const saved = h("span", { class: "count", role: "status" }, "Saved automatically");
+  if (!textWrites.has(key)) textWrites.set(key, { running: null, notify: () => {} });
+  textWrites.get(key).notify = (text) => { saved.textContent = text; };
+  if (key in drafts) saved.textContent = "Saving…";
   const copyButton = h("button", { type: "button", class: "ghost" }, "Copy");
   const sync = () => {
     count.textContent = `${box.value.length}/${max}`;
-    saveButton.disabled = box.value === text || (field === "title" && !box.value.trim());
   };
   sync();
   box.addEventListener("input", () => {
     drafts[key] = box.value; // survives the redraws polling makes until it's saved
     sync();
+    saveText(c.id, field);
   });
-  saveButton.addEventListener("click", async () => {
-    saveButton.disabled = true;
-    if (await save("/api/text", { clip: c.id, field, text: box.value })) delete drafts[key];
-    else sync();
-  });
+  box.addEventListener("blur", () => saveText(c.id, field));
   copyButton.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(box.value);
@@ -376,7 +406,7 @@ function editable(c, field, label, text, max, platform) {
   return h(
     "div",
     { class: "copy" },
-    h("div", { class: "copy-head" }, h("span", { class: "label" }, label), count, saveButton, copyButton),
+    h("div", { class: "copy-head" }, h("span", { class: "label" }, label), count, saved, copyButton),
     box,
     live ? h("p", { class: "hint" }, `Already posted: saving here doesn't change the ${PLATFORMS[platform]} post.`) : "",
   );
@@ -387,9 +417,9 @@ function postNow(c) {
   if (c.uploads.youtube) return "";
   const button = h("button", { type: "button", class: "primary" }, "Post to YouTube now");
   button.addEventListener("click", async () => {
-    const saved = { title: c.title, youtube: description(c) };
-    if (Object.entries(saved).some(([f, text]) => (drafts[`${c.id}:text:${f}`] ?? text) !== text)) {
-      alert("Save your title and description changes first: the post uses the saved text.");
+    const results = await Promise.all([saveText(c.id, "title"), saveText(c.id, "youtube")]);
+    if (results.some((ok) => !ok)) {
+      alert("Couldn't save your latest title or description. Check the fields before posting.");
       return;
     }
     if (!confirm("Post this clip publicly on your YouTube channel now?")) return;
