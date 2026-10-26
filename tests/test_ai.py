@@ -138,6 +138,7 @@ def test_default_ai_disables_tools(monkeypatch):
 
 
 def test_claude_found_in_either_desktop_bundle_newest_wins(monkeypatch):
+    monkeypatch.setattr(ai.codex, "find_cli", lambda: None)
     bundles = {"Claude-Data": [], r"\Claude\claude-code": []}  # glob results per bundle folder (Windows paths)
     mtime = {"C:/local/claude.exe": 2.0, "C:/roaming/claude.exe": 1.0}
     monkeypatch.setattr(ai.shutil, "which", lambda _: None)

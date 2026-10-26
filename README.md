@@ -4,7 +4,7 @@ Turn hours-long Twitch streams into short vertical clips for TikTok and YouTube 
 
 Clipit finds the best moments of a VOD from chat activity and audio, has an AI pick the cuts and write the post text,
 and renders ready-to-post 9:16 videos with captions. It works with whatever AI you have on your machine: Claude Code,
-a local model through Ollama, or any other AI CLI.
+Codex CLI, a local model through Ollama, or any other AI CLI.
 
 ## Features
 
@@ -46,7 +46,13 @@ Skip `uv sync` and `uv run`: they resolve their own versions into a `uv.lock` in
 
 ### Choosing an AI
 
-- **Claude Code** (the default): install it, run `claude` once and type `/login`.
+- **Claude Code** (preferred when installed): install it, run `claude` once and type `/login`.
+- **Codex CLI**: install [Codex](https://learn.chatgpt.com/docs/codex/cli) and run `codex login` once, or use the CLI bundled with the Windows Codex desktop app. Select it explicitly with:
+  ```bash
+  clipit <vod-url> --ai codex
+  clipit --refresh-trends --trends-ai codex
+  ```
+  Clipit selects Codex automatically when Claude Code is not installed. It uses your existing Codex login and the CLI's default model. A request runs in an empty temporary workspace with user configuration, shell commands, file-editing tools, apps, plugins and browser controls disabled; only trend research enables web search. Clip selection uses a JSON output schema. The CLI must support `exec --ignore-user-config` and `debug models --bundled`; unsupported versions stop with an update message instead of falling back to broader permissions.
 - **A local model with [Ollama](https://ollama.com)**:
   ```bash
   ollama pull qwen3:8b
@@ -149,8 +155,8 @@ have the rights to: three copyright strikes delete a channel.
 |---|---|---|
 | `URL` | | Twitch VOD link. Other sites yt-dlp supports work too, without chat. |
 | `-n`, `--clips N` | `6` | Clips per VOD. |
-| `--ai CMD` | Claude Code, all tools disabled | The AI that picks clips: any CLI that reads a prompt on stdin and prints the answer. **Don't give this command tools**: its prompt contains Twitch chat written by strangers. |
-| `--trends-ai CMD` | Claude Code, web tools only | The AI for `--refresh-trends`, which needs web search. |
+| `--ai CMD` | Claude Code, then Codex | The AI that picks clips: `codex` uses the isolated built-in provider; other values are commands that read a prompt on stdin and print the answer. **Don't give custom commands tools**: prompts contain Twitch chat written by strangers. |
+| `--trends-ai CMD` | Claude Code, then Codex | The AI for `--refresh-trends`, which needs web search. Use `codex` for Codex with web search only. |
 | `--whisper MODEL` | `turbo` | Transcription model: `tiny`, `base`, `small`, `medium` or `turbo`. Bigger is more accurate but slower. |
 | `--out DIR` | `out` | Where working files, clips, logs and the database go. |
 | `--refresh-trends` | | Research current trends into `trends.md`. |

@@ -42,13 +42,13 @@ def main() -> None:
     ap.add_argument(
         "--ai",
         default=ai.default_ai(),
-        help="command that reads a prompt on stdin and prints the answer, used to pick clips. "
-        'Give it no tools: its prompt contains text from strangers. Default: Claude Code with --tools ""',
+        help="'codex' or a command that reads a prompt on stdin and prints the answer, used to pick clips. "
+        "Give custom commands no tools: prompts contain text from strangers. Default: Claude Code, then Codex if installed.",
     )
     ap.add_argument(
         "--trends-ai",
         default=ai.default_trends_ai(),
-        help="command for --refresh-trends; needs web search (default: Claude Code with web tools only)",
+        help="'codex' or a command for --refresh-trends; needs web search (default: Claude Code, then Codex)",
     )
     ap.add_argument("--whisper", default="turbo", help="faster-whisper model: tiny, base, small, medium, turbo (default)")
     ap.add_argument("--out", type=Path, default=ROOT / "out", help="working files, clips, logs and the database")
@@ -86,7 +86,7 @@ def main() -> None:
     try:
         if a.refresh_trends:
             if not a.trends_ai:
-                raise ClipitError('No AI for trend research. Install Claude Code or pass --trends-ai "<command>"')
+                raise ClipitError('No AI for trend research. Install Claude Code or Codex CLI, or pass --trends-ai "<command>"')
             log("researching current trends (web search)...")
             ai.refresh_trends(a.trends_ai)
             log(f"wrote {ai.TRENDS}")
