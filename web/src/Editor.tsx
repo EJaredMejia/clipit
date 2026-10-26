@@ -137,7 +137,7 @@ function Notes({ clip: c }: { clip: Clip }) {
         <ChevronRight className="size-4 transition-transform duration-200 ease-out group-data-panel-open:rotate-90" />
         Why the AI picked it
       </CollapsibleTrigger>
-      <CollapsibleContent className="h-(--collapsible-panel-height) overflow-hidden transition-[height] duration-200 ease-out data-ending-style:h-0 data-starting-style:h-0 motion-reduce:transition-none">
+      <CollapsibleContent className="transition-opacity duration-150 ease-out data-ending-style:opacity-0 data-starting-style:opacity-0">
         <dl className="grid grid-cols-[max-content_1fr] gap-x-5 gap-y-2 pt-3 text-sm">
           {notes.map(([k, v]) => (
             <Fragment key={k}>

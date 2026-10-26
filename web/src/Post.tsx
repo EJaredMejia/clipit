@@ -1,5 +1,5 @@
 // The Post tab: kept clips waiting to go up, one at a time. Marking the last platform posted moves on to the next.
-import { Check } from "lucide-react";
+import { Check, Loader2 } from "lucide-react";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
 import { ClipEditor } from "./Editor";
@@ -80,10 +80,16 @@ function QueueItem({ clip: c, current }: { clip: Clip; current: boolean }) {
 
 // a platform's step at a glance: checked once it's up there
 function Done({ clip: c, platform }: { clip: Clip; platform: Platform }) {
-  const up = c.uploads[platform];
+  const up = c.uploads[platform]?.status; // "uploading" isn't done yet
   return (
-    <span className={`flex items-center gap-1 text-xs ${up ? "text-keep" : "text-muted-foreground"}`}>
-      {up ? <Check className="size-3" strokeWidth={3} /> : <span className="size-1.5 rounded-full bg-current opacity-60" aria-hidden="true" />}
+    <span className={`flex items-center gap-1 text-xs ${up === "done" ? "text-keep" : up ? "text-warn" : "text-muted-foreground"}`}>
+      {up === "done" ? (
+        <Check className="size-3" strokeWidth={3} />
+      ) : up ? (
+        <Loader2 className="size-3 animate-spin" />
+      ) : (
+        <span className="size-1.5 rounded-full bg-current opacity-60" aria-hidden="true" />
+      )}
       {PLATFORMS[platform]}
     </span>
   );

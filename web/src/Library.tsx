@@ -1,5 +1,5 @@
 // The Library: every clip as its own frame. Hover plays it silently; a click opens it in the side sheet.
-import { Check, Search, Trash2 } from "lucide-react";
+import { Check, Loader2, Search, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
@@ -146,7 +146,11 @@ function Tile({ clip: c, dim }: { clip: Clip; dim: boolean }) {
           .filter((p) => c.uploads[p])
           .map((p) => (
             <span key={p} className={`flex items-center gap-1 ${glass}`}>
-              <Check className="size-3 text-keep" strokeWidth={3} />
+              {c.uploads[p]?.status === "done" ? (
+                <Check className="size-3 text-keep" strokeWidth={3} />
+              ) : (
+                <Loader2 className="size-3 animate-spin text-warn" />
+              )}
               {PLATFORMS[p]}
             </span>
           ))}

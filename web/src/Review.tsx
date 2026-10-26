@@ -16,7 +16,7 @@ function toggle(video: HTMLVideoElement): void {
 const reduced = () => matchMedia("(prefers-reduced-motion: reduce)").matches;
 const sign = (v: Verdict) => (v === "keep" ? 1 : -1);
 const big =
-  "h-14 min-w-36 rounded-2xl px-6 font-heading text-lg font-bold hover:brightness-110 disabled:opacity-40 [&_svg:not([class*='size-'])]:size-5";
+  "h-14 min-w-0 flex-1 rounded-2xl px-4 sm:min-w-36 sm:flex-none sm:px-6 font-heading text-lg font-bold hover:brightness-110 disabled:opacity-40 [&_svg:not([class*='size-'])]:size-5";
 
 export function Review() {
   const clips = useClipit((s) => s.data.clips);
@@ -84,7 +84,7 @@ export function Review() {
             />
           )}
         </div>
-        <div className="mt-6 flex items-center gap-3">
+        <div className="mt-6 flex w-full max-w-sm items-center gap-3 sm:w-auto sm:max-w-none">
           <Button type="button" id="skip" className={`${big} bg-skip-bg text-skip`} disabled={!top} onClick={() => fling("skip", "button")}>
             <X strokeWidth={2.75} />
             Skip
@@ -94,7 +94,7 @@ export function Review() {
             id="undo"
             variant="ghost"
             aria-label="Undo"
-            className="size-14 rounded-2xl text-muted-foreground"
+            className="size-14 shrink-0 rounded-2xl text-muted-foreground"
             disabled={!last}
             onClick={() => back("button")}
           >
@@ -226,7 +226,7 @@ function Card(props: {
     const w = el.current!.offsetWidth;
     el.current!.animate(
       [{ transform: `translateX(${from * (innerWidth / 2 + w)}px) rotate(${from * 22}deg)`, opacity: 0 }, { transform: "none", opacity: 1 }],
-      { duration: 320, easing: "cubic-bezier(0.32, 0.72, 0, 1)" },
+      { duration: 280, easing: "cubic-bezier(0.32, 0.72, 0, 1)" },
     );
   }, []);
   useEffect(() => {
@@ -238,7 +238,8 @@ function Card(props: {
   useEffect(() => {
     const v = video.current;
     if (!v) return;
-    if (useClipit.getState().tab !== "review") return setPaused(true);
+    const s = useClipit.getState();
+    if (s.tab !== "review" || s.sheet !== null) return setPaused(true); // another tab, or the sheet is playing
     v.play().catch(() => {
       // the browser blocks autoplay with sound until the page has been clicked: start muted instead
       v.muted = true;
@@ -268,7 +269,7 @@ function Card(props: {
   };
   // let go short of a decision: spring back home, a little past center, the way it was thrown
   const home = (card: HTMLDivElement) => {
-    card.style.transition = reduced() ? "transform 150ms ease-out" : "transform 480ms cubic-bezier(0.34, 1.45, 0.64, 1)";
+    card.style.transition = reduced() ? "none" : "transform 280ms cubic-bezier(0.34, 1.45, 0.64, 1)";
     keep.current!.style.transition = skip.current!.style.transition = "opacity 200ms ease-out";
     move(0);
   };

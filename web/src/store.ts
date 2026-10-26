@@ -254,6 +254,14 @@ export function saveText(clip: number, field: string): Promise<boolean> {
           say("Couldn't save — edit or leave the field to retry");
           return false;
         }
+        // The server has it: show it now, as db.set_text stored it, so a refresh that failed (or a hidden tab that
+        // skipped it) can't put the old text back in the field and get it saved over the edit.
+        set((s) => ({
+          data: {
+            ...s.data,
+            clips: s.data.clips.map((x) => (x.id === clip ? { ...x, youtube: x.youtube || x.caption, [field]: text, edited: 1 } : x)),
+          },
+        }));
         if (get().drafts[key] === text) dropDraft(key);
       }
       say("Saved automatically");

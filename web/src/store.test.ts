@@ -106,6 +106,18 @@ test("a slow save can't erase newer typing", async () => {
   expect("1:text:title" in drafts()).toBe(false);
 });
 
+test("a saved edit stays in the field even when the refresh after it fails", async () => {
+  const { sent } = textServer();
+  set({ data: { vods: [], clips: [clip(1)] } });
+  vi.stubGlobal("fetch", ((real) => (url: string, opts: RequestInit) => (url === "/api/data" ? Promise.reject(new Error("down")) : real(url, opts)))(fetch));
+  setDraft("1:text:title", "New title");
+  const saving = saveText(1, "title");
+  (await sent("New title")).reply(true);
+  expect(await saving).toBe(true);
+  expect("1:text:title" in drafts()).toBe(false);
+  expect(useClipit.getState().data.clips[0].title).toBe("New title"); // what the field shows once the draft is gone
+});
+
 test("a failed save keeps the draft and says so, and the next save sends it", async () => {
   const { sent } = textServer();
   setDraft("1:text:youtube", "Keep on failure");

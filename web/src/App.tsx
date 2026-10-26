@@ -162,7 +162,7 @@ function ClipSheet() {
     <Sheet open={Boolean(open)} onOpenChange={(o) => !o && openClip(null)}>
       <SheetContent
         side="right"
-        className="gap-0 overflow-hidden bg-background p-0 duration-300 ease-(--ease-drawer) data-ending-style:duration-200 data-ending-style:opacity-100 data-starting-style:opacity-100 data-[side=right]:w-full data-[side=right]:data-ending-style:translate-x-full data-[side=right]:data-starting-style:translate-x-full data-[side=right]:sm:max-w-[min(72rem,94vw)] motion-reduce:duration-0"
+        className="gap-0 overflow-hidden bg-background p-0 duration-280 ease-(--ease-drawer) data-ending-style:duration-200 data-ending-style:opacity-100 data-starting-style:opacity-100 data-[side=right]:w-full data-[side=right]:data-ending-style:translate-x-full data-[side=right]:data-starting-style:translate-x-full data-[side=right]:sm:max-w-[min(72rem,94vw)] motion-reduce:duration-0"
       >
         <SheetTitle className="sr-only">{shown?.title || "Clip"}</SheetTitle>
         {shown && <ClipEditor key={shown.id} clip={shown} layout="sheet" />}

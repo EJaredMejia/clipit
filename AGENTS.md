@@ -77,8 +77,9 @@ and light/dark follows the OS (`prefers-color-scheme`). The CSP allows only the 
 scripts or `data:` images: use OS fonts and lucide icons.
 
 Motion follows a few rules: keyboard actions never animate; UI motion stays under 300 ms with ease-out curves (never
-ease-in); only `transform` and `opacity` animate; anything you can drag follows the pointer 1:1 and is thrown with its
-release speed; `prefers-reduced-motion` gets fades or nothing. Any player showing a clip's video lets go of it while the
+ease-in); movement and appearing use only `transform` and `opacity`, never size or layout (colors may fade on hover);
+anything you can drag follows the pointer 1:1 and is thrown with its release speed; `prefers-reduced-motion` gets
+fades or nothing, never movement. Any player showing a clip's video lets go of it while the
 clip is deleted (`released` in the store): Windows can't delete a file that's being read.
 
 Planned: auto-upload to TikTok, and to several accounts per platform (accounts as a new table). TikTok posts are

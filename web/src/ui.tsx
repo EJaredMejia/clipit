@@ -82,7 +82,7 @@ export function Posted({ clip: c, platform, className = "" }: { clip: Clip; plat
   );
 }
 
-// A clip's video, loaded only once it's near the screen (a Library of hundreds of clips must not fetch hundreds of
+// A clip's video, attached only while it's near the screen (a Library of hundreds of clips must not hold hundreds of
 // videos) and let go of while the clip is being deleted. `at` shows that second as the still frame.
 export function Frame({ clip: c, at = 1, preview = false, className = "" }: { clip: Clip; at?: number; preview?: boolean; className?: string }) {
   const box = useRef<HTMLDivElement>(null);
@@ -90,7 +90,7 @@ export function Frame({ clip: c, at = 1, preview = false, className = "" }: { cl
   const [near, setNear] = useState(false);
   const released = useClipit((s) => s.released.includes(c.id));
   useEffect(() => {
-    const seen = new IntersectionObserver(([e]) => e.isIntersecting && (setNear(true), seen.disconnect()), { rootMargin: "300px" });
+    const seen = new IntersectionObserver(([e]) => setNear(e.isIntersecting), { rootMargin: "300px" });
     seen.observe(box.current!);
     return () => seen.disconnect();
   }, []);
