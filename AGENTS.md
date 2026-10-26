@@ -38,6 +38,7 @@ VODs to process; `cli.py` is the only place that parses flags, sets up logging, 
 | `moments.py` | loudness + chat scoring, picks candidate windows |
 | `transcribe.py` | Whisper on the candidate windows |
 | `ai.py` | prompts, calling the AI CLI, validating its picks, trend research |
+| `codex.py` | isolated Codex CLI provider, restricted model catalog and structured clip output |
 | `facecam.py` | webcam overlay detection |
 | `render.py` | captions, ffmpeg render, `posts.md` |
 | `util.py` | logging, shell helpers with timeouts, atomic writes, `ClipitError` |
@@ -84,8 +85,11 @@ recorded by hand from the dashboard until then.
 ### Untrusted input
 Stream titles, chat, transcripts, VOD metadata, web pages and **everything the AI returns** come from strangers.
 - AI prompts: untrusted text goes inside the `<stream_data>` fence (see `ai.build_prompt`) and must not be able to
-  close it. The clip-picking AI runs **with no tools** and in an empty temp folder. Only trend research gets web
-  tools, and its prompt contains no untrusted text. Never give the picking command tools.
+  close it. The clip-picking AI runs in an empty temp folder with **no tools that access files, run commands, or
+  reach the network**. Claude Code uses `--tools ""`; the built-in Codex provider disables shell, file editing,
+  apps, plugins and browser tools, ignores user configuration and uses a read-only sandbox. Its temporary model
+  catalog must remove `apply_patch_tool_type` and model-specific extra tools. Only trend research gets web search,
+  and its prompt contains no untrusted text. Never enable external tools for clip picking.
 - AI output is validated before use (`ai.clean`): numbers parsed and clamped, text fields forced to capped strings.
 - Untrusted text never reaches a shell. File names go through `util.slug`, folder names are checked against a strict
   pattern, subtitle text goes through `render.make_ass`'s escaping (strips `\ { }` and newlines).

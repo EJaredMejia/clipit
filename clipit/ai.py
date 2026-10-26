@@ -14,6 +14,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from clipit import codex
 from clipit.util import ROOT, ClipitError, logger, write_atomic
 
 TRENDS = ROOT / "trends.md"
@@ -87,18 +88,24 @@ def _claude() -> str | None:
 
 
 def default_ai() -> str | None:
-    """Clip picking: Claude Code with every tool disabled, so injected chat can't make it read or fetch anything."""
+    """Prefer Claude Code without tools, then the isolated Codex provider when installed."""
     claude = _claude()
-    return claude and f'{claude} --tools ""'
+    if claude:
+        return f'{claude} --tools ""'
+    return "codex" if codex.find_cli() else None
 
 
 def default_trends_ai() -> str | None:
-    """Trend research: Claude Code with web search only."""
+    """Trend research: Claude Code or Codex with web search only."""
     claude = _claude()
-    return claude and f"{claude} --tools WebSearch WebFetch --allowedTools WebSearch WebFetch"
+    if claude:
+        return f"{claude} --tools WebSearch WebFetch --allowedTools WebSearch WebFetch"
+    return "codex" if codex.find_cli() else None
 
 
 def ask_ai(cmd: str, prompt: str) -> str:
+    if cmd == "codex":
+        return codex.ask(prompt, timeout=AI_TIMEOUT)
     # The command string is the user's own config, never untrusted data; the prompt goes in on stdin.
     with tempfile.TemporaryDirectory() as empty:  # nothing local for an AI tool to read
         try:
@@ -124,7 +131,9 @@ def ask_ai(cmd: str, prompt: str) -> str:
 
 
 def refresh_trends(cmd: str) -> None:
-    write_atomic(TRENDS, ask_ai(cmd, TRENDS_PROMPT.format(date=datetime.date.today()))[:MAX_TRENDS_CHARS])
+    prompt = TRENDS_PROMPT.format(date=datetime.date.today())
+    reply = codex.ask(prompt, web_search=True, timeout=AI_TIMEOUT) if cmd == "codex" else ask_ai(cmd, prompt)
+    write_atomic(TRENDS, reply[:MAX_TRENDS_CHARS])
 
 
 def build_prompt(info: dict, cands: list[dict], n: int, trends: str) -> str:
@@ -210,7 +219,7 @@ def name_streamer(picks: list[dict], *names: object) -> list[dict]:
 def pick_clips(cmd: str | None, info: dict, cands: list[dict], n: int, work: Path) -> list[dict]:
     """Ask the AI and validate its picks. The raw reply is kept in work/ai_reply.txt for debugging."""
     if not cmd:
-        raise ClipitError('No AI command. Install Claude Code or pass --ai "<command>"')
+        raise ClipitError('No AI command. Install Claude Code or Codex CLI, or pass --ai "<command>"')
     trends = TRENDS.read_text(encoding="utf-8") if TRENDS.exists() else "(no trend notes, use your own knowledge)"
     reply = ask_ai(cmd, build_prompt(info, cands, n, trends))
     write_atomic(work / "ai_reply.txt", reply)
