@@ -38,8 +38,9 @@ def test_post_texts_without_a_known_streamer_have_no_credit():
     "streamer", ["lacy", "JasonTheWeen", "silky", "adapt", "yourragegaming", "plaqueboymax", "FaZeRug", "stableronaldo"]
 )
 @pytest.mark.parametrize("hashtags", [[], ["gaming"], ["StableRonaldo", "gaming"]])
-def test_faze_descriptions_always_include_ronaldo_once(streamer, hashtags):
-    clip = {"description": "A wild moment.", "streamer": streamer, "hashtags": hashtags}
+@pytest.mark.parametrize("description", ["A wild moment.", "A wild #StableRonaldo moment."])
+def test_faze_descriptions_always_include_ronaldo_once(streamer, hashtags, description):
+    clip = {"description": description, "streamer": streamer, "hashtags": hashtags}
     for text in render.post_texts(clip):
         assert text.split().count("#stableronaldo") == 1
         assert text.lower().split().count("#stableronaldo") == 1

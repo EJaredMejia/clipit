@@ -147,15 +147,17 @@ def post_texts(clip: dict) -> tuple[str, str]:
     The credit is added here, never by the AI, so injected chat can't make it tag or link someone else."""
     login = clip["streamer"]
     tags = ([login] if login else []) + [t for t in clip.get("hashtags", []) if t.lower() != login.lower()]
+    description = clip["description"]
     if login.lower() in FAZE_STREAMERS or login.lower().startswith("faze"):
         # Enforce this in code even when the AI omits it or returns a differently cased duplicate.
         tags = [t for t in tags if t.lower() != "stableronaldo"]
         tags.append("stableronaldo")
+        description = re.sub(r"\s*#stableronaldo\b", "", description, flags=re.IGNORECASE).strip()
     credit = f"Credit: twitch.tv/{login}" if login else ""
     yt_tags = tags if "shorts" in map(str.lower, tags) else [*tags, "shorts"]
 
     def text(hashtags: list[str]) -> str:
-        return "\n\n".join(filter(None, [clip["description"], credit, " ".join(f"#{t}" for t in hashtags)]))
+        return "\n\n".join(filter(None, [description, credit, " ".join(f"#{t}" for t in hashtags)]))
 
     return text(tags), text(yt_tags)
 
