@@ -18,9 +18,20 @@ pytest -q                                                # tests, must pass
 clipit --poll --dry-run                                  # see what polling would clip, touches nothing
 ```
 
-A change is not done until `ruff check .`, `ruff format --check .`, `pyright` and `pytest -q` all pass. CI runs all four
-on every push and pull request. Changes to media handling (ffmpeg, Whisper,
-facecam, captions) also need a check on a real VOD: render a clip and look at a frame from it.
+The dashboard page is a React + TypeScript app in `web/` (Node 22.12+), built with Vite:
+
+```bash
+cd web && npm ci                                         # install, versions pinned by package-lock.json
+npm run dev                                              # hot-reloading page on :5173, API proxied to a running clipit --dashboard
+npm test                                                 # Vitest, must pass
+npm run build                                            # type check, then write the page to clipit/web/
+```
+
+A change is not done until `ruff check .`, `ruff format --check .`, `pyright` and `pytest -q` all pass, and for `web/`
+changes `npm test` and `npm run build` too, with the rebuilt `clipit/web/` committed. CI runs all of them on every push
+and pull request, and fails if `clipit/web/` doesn't match `web/src/`. Changes to media handling (ffmpeg, Whisper,
+facecam, captions) also need a check on a real VOD: render a clip and look at a frame from it. Changes to the page
+also need a look in a browser.
 
 ## Architecture
 
@@ -41,8 +52,34 @@ VODs to process; `cli.py` is the only place that parses flags, sets up logging, 
 | `facecam.py` | webcam overlay detection |
 | `render.py` | captions, ffmpeg render, `posts.md` |
 | `util.py` | logging, shell helpers with timeouts, atomic writes, `ClipitError` |
-| `dashboard.py` | `--dashboard`: local HTTP server (127.0.0.1) for `dashboard.html` / `dashboard.js`, reads and writes via `db.py` |
+| `dashboard.py` | `--dashboard`: local HTTP server (127.0.0.1) for the built page in `clipit/web/` and its JSON API, reads and writes via `db.py` |
 | `youtube.py` | `--youtube-login` and `--upload`: posts kept clips to YouTube Shorts, records each post in `uploads` |
+
+`web/src/` is the dashboard page: `store.ts` is its zustand store (state, and every call to the server as plain
+functions), and components read it through selectors, `useClipit((s) => s.tab)`, so each re-renders only when what it
+reads changes. Actions replace state with `set()`, never mutate it: a selector can't see an in-place change. Python
+stays the only server: the page never talks to SQLite or anything else directly, only to `dashboard.py`'s API.
+
+| Page file | Job |
+|---|---|
+| `App.tsx` | header, navigation (pill bar on wide screens, tab bar on phones), the clip side sheet, the connection light |
+| `Review.tsx` | the deck: drag, throw, keys, undo |
+| `Post.tsx` | kept clips waiting to go up, one at a time |
+| `Library.tsx` | every clip as a frame: filters, search, opens the sheet |
+| `Editor.tsx` | one clip's post text, upload steps, verdict and delete: used by Post and the sheet |
+| `Vods.tsx` | the VODs table |
+| `ui.tsx` | formatting, links, badges, lazy video frames, confirm dialogs |
+
+The UI is built from shadcn/ui components on Base UI (not Radix) and Tailwind v4, in `web/src/components/ui/`, added
+with `npx shadcn@latest add <name>` from `web/`; edit them only where the app needs it. Base UI uses a `render` prop
+where Radix had `asChild`. Theme colors (the pink accent, keep, skip, warn) are CSS variables in `web/src/index.css`,
+and light/dark follows the OS (`prefers-color-scheme`). The CSP allows only the page's own files, so no web fonts, CDN
+scripts or `data:` images: use OS fonts and lucide icons.
+
+Motion follows a few rules: keyboard actions never animate; UI motion stays under 300 ms with ease-out curves (never
+ease-in); only `transform` and `opacity` animate; anything you can drag follows the pointer 1:1 and is thrown with its
+release speed; `prefers-reduced-motion` gets fades or nothing. Any player showing a clip's video lets go of it while the
+clip is deleted (`released` in the store): Windows can't delete a file that's being read.
 
 Planned: auto-upload to TikTok, and to several accounts per platform (accounts as a new table). TikTok posts are
 recorded by hand from the dashboard until then.
@@ -89,8 +126,10 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
 - AI output is validated before use (`ai.clean`): numbers parsed and clamped, text fields forced to capped strings.
 - Untrusted text never reaches a shell. File names go through `util.slug`, folder names are checked against a strict
   pattern, subtitle text goes through `render.make_ass`'s escaping (strips `\ { }` and newlines).
-- The dashboard page shows untrusted text as text only (`textContent`, never `innerHTML`), links only http(s) URLs, and
-  its server only answers its own page (Host and Origin checks, JSON-only writes, no inline scripts under its CSP).
+- The dashboard page shows untrusted text as React text only (never `dangerouslySetInnerHTML` or `innerHTML`:
+  `web/src/safety.test.ts` fails on them), links only http(s) URLs (`safeUrl`), and its server only answers its own
+  page (Host and Origin checks, JSON-only writes, no inline scripts under its CSP). The dev server's proxy vouches for
+  the dev page's Origin only (`web/vite.config.ts`); never loosen the Origin check in `dashboard.py` for it.
 - Post text credits the streamer from yt-dlp's checked Twitch login (`pipeline.streamer`), added in code by
   `render.post_texts`: the AI is told not to write links or @mentions.
 
@@ -104,8 +143,10 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
 - Silence pyright only for wrong third-party stubs, with `# pyright: ignore[rule]` and the reason on the same line.
 - New logic gets a pytest test in `tests/`, using fakes (`monkeypatch`, `tmp_path`) instead of the network.
 - New dependency: add it to `pyproject.toml`, then regenerate the lockfile
-  (`pip freeze --exclude-editable > requirements.lock`) and say why in the commit.
-- Never commit `out/`, `.venv/`, credentials, browser profiles or tokens.
+  (`pip freeze --exclude-editable > requirements.lock`) and say why in the commit. For the page: `npm install <pkg>`
+  in `web/` (it updates `package-lock.json`), and say why in the commit.
+- Page code is TypeScript under `strict`, type-checked by `npm run build`. Never edit `clipit/web/` by hand: it's build output.
+- Never commit `out/`, `.venv/`, `node_modules/`, credentials, browser profiles or tokens.
 - Branch names are `<type>/<short-name>` in lowercase (CI rejects others): `feat/` new feature, `fix/` bug fix,
   `refactor/` no behavior change, `test/` tests only. Example: `fix/stale-claim`.
 

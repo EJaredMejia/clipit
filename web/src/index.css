@@ -1,0 +1,253 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+/* Light or dark follows the system: no toggle, no class on <html>. */
+@custom-variant dark (@media (prefers-color-scheme: dark));
+
+/* One accent, hot pink (dark ink on it passes contrast in both themes); skip is a warm red so it never reads as
+   the accent. Bahnschrift (Windows) and DIN Alternate (macOS) are the condensed broadcast face for names, numbers,
+   timecodes and controls; body text stays the system UI face. Both ship with the OS: the CSP allows no web fonts. */
+@theme inline {
+  --font-sans: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-heading: "Bahnschrift", "DIN Alternate", "Barlow Semi Condensed", "Arial Narrow", system-ui, sans-serif;
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-keep: var(--keep);
+  --color-keep-bg: var(--keep-bg);
+  --color-skip: var(--skip);
+  --color-skip-bg: var(--skip-bg);
+  --color-warn: var(--warn);
+  --color-warn-bg: var(--warn-bg);
+  --color-link: var(--link);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+  /* strong curves: UI motion that starts at once and settles, never ease-in */
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+}
+
+:root {
+  color-scheme: light dark;
+  --radius: 0.625rem;
+  --background: #f4f3f8;
+  --foreground: #191624;
+  --card: #ffffff;
+  --card-foreground: #191624;
+  --popover: #ffffff;
+  --popover-foreground: #191624;
+  --primary: #f0388f;
+  --primary-foreground: #191624;
+  --secondary: #ecebf3;
+  --secondary-foreground: #191624;
+  --muted: #ecebf3;
+  --muted-foreground: #625d75;
+  --accent: #ecebf3;
+  --accent-foreground: #191624;
+  --destructive: #c2361f;
+  --border: #dddbe8;
+  --input: #d3d0e0;
+  --ring: #6d5ae6;
+  --keep: #0f7a4f;
+  --keep-bg: #d7f5e7;
+  --skip: #c2361f;
+  --skip-bg: #ffe3dc;
+  --warn: #8a5a00;
+  --warn-bg: #fff1c7;
+  --link: #4b3fbf;
+  --chart-1: #f0388f;
+  --chart-2: #6d5ae6;
+  --chart-3: #0f7a4f;
+  --chart-4: #c98a00;
+  --chart-5: #625d75;
+  --shadow-card: 0 1px 2px rgb(25 22 36 / 0.06), 0 12px 32px -12px rgb(25 22 36 / 0.25);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #15131d;
+    --foreground: #f1eff7;
+    --card: #1d1a28;
+    --card-foreground: #f1eff7;
+    --popover: #221f2f;
+    --popover-foreground: #f1eff7;
+    --primary: #ff5cad;
+    --primary-foreground: #191624;
+    --secondary: #262234;
+    --secondary-foreground: #f1eff7;
+    --muted: #262234;
+    --muted-foreground: #a29db3;
+    --accent: #2c2840;
+    --accent-foreground: #f1eff7;
+    --destructive: #ff7a5c;
+    --border: #322d44;
+    --input: #3a3450;
+    --ring: #ff5cad;
+    --keep: #4ade9b;
+    --keep-bg: #173a2c;
+    --skip: #ff7a5c;
+    --skip-bg: #45201a;
+    --warn: #fcd34d;
+    --warn-bg: #3d2f12;
+    --link: #b3a8ff;
+    --chart-1: #ff5cad;
+    --chart-2: #b3a8ff;
+    --chart-3: #4ade9b;
+    --chart-4: #fcd34d;
+    --chart-5: #a29db3;
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.3), 0 18px 40px -16px rgb(0 0 0 / 0.7);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html {
+    @apply font-sans antialiased;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  /* keyboard focus is always plain to see; components that draw their own ring keep it */
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  /* large condensed type reads too loose: tighten it as it grows; small labels stay at 0 */
+  h1,
+  h2 {
+    letter-spacing: -0.015em;
+  }
+}
+
+@layer components {
+  /* Translucent chrome: content scrolls under the bars instead of being cut off by them. */
+  .chrome {
+    background: color-mix(in srgb, var(--background) 72%, transparent);
+    backdrop-filter: blur(20px) saturate(170%);
+  }
+  @media (prefers-reduced-transparency: reduce) {
+    .chrome {
+      background: var(--background);
+      backdrop-filter: none;
+    }
+  }
+
+  /* The review deck: a 9:16 card dragged by hand. Review.tsx moves it frame by frame while dragging and sets the
+     transition for the throw (from the release velocity) or the spring back; these rules give it its shape. */
+  .deck-card {
+    position: relative;
+    height: min(74vh, 720px);
+    aspect-ratio: 9 / 16;
+    max-width: calc(100vw - 2rem);
+    overflow: hidden;
+    border-radius: 20px;
+    background: #000;
+    box-shadow: var(--shadow-card);
+    touch-action: pan-y;
+    user-select: none;
+    cursor: grab;
+    transition:
+      transform 200ms var(--ease-out),
+      opacity 200ms var(--ease-out);
+    /* the next card is promoted from behind: it grows into place */
+    @starting-style {
+      transform: scale(0.95) translateY(14px);
+      opacity: 0.6;
+    }
+  }
+  /* after a key press: the next card is simply there */
+  .deck-card.instant {
+    transition: none;
+    @starting-style {
+      transform: none;
+      opacity: 1;
+    }
+  }
+  .deck-card.dragging {
+    cursor: grabbing;
+    will-change: transform;
+  }
+  .deck-card.back {
+    transform: scale(0.95) translateY(14px);
+    opacity: 0.5;
+    pointer-events: none;
+    box-shadow: none;
+    background: var(--muted);
+  }
+  .deck-card video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    pointer-events: none;
+  }
+  .deck-stamp {
+    position: absolute;
+    top: 1.5rem;
+    padding: 0.1rem 0.7rem;
+    border: 4px solid;
+    border-radius: 10px;
+    font: 700 2.25rem/1.1 var(--font-heading);
+    letter-spacing: 0.04em;
+    background: rgb(0 0 0 / 0.3);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .deck-stamp.keep {
+    left: 1.25rem;
+    color: #4ade9b;
+    transform: rotate(-10deg);
+  }
+  .deck-stamp.skip {
+    right: 1.25rem;
+    color: #ff7a5c;
+    transform: rotate(10deg);
+  }
+  @media (max-width: 640px) {
+    .deck-card {
+      height: min(60vh, 640px);
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .deck-card {
+      transition: opacity 150ms ease;
+      @starting-style {
+        transform: none;
+        opacity: 0;
+      }
+    }
+  }
+}

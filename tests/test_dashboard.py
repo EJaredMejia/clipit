@@ -1,5 +1,4 @@
 import json
-import shutil
 import sqlite3
 import subprocess
 import threading
@@ -51,9 +50,11 @@ def test_page_and_data(site):
     base, _, ids = site
     status, headers, page = call(base + "/")
     csp = headers["Content-Security-Policy"]
-    assert status == 200 and b'<script src="/app.js">' in page
+    assert status == 200 and b'src="/assets/app.js"' in page and b"<script>" not in page
     assert "default-src 'self'" in csp and "script-src" not in csp  # no inline scripts, so injected HTML can't run any
-    assert call(base + "/app.js")[0] == 200
+    for asset, ctype in (("/assets/app.js", "text/javascript"), ("/assets/app.css", "text/css")):
+        status, headers, _ = call(base + asset)
+        assert status == 200 and headers["Content-Type"].startswith(ctype)  # nosniff: a wrong type would block it
     status, headers, body = call(base + "/api/data")
     clips = json.loads(body)["clips"]
     assert status == 200 and [c["id"] for c in clips] == ids and clips[0]["title"] == CLIP["title"]  # sent as data
@@ -146,33 +147,6 @@ def test_reveal_failures_are_errors_except_explorers_exit_code(site, monkeypatch
     assert call(base + "/api/reveal", {"clip": cid})[0] == 500  # the page shows an error, not "Opened"
 
 
-NODE = shutil.which("node")
-
-
-@pytest.mark.skipif(not NODE, reason="needs Node.js (CI installs it)")
-def test_review_deck_decide_and_undo(tmp_path):
-    """Runs dashboard.js itself under Node (tests/dashboard_deck.js) with scripted verdict saves."""
-    assert NODE  # the skipif above; pyright doesn't narrow through it
-    harness = (Path(__file__).parent / "dashboard_deck.js").read_text(encoding="utf-8")
-    prelude, scenarios = harness.split("// SCENARIOS\n")
-    page = (Path(dashboard.__file__).parent / "dashboard.js").read_text(encoding="utf-8")
-    (tmp_path / "deck.cjs").write_text(f"{prelude}\n{page}\n{scenarios}", encoding="utf-8")
-    r = subprocess.run([NODE, str(tmp_path / "deck.cjs")], capture_output=True, text=True, timeout=60)
-    assert r.returncode == 0, r.stderr
-    got = json.loads(r.stdout.strip().splitlines()[-1])
-    for case in got.values():
-        assert case["ordered"] and case["pending"] == 0  # one verdict write at a time, none left marked pending
-
-    # Keep, Undo, Keep again with the first save failing late: the later Keep and its Undo entry survive
-    assert got["keepUndoKeep"] == {**got["keepUndoKeep"], "sent": ["keep", None, "keep"], "history": [1], "queue": [2]}
-    # a lone failed Keep: card back on top, nothing to undo
-    assert got["keepFails"]["history"] == [] and got["keepFails"]["queue"] == [1, 2]
-    # Undo's save fails: the Keep stays decided and undoable
-    assert got["undoFails"]["sent"] == ["keep", None] and got["undoFails"]["history"] == [1] and got["undoFails"]["queue"] == [2]
-    # quick Keep then Undo: saved in that order, card back on top
-    assert got["keepUndo"]["sent"] == ["keep", None] and got["keepUndo"]["history"] == [] and got["keepUndo"]["queue"] == [1, 2]
-
-
 def test_post_to_youtube_from_the_page(site, monkeypatch, tmp_path):
     base, conn, (cid, outside) = site
     monkeypatch.setattr(youtube, "TOKEN", tmp_path / "missing.json")
@@ -209,67 +183,6 @@ def test_post_text_edits(site):
     assert call(base + "/api/text", {"clip": 999, "field": "title", "text": "t"})[0] == 404
     assert call(base + "/api/text", {"clip": cid, "field": "title", "text": "t"}, Origin="https://evil.example")[0] == 403
     assert db.overview(conn)["clips"][0]["title"] == "New <title>"
-
-
-@pytest.mark.skipif(not NODE, reason="needs Node.js (CI installs it)")
-def test_text_autosave_keeps_latest_draft(tmp_path):
-    """A slow save cannot erase newer typing; failures retain the draft for retry."""
-    assert NODE
-    harness = (Path(__file__).parent / "dashboard_deck.js").read_text(encoding="utf-8")
-    prelude = harness.split("// SCENARIOS\n")[0]
-    page = (Path(dashboard.__file__).parent / "dashboard.js").read_text(encoding="utf-8")
-    scenarios = r"""
-(async () => {
-  const assert = require("node:assert/strict");
-  const sent = [];
-  let release;
-  save = async (path, body) => {
-    sent.push(body.text);
-    if (sent.length === 1) await new Promise((resolve) => { release = resolve; });
-    return true;
-  };
-  drafts["1:text:title"] = "First";
-  const first = saveText(1, "title");
-  await Promise.resolve();
-  drafts["1:text:title"] = "Latest";
-  assert.equal(saveText(1, "title"), first);
-  release();
-  assert.equal(await first, true);
-  assert.deepEqual(sent, ["First", "Latest"]);
-  assert.equal("1:text:title" in drafts, false);
-  save = async () => false;
-  drafts["1:text:youtube"] = "Keep on failure";
-  assert.equal(await saveText(1, "youtube"), false);
-  assert.equal(drafts["1:text:youtube"], "Keep on failure");
-  save = async () => true;
-  assert.equal(await saveText(1, "youtube"), true);
-  assert.equal("1:text:youtube" in drafts, false);
-  drafts["1:text:title"] = "   ";
-  assert.equal(await saveText(1, "title"), false);
-  assert.equal(drafts["1:text:title"], "   ");
-  drafts["1:text:youtube"] = "";
-  assert.equal(await saveText(1, "youtube"), true);
-})().catch((e) => { console.error(e); process.exitCode = 1; });
-"""
-    script = tmp_path / "autosave.cjs"
-    script.write_text(f"{prelude}\n{page}\n{scenarios}", encoding="utf-8")
-    result = subprocess.run([NODE, str(script)], capture_output=True, text=True, timeout=60)
-    assert result.returncode == 0, result.stderr
-
-
-@pytest.mark.skipif(not NODE, reason="needs Node.js (CI installs it)")
-def test_autosave_review_regressions(tmp_path):
-    """Exercise posting races, deferred detail redraws, and rebuilt save errors in the page script."""
-    assert NODE
-    tests = Path(__file__).parent
-    prelude = (tests / "dashboard_deck.js").read_text(encoding="utf-8").split("// SCENARIOS\n")[0]
-    page = (Path(dashboard.__file__).parent / "dashboard.js").read_text(encoding="utf-8")
-    prelude += "\nconst documentListeners = {}; document.addEventListener = (name, fn) => { documentListeners[name] = fn; };\n"
-    scenarios = (tests / "dashboard_autosave_review.js").read_text(encoding="utf-8")
-    script = tmp_path / "autosave_review.cjs"
-    script.write_text(f"{prelude}\n{page}\n{scenarios}", encoding="utf-8")
-    result = subprocess.run([NODE, str(script)], capture_output=True, text=True, timeout=60)
-    assert result.returncode == 0, result.stderr
 
 
 def test_delete_removes_clip_and_video_only_inside_out(site: Site, tmp_path: Path) -> None:
