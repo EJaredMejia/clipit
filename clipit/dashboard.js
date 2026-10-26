@@ -460,8 +460,10 @@ function deleteButton(c) {
 }
 
 $("purge").addEventListener("click", async () => {
-  const n = data.clips.filter(VIEWS.skip[1]).length;
-  if (!confirm(`Delete all ${n} skipped clips and their videos? This can't be undone.`)) return;
+  const skipped = data.clips.filter(VIEWS.skip[1]);
+  const live = skipped.filter((c) => posted(c)).length;
+  const gone = live ? ` ${live} of them were posted: those posts stay up, clipit just forgets them.` : "";
+  if (!confirm(`Delete all ${skipped.length} skipped clips and their videos? This can't be undone.${gone}`)) return;
   if (data.clips.find((x) => x.id === selected)?.verdict === "skip") select(null); // let go of the playing video
   const r = await save("/api/delete-skipped", {});
   if (r?.failed) alert(`${r.failed} clip(s) weren't deleted: their video is open in another program. Close it and try again.`);

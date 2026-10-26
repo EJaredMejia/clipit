@@ -32,7 +32,7 @@ CHUNK = 1 << 20  # video bytes per range response: short responses keep a paused
 MAX_BODY = 32768  # a 5,000-character description, in UTF-8 and JSON escaped
 MAX_URL = 500
 REVEAL_TIMEOUT = 15
-DELETE_TRIES = 10  # 2 s for a locked video to be let go
+DELETE_WAIT = 2.0  # seconds a locked video gets to be let go
 
 
 def make_server(out: Path, port: int) -> http.server.ThreadingHTTPServer:
@@ -91,10 +91,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         req = self.read_json()
         if self.path == "/api/delete-skipped" and self.headers.get_content_type() == "application/json":
             deleted = failed = 0
+            deadline = time.monotonic() + DELETE_WAIT  # one wait for all: the page stops waiting after 15 s
             with self.conn() as conn:
                 for clip in db.skipped(conn):
                     try:
-                        deleted += self.delete(conn, clip)
+                        deleted += self.delete(conn, clip, deadline, only_skipped=True)
                     except OSError:
                         failed += 1
             return self.send(200, json.dumps({"deleted": deleted, "failed": failed}).encode())
@@ -113,7 +114,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/delete":
             try:
                 with self.conn() as conn:
-                    found = self.delete(conn, clip)
+                    found = self.delete(conn, clip, time.monotonic() + DELETE_WAIT)
             except OSError:
                 return self.send(409, b'{"error": "couldn\'t delete the video. Is it open in another program?"}')
         elif self.path == "/api/reveal":
@@ -170,18 +171,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = (self.out / file).resolve() if file else None
         return path if path and path.is_relative_to(self.out) and path.is_file() else None
 
-    def delete(self, conn: sqlite3.Connection, clip_id: int) -> bool:
-        """Delete the clip's row and its video together, or neither (OSError: the file couldn't be deleted).
-        False when there's no such clip or it's being uploaded."""
-        with db.deleting_clip(conn, clip_id) as file:
+    def delete(self, conn: sqlite3.Connection, clip_id: int, deadline: float, only_skipped: bool = False) -> bool:
+        """Delete the clip's row and its video together, or neither (OSError: the file couldn't be deleted by
+        `deadline`, a time.monotonic()). False when there's no such clip, it's being uploaded, or it isn't skipped."""
+        with db.deleting_clip(conn, clip_id, only_skipped) as file:
             path = (self.out / file).resolve() if file else None
             if path and path.is_relative_to(self.out):  # a db path pointing outside out/ isn't ours to delete
-                for attempt in range(DELETE_TRIES):
+                while True:
                     try:
                         path.unlink(missing_ok=True)
                         break
                     except PermissionError:  # Windows: open somewhere, often our own player's last range read
-                        if attempt == DELETE_TRIES - 1:
+                        if time.monotonic() >= deadline:
                             logger.warning("couldn't delete %s: it's open in another program", path)
                             raise
                         time.sleep(0.2)

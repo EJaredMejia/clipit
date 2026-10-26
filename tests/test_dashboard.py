@@ -224,21 +224,38 @@ def test_delete_removes_clip_and_video_only_inside_out(site, tmp_path):
 
 def test_delete_is_all_or_nothing_when_the_video_is_locked(site, tmp_path, monkeypatch):
     base, conn, (cid, other) = site
+    clock = [0.0]
 
     def locked(self, missing_ok=False):
         raise PermissionError("in use")  # what Windows says while another program has the file open
 
-    monkeypatch.setattr(dashboard, "DELETE_TRIES", 2)
-    monkeypatch.setattr(dashboard.time, "sleep", lambda s: None)
+    def sleep(s):
+        clock[0] += s
+
+    monkeypatch.setattr(dashboard.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(dashboard.time, "sleep", sleep)
     monkeypatch.setattr(Path, "unlink", locked)
     status, _, body = call(base + "/api/delete", {"clip": cid})
     assert status == 409 and b"open in another program" in body
     assert db.clip_file(conn, cid) and (tmp_path / "out" / "v1" / "clips" / "01_a.mp4").exists()  # row and file both stay
-    db.set_verdict(conn, cid, "skip")
-    db.set_verdict(conn, other, "skip")  # its path is outside out/: nothing to unlink, so it goes
+    assert clock[0] >= dashboard.DELETE_WAIT  # it waited for the lock to go before giving up
+    (tmp_path / "out" / "v1" / "clips" / "03_b.mp4").write_bytes(VIDEO)
+    db.save_clips(conn, "v1", [CLIP, {**CLIP, "start": 30.0, "end": 50.0, "file": "v1/../../secret.txt"},
+                               {**CLIP, "start": 60.0, "end": 80.0, "file": "v1/clips/03_b.mp4"}])  # fmt: skip
+    for (c,) in conn.execute("SELECT id FROM clips").fetchall():
+        db.set_verdict(conn, c, "skip")
+    clock[0] = 0.0
     status, _, body = call(base + "/api/delete-skipped", {})
-    assert status == 200 and json.loads(body) == {"deleted": 1, "failed": 1}
-    assert [c["id"] for c in db.overview(conn)["clips"]] == [cid]
+    assert status == 200 and json.loads(body) == {"deleted": 1, "failed": 2}  # only the one outside out/ had nothing to unlink
+    assert clock[0] < 2 * dashboard.DELETE_WAIT  # one wait for the whole batch, not one per locked video
+    assert other not in [c["id"] for c in db.overview(conn)["clips"]]
+
+
+def test_delete_skipped_spares_a_clip_kept_since(site):
+    _, conn, (cid, _) = site
+    with db.deleting_clip(conn, cid, only_skipped=True) as file:  # another tab undid the skip after the list was read
+        assert file is None
+    assert db.clip_file(conn, cid)
 
 
 def test_delete_skipped(site, tmp_path):
