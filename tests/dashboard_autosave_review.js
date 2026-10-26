@@ -73,6 +73,40 @@
   assert.match($("player").children[0].attrs.src, /new.mp4/);
   assert.equal($("info").children[0].children[0].children[0], "Updated");
 
+  // A held pointer must preserve the original Copy button across blur and even a slow save/poll.
+  data.clips = [clip];
+  renderDetail();
+  const heldBox = fieldBox($("info"));
+  const copy = descendants($("info")).find((el) => el.tagName === "BUTTON" && el.children.includes("Copy"));
+  const pointerEvent = { isPrimary: true, target: copy, pointerId: 7 };
+  document.activeElement = heldBox;
+  documentListeners.pointerdown(pointerEvent);
+  data.clips = [{ ...clip, title: "Changed during press" }];
+  document.activeElement = copy;
+  await heldBox.listeners.blur();
+  await new Promise((resolve) => setTimeout(resolve, 10)); // user is still holding the mouse down
+  renderDetail(); // a poll/save redraw must also respect the press
+  assert.equal($("info").contains(copy), true);
+  documentListeners.pointerup(pointerEvent);
+  let copied = "";
+  Object.defineProperty(globalThis, "navigator", { configurable: true, value: {
+    clipboard: { writeText: async (text) => { copied = text; } },
+  } });
+  await copy.listeners.click();
+  assert.equal(copied, heldBox.value);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(detailPointer, null);
+  assert.equal(shown.key, JSON.stringify(data.clips[0]));
+
+  // Cancelling a pointer also applies the deferred update without leaving controls locked.
+  const cancelledBox = fieldBox($("info"));
+  documentListeners.pointerdown({ ...pointerEvent, target: cancelledBox });
+  data.clips = [{ ...clip, title: "Changed during cancelled press" }];
+  documentListeners.pointercancel(pointerEvent);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(detailPointer, null);
+  assert.equal(shown.key, JSON.stringify(data.clips[0]));
+
   // A new title save starts after the first title finishes, while the original description is still pending.
   const tick = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
   const pendingSaves = [];

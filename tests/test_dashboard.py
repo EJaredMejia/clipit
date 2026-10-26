@@ -261,6 +261,7 @@ def test_autosave_review_regressions(tmp_path):
     tests = Path(__file__).parent
     prelude = (tests / "dashboard_deck.js").read_text(encoding="utf-8").split("// SCENARIOS\n")[0]
     page = (Path(dashboard.__file__).parent / "dashboard.js").read_text(encoding="utf-8")
+    prelude += "\nconst documentListeners = {}; document.addEventListener = (name, fn) => { documentListeners[name] = fn; };\n"
     scenarios = (tests / "dashboard_autosave_review.js").read_text(encoding="utf-8")
     script = tmp_path / "autosave_review.cjs"
     script.write_text(f"{prelude}\n{page}\n{scenarios}", encoding="utf-8")

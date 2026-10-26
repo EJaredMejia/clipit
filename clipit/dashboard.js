@@ -25,6 +25,7 @@ let etag = "";
 let view = "ready"; // the Clips tab is where kept clips get posted
 let selected = null; // clip id
 let shown = { id: null, file: null, key: "" }; // what the detail panel renders now, so polling doesn't redraw it for nothing
+let detailPointer = null; // preserve detail controls from pointerdown through click
 const textWrites = new Map(); // one ordered autosave per clip field
 const drafts = {}; // post links typed but not saved yet, by "clipId:platform"
 let queue = []; // review deck: unreviewed clip ids in random order, queue[0] is the card on top
@@ -220,6 +221,7 @@ function renderDetail() {
     shown = { id: null, file: null, key: "" };
     return;
   }
+  if (shown.id === c.id && detailPointer?.clip === c.id) return;
   if (shown.id === c.id && $("info").contains(document.activeElement) && document.activeElement?.tagName === "TEXTAREA") return;
   const key = JSON.stringify(c);
   if (shown.id === c.id && shown.key === key) return; // unchanged: keep the focus and anything typed
@@ -731,6 +733,23 @@ function showTab(tab) {
   for (const v of document.querySelectorAll("[role=tabpanel][hidden] video")) v.pause();
   window.history.replaceState(null, "", `#${tab.id.replace(/-tab$/, "")}`); // a reload comes back to this tab
   if (tab.id === "clips-tab" && selected === null) select(firstOnWide());
+}
+
+// Blur and save responses can arrive between pointerdown and click. Keep the pressed control alive.
+document.addEventListener("pointerdown", (e) => {
+  if (e.isPrimary && $("info").contains(e.target)) detailPointer = { clip: shown.id, pointer: e.pointerId };
+}, true);
+for (const event of ["pointerup", "pointercancel"]) {
+  document.addEventListener(event, (e) => {
+    const pressed = detailPointer;
+    if (!pressed || pressed.pointer !== e.pointerId) return;
+    // The release's click dispatch completes before this timer; cancellation also releases the guard.
+    setTimeout(() => {
+      if (detailPointer !== pressed) return;
+      detailPointer = null;
+      renderDetail();
+    }, 0);
+  }, true);
 }
 
 for (const tab of document.querySelectorAll("[role=tab]")) tab.addEventListener("click", () => showTab(tab));
