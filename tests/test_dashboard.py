@@ -222,11 +222,30 @@ def test_delete_removes_clip_and_video_only_inside_out(site, tmp_path):
     assert (tmp_path / "secret.txt").exists()  # its db path points outside out/: the row goes, the file stays
 
 
+def test_delete_is_all_or_nothing_when_the_video_is_locked(site, tmp_path, monkeypatch):
+    base, conn, (cid, other) = site
+
+    def locked(self, missing_ok=False):
+        raise PermissionError("in use")  # what Windows says while another program has the file open
+
+    monkeypatch.setattr(dashboard, "DELETE_TRIES", 2)
+    monkeypatch.setattr(dashboard.time, "sleep", lambda s: None)
+    monkeypatch.setattr(Path, "unlink", locked)
+    status, _, body = call(base + "/api/delete", {"clip": cid})
+    assert status == 409 and b"open in another program" in body
+    assert db.clip_file(conn, cid) and (tmp_path / "out" / "v1" / "clips" / "01_a.mp4").exists()  # row and file both stay
+    db.set_verdict(conn, cid, "skip")
+    db.set_verdict(conn, other, "skip")  # its path is outside out/: nothing to unlink, so it goes
+    status, _, body = call(base + "/api/delete-skipped", {})
+    assert status == 200 and json.loads(body) == {"deleted": 1, "failed": 1}
+    assert [c["id"] for c in db.overview(conn)["clips"]] == [cid]
+
+
 def test_delete_skipped(site, tmp_path):
     base, conn, (cid, other) = site
     db.set_verdict(conn, cid, "skip")
     status, _, body = call(base + "/api/delete-skipped", {})
-    assert status == 200 and json.loads(body) == {"deleted": 1}
+    assert status == 200 and json.loads(body) == {"deleted": 1, "failed": 0}
     assert not (tmp_path / "out" / "v1" / "clips" / "01_a.mp4").exists()
     assert [c["id"] for c in db.overview(conn)["clips"]] == [other]
     req = urllib.request.Request(base + "/api/delete-skipped", b"{}", {"Content-Type": "text/plain"})

@@ -90,6 +90,7 @@ async function load() {
 }
 
 async function save(path, body) {
+  let reply;
   try {
     const r = await fetch(path, {
       method: "POST",
@@ -97,13 +98,14 @@ async function save(path, body) {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(FETCH_MS),
     });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    reply = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(reply.error || `HTTP ${r.status}`);
   } catch (e) {
     setStatus(`Couldn't save (${e.message})`, true);
     return false;
   }
   await load();
-  return true;
+  return reply;
 }
 
 // Verdict writes go out one at a time, in order: a quick Keep then Undo must land as Keep then Undo.
@@ -446,9 +448,11 @@ function deleteButton(c) {
       type: "button",
       class: "ghost",
       onclick: async () => {
-        if (confirm(`Delete this clip's video and remove it from clipit? This can't be undone.${gone}`)) {
-          if (await save("/api/delete", { clip: c.id })) select(null);
-        }
+        if (!confirm(`Delete this clip's video and remove it from clipit? This can't be undone.${gone}`)) return;
+        $("player").replaceChildren(); // let go of the file: Windows can't delete a video that's being read
+        shown = { id: null, file: null, key: "" }; // so a failed delete puts the player back
+        if (await save("/api/delete", { clip: c.id })) select(null);
+        else renderDetail();
       },
     },
     "Delete",
@@ -457,7 +461,10 @@ function deleteButton(c) {
 
 $("purge").addEventListener("click", async () => {
   const n = data.clips.filter(VIEWS.skip[1]).length;
-  if (confirm(`Delete all ${n} skipped clips and their videos? This can't be undone.`)) await save("/api/delete-skipped", {});
+  if (!confirm(`Delete all ${n} skipped clips and their videos? This can't be undone.`)) return;
+  if (data.clips.find((x) => x.id === selected)?.verdict === "skip") select(null); // let go of the playing video
+  const r = await save("/api/delete-skipped", {});
+  if (r?.failed) alert(`${r.failed} clip(s) weren't deleted: their video is open in another program. Close it and try again.`);
 });
 
 function shuffle(a) {

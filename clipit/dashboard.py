@@ -19,6 +19,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import time
 import webbrowser
 from pathlib import Path
 
@@ -31,6 +32,7 @@ CHUNK = 1 << 20  # video bytes per range response: short responses keep a paused
 MAX_BODY = 32768  # a 5,000-character description, in UTF-8 and JSON escaped
 MAX_URL = 500
 REVEAL_TIMEOUT = 15
+DELETE_TRIES = 10  # 2 s for a locked video to be let go
 
 
 def make_server(out: Path, port: int) -> http.server.ThreadingHTTPServer:
@@ -88,10 +90,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         req = self.read_json()
         if self.path == "/api/delete-skipped" and self.headers.get_content_type() == "application/json":
+            deleted = failed = 0
             with self.conn() as conn:
-                files = db.delete_skipped(conn)
-            self.remove(files)
-            return self.send(200, json.dumps({"deleted": len(files)}).encode())
+                for clip in db.skipped(conn):
+                    try:
+                        deleted += self.delete(conn, clip)
+                    except OSError:
+                        failed += 1
+            return self.send(200, json.dumps({"deleted": deleted, "failed": failed}).encode())
         clip = req.get("clip")
         if not isinstance(clip, int) or isinstance(clip, bool):
             return self.send(400, b'{"error": "expected JSON with a clip id"}')
@@ -105,10 +111,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with self.conn() as conn:
                 found = db.set_text(conn, clip, req["field"], req["text"])
         elif self.path == "/api/delete":
-            with self.conn() as conn:
-                file = db.delete_clip(conn, clip)
-            found = file is not None
-            self.remove([file] if file else [])
+            try:
+                with self.conn() as conn:
+                    found = self.delete(conn, clip)
+            except OSError:
+                return self.send(409, b'{"error": "couldn\'t delete the video. Is it open in another program?"}')
         elif self.path == "/api/reveal":
             if not (path := self.clip_path(clip)):
                 return self.send(404, b'{"error": "no video"}')
@@ -163,15 +170,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = (self.out / file).resolve() if file else None
         return path if path and path.is_relative_to(self.out) and path.is_file() else None
 
-    def remove(self, files: list[str]) -> None:
-        """Delete the videos of clips just removed from the catalog, never anything outside out/."""
-        for file in files:
-            path = (self.out / file).resolve()
-            if path.is_relative_to(self.out):
-                try:
-                    path.unlink(missing_ok=True)
-                except OSError as e:  # e.g. Windows: the player is still reading it. The catalog is what counts.
-                    logger.warning("couldn't delete %s: %s", path, e)
+    def delete(self, conn: sqlite3.Connection, clip_id: int) -> bool:
+        """Delete the clip's row and its video together, or neither (OSError: the file couldn't be deleted).
+        False when there's no such clip or it's being uploaded."""
+        with db.deleting_clip(conn, clip_id) as file:
+            path = (self.out / file).resolve() if file else None
+            if path and path.is_relative_to(self.out):  # a db path pointing outside out/ isn't ours to delete
+                for attempt in range(DELETE_TRIES):
+                    try:
+                        path.unlink(missing_ok=True)
+                        break
+                    except PermissionError:  # Windows: open somewhere, often our own player's last range read
+                        if attempt == DELETE_TRIES - 1:
+                            logger.warning("couldn't delete %s: it's open in another program", path)
+                            raise
+                        time.sleep(0.2)
+        return file is not None
 
     def video(self, clip_id: int) -> None:
         if not (path := self.clip_path(clip_id)):

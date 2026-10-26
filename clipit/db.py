@@ -260,19 +260,26 @@ def clip_file(conn: sqlite3.Connection, clip_id: int) -> str | None:
     return row and row["file"]
 
 
-def delete_clip(conn: sqlite3.Connection, clip_id: int) -> str | None:
-    """Remove the clip and its upload records. Returns its file, for the caller to delete; None when there's no such
-    clip or it's being uploaded right now."""
-    row = conn.execute(f"DELETE FROM clips WHERE id = ? AND {_NOT_UPLOADING} RETURNING file", (clip_id,)).fetchone()  # noqa: S608 (constant)
-    return row and row["file"]
+@contextlib.contextmanager
+def deleting_clip(conn: sqlite3.Connection, clip_id: int) -> Iterator[str | None]:
+    """Remove the clip and its upload records, yielding its file for the block to delete. All or nothing: if the block
+    raises (the file couldn't be deleted), the row stays. Yields None when there's no such clip or it's being uploaded."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        rows = conn.execute(
+            """DELETE FROM clips WHERE id = ? AND id NOT IN (SELECT clip_id FROM uploads WHERE status = 'uploading')
+               RETURNING file""",
+            (clip_id,),
+        ).fetchall()
+        yield rows[0]["file"] if rows else None
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
 
 
-def delete_skipped(conn: sqlite3.Connection) -> list[str]:
-    """Remove every clip the user skipped (except one being uploaded right now). Returns their files, for the caller to delete."""
-    return [r["file"] for r in conn.execute(f"DELETE FROM clips WHERE verdict = 'skip' AND {_NOT_UPLOADING} RETURNING file")]  # noqa: S608 (constant)
-
-
-_NOT_UPLOADING = "id NOT IN (SELECT clip_id FROM uploads WHERE status = 'uploading')"  # deleting it would break the upload
+def skipped(conn: sqlite3.Connection) -> list[int]:
+    return [r[0] for r in conn.execute("SELECT id FROM clips WHERE verdict = 'skip'")]
 
 
 def set_verdict(conn: sqlite3.Connection, clip_id: int, verdict: str | None) -> bool:
