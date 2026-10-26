@@ -25,6 +25,8 @@ let etag = "";
 let view = "ready"; // the Clips tab is where kept clips get posted
 let selected = null; // clip id
 let shown = { id: null, file: null, key: "" }; // what the detail panel renders now, so polling doesn't redraw it for nothing
+let detailPointer = null; // preserve detail controls from pointerdown through click
+const textWrites = new Map(); // one ordered autosave per clip field
 const drafts = {}; // post links typed but not saved yet, by "clipId:platform"
 let queue = []; // review deck: unreviewed clip ids in random order, queue[0] is the card on top
 const history = []; // {id} per decision made in the deck this visit, newest last, for undo
@@ -219,6 +221,8 @@ function renderDetail() {
     shown = { id: null, file: null, key: "" };
     return;
   }
+  if (shown.id === c.id && detailPointer?.clip === c.id) return;
+  if (shown.id === c.id && $("info").contains(document.activeElement) && document.activeElement?.tagName === "TEXTAREA") return;
   const key = JSON.stringify(c);
   if (shown.id === c.id && shown.key === key) return; // unchanged: keep the focus and anything typed
   if (shown.id !== c.id || shown.file !== c.file) {
@@ -340,27 +344,70 @@ function advanceFrom(id, order) {
   select([...order.slice(i + 1), ...order.slice(0, i).reverse()].find(inView) ?? null);
 }
 
+// Save status belongs to the field, so rebuilding its DOM preserves errors and validation messages.
+function textState(key) {
+  if (!textWrites.has(key)) {
+    textWrites.set(key, {
+      running: null,
+      status: "Saved automatically",
+      notify: () => {},
+      setStatus(text) {
+        this.status = text;
+        this.notify(text);
+      },
+    });
+  }
+  return textWrites.get(key);
+}
+
+// Keep the latest draft until its exact value has reached the database. New input during a save is sent next.
+function saveText(clip, field) {
+  const key = `${clip}:text:${field}`;
+  const state = textState(key);
+  if (state.running) return state.running;
+  state.running = Promise.resolve().then(async () => {
+    while (key in drafts) {
+      const text = drafts[key];
+      if (field === "title" && !text.trim()) {
+        state.setStatus("Title is required");
+        return false;
+      }
+      state.setStatus("Saving…");
+      if (!(await save("/api/text", { clip, field, text }))) {
+        state.setStatus("Couldn't save — edit or leave the field to retry");
+        return false;
+      }
+      if (drafts[key] === text) delete drafts[key];
+    }
+    state.setStatus("Saved automatically");
+    return true;
+  }).finally(() => { state.running = null; });
+  return state.running;
+}
+
 // Post text the user can edit and copy. Saved edits are theirs: a re-render of the clip never overwrites them.
 function editable(c, field, label, text, max, platform) {
   const key = `${c.id}:text:${field}`; // post-link drafts use "id:platform"
   const box = h("textarea", { rows: field === "title" ? 2 : 5, maxlength: String(max), "aria-label": label });
   box.value = drafts[key] ?? text;
   const count = h("span", { class: "count" });
-  const saveButton = h("button", { type: "button", class: "ghost" }, "Save");
+  const state = textState(key);
+  const saved = h("span", { class: "count", role: "status" }, state.status);
+  state.notify = (text) => { saved.textContent = text; };
   const copyButton = h("button", { type: "button", class: "ghost" }, "Copy");
   const sync = () => {
     count.textContent = `${box.value.length}/${max}`;
-    saveButton.disabled = box.value === text || (field === "title" && !box.value.trim());
   };
   sync();
   box.addEventListener("input", () => {
     drafts[key] = box.value; // survives the redraws polling makes until it's saved
     sync();
+    saveText(c.id, field);
   });
-  saveButton.addEventListener("click", async () => {
-    saveButton.disabled = true;
-    if (await save("/api/text", { clip: c.id, field, text: box.value })) delete drafts[key];
-    else sync();
+  box.addEventListener("blur", async () => {
+    await saveText(c.id, field);
+    // Polling may have cached newer details while this textarea held focus, even if the next poll is 304.
+    renderDetail();
   });
   copyButton.addEventListener("click", async () => {
     try {
@@ -376,7 +423,7 @@ function editable(c, field, label, text, max, platform) {
   return h(
     "div",
     { class: "copy" },
-    h("div", { class: "copy-head" }, h("span", { class: "label" }, label), count, saveButton, copyButton),
+    h("div", { class: "copy-head" }, h("span", { class: "label" }, label), count, saved, copyButton),
     box,
     live ? h("p", { class: "hint" }, `Already posted: saving here doesn't change the ${PLATFORMS[platform]} post.`) : "",
   );
@@ -387,11 +434,15 @@ function postNow(c) {
   if (c.uploads.youtube) return "";
   const button = h("button", { type: "button", class: "primary" }, "Post to YouTube now");
   button.addEventListener("click", async () => {
-    const saved = { title: c.title, youtube: description(c) };
-    if (Object.entries(saved).some(([f, text]) => (drafts[`${c.id}:text:${f}`] ?? text) !== text)) {
-      alert("Save your title and description changes first: the post uses the saved text.");
-      return;
-    }
+    const fields = ["title", "youtube"];
+    do {
+      const results = await Promise.all(fields.map((field) => saveText(c.id, field)));
+      if (results.some((ok) => !ok)) {
+        alert("Couldn't save your latest title or description. Check the fields before posting.");
+        return;
+      }
+      // A field can be edited again after its save finishes while the other field is still saving.
+    } while (fields.some((field) => `${c.id}:text:${field}` in drafts || textState(`${c.id}:text:${field}`).running));
     if (!confirm("Post this clip publicly on your YouTube channel now?")) return;
     button.disabled = true;
     button.textContent = "Posting…";
@@ -682,6 +733,23 @@ function showTab(tab) {
   for (const v of document.querySelectorAll("[role=tabpanel][hidden] video")) v.pause();
   window.history.replaceState(null, "", `#${tab.id.replace(/-tab$/, "")}`); // a reload comes back to this tab
   if (tab.id === "clips-tab" && selected === null) select(firstOnWide());
+}
+
+// Blur and save responses can arrive between pointerdown and click. Keep the pressed control alive.
+document.addEventListener("pointerdown", (e) => {
+  if (e.isPrimary && $("info").contains(e.target)) detailPointer = { clip: shown.id, pointer: e.pointerId };
+}, true);
+for (const event of ["pointerup", "pointercancel"]) {
+  document.addEventListener(event, (e) => {
+    const pressed = detailPointer;
+    if (!pressed || pressed.pointer !== e.pointerId) return;
+    // The release's click dispatch completes before this timer; cancellation also releases the guard.
+    setTimeout(() => {
+      if (detailPointer !== pressed) return;
+      detailPointer = null;
+      renderDetail();
+    }, 0);
+  }, true);
 }
 
 for (const tab of document.querySelectorAll("[role=tab]")) tab.addEventListener("click", () => showTab(tab));
