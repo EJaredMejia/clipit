@@ -342,30 +342,42 @@ function advanceFrom(id, order) {
   select([...order.slice(i + 1), ...order.slice(0, i).reverse()].find(inView) ?? null);
 }
 
+// Save status belongs to the field, so rebuilding its DOM preserves errors and validation messages.
+function textState(key) {
+  if (!textWrites.has(key)) {
+    textWrites.set(key, {
+      running: null,
+      status: "Saved automatically",
+      notify: () => {},
+      setStatus(text) {
+        this.status = text;
+        this.notify(text);
+      },
+    });
+  }
+  return textWrites.get(key);
+}
+
 // Keep the latest draft until its exact value has reached the database. New input during a save is sent next.
 function saveText(clip, field) {
   const key = `${clip}:text:${field}`;
-  let state = textWrites.get(key);
-  if (!state) {
-    state = { running: null, notify: () => {} };
-    textWrites.set(key, state);
-  }
+  const state = textState(key);
   if (state.running) return state.running;
   state.running = Promise.resolve().then(async () => {
     while (key in drafts) {
       const text = drafts[key];
       if (field === "title" && !text.trim()) {
-        state.notify("Title is required");
+        state.setStatus("Title is required");
         return false;
       }
-      state.notify("Saving…");
+      state.setStatus("Saving…");
       if (!(await save("/api/text", { clip, field, text }))) {
-        state.notify("Couldn't save — edit or leave the field to retry");
+        state.setStatus("Couldn't save — edit or leave the field to retry");
         return false;
       }
       if (drafts[key] === text) delete drafts[key];
     }
-    state.notify("Saved automatically");
+    state.setStatus("Saved automatically");
     return true;
   }).finally(() => { state.running = null; });
   return state.running;
@@ -377,10 +389,9 @@ function editable(c, field, label, text, max, platform) {
   const box = h("textarea", { rows: field === "title" ? 2 : 5, maxlength: String(max), "aria-label": label });
   box.value = drafts[key] ?? text;
   const count = h("span", { class: "count" });
-  const saved = h("span", { class: "count", role: "status" }, "Saved automatically");
-  if (!textWrites.has(key)) textWrites.set(key, { running: null, notify: () => {} });
-  textWrites.get(key).notify = (text) => { saved.textContent = text; };
-  if (key in drafts) saved.textContent = "Saving…";
+  const state = textState(key);
+  const saved = h("span", { class: "count", role: "status" }, state.status);
+  state.notify = (text) => { saved.textContent = text; };
   const copyButton = h("button", { type: "button", class: "ghost" }, "Copy");
   const sync = () => {
     count.textContent = `${box.value.length}/${max}`;
@@ -391,7 +402,11 @@ function editable(c, field, label, text, max, platform) {
     sync();
     saveText(c.id, field);
   });
-  box.addEventListener("blur", () => saveText(c.id, field));
+  box.addEventListener("blur", async () => {
+    await saveText(c.id, field);
+    // Polling may have cached newer details while this textarea held focus, even if the next poll is 304.
+    renderDetail();
+  });
   copyButton.addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText(box.value);
@@ -417,11 +432,15 @@ function postNow(c) {
   if (c.uploads.youtube) return "";
   const button = h("button", { type: "button", class: "primary" }, "Post to YouTube now");
   button.addEventListener("click", async () => {
-    const results = await Promise.all([saveText(c.id, "title"), saveText(c.id, "youtube")]);
-    if (results.some((ok) => !ok)) {
-      alert("Couldn't save your latest title or description. Check the fields before posting.");
-      return;
-    }
+    const fields = ["title", "youtube"];
+    do {
+      const results = await Promise.all(fields.map((field) => saveText(c.id, field)));
+      if (results.some((ok) => !ok)) {
+        alert("Couldn't save your latest title or description. Check the fields before posting.");
+        return;
+      }
+      // A field can be edited again after its save finishes while the other field is still saving.
+    } while (fields.some((field) => `${c.id}:text:${field}` in drafts || textState(`${c.id}:text:${field}`).running));
     if (!confirm("Post this clip publicly on your YouTube channel now?")) return;
     button.disabled = true;
     button.textContent = "Posting…";

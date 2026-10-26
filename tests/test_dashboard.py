@@ -252,3 +252,17 @@ def test_text_autosave_keeps_latest_draft(tmp_path):
     script.write_text(f"{prelude}\n{page}\n{scenarios}", encoding="utf-8")
     result = subprocess.run([NODE, str(script)], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(not NODE, reason="needs Node.js (CI installs it)")
+def test_autosave_review_regressions(tmp_path):
+    """Exercise posting races, deferred detail redraws, and rebuilt save errors in the page script."""
+    assert NODE
+    tests = Path(__file__).parent
+    prelude = (tests / "dashboard_deck.js").read_text(encoding="utf-8").split("// SCENARIOS\n")[0]
+    page = (Path(dashboard.__file__).parent / "dashboard.js").read_text(encoding="utf-8")
+    scenarios = (tests / "dashboard_autosave_review.js").read_text(encoding="utf-8")
+    script = tmp_path / "autosave_review.cjs"
+    script.write_text(f"{prelude}\n{page}\n{scenarios}", encoding="utf-8")
+    result = subprocess.run([NODE, str(script)], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
