@@ -109,11 +109,15 @@ first, public, at most 3 a day and at least 4 hours apart. Clips you skipped or 
 Set up once (free, about 15 minutes):
 
 1. In the [Google Cloud console](https://console.cloud.google.com), create a project and enable **YouTube Data API v3**.
-2. In **Google Auth Platform**, set up the consent screen as **External**, add the scope
-   `https://www.googleapis.com/auth/youtube.upload` and add your Google account as a test user.
-3. Click **Publish app** so it says **In production**. While it's in Testing, Google ends the login every 7 days and
-   posting stops. You don't need Google's verification to use it yourself: click through the "Google hasn't verified
-   this app" warning when you sign in.
+2. In **Google Auth Platform**, set up the consent screen as **External** and, under **Data Access**, add the scope
+   `https://www.googleapis.com/auth/youtube.upload`.
+3. The app starts in **Testing**, where only Google accounts listed as test users can sign in. Either:
+   - in **Audience** → **Test users**, add the Google account that owns the YouTube channel. Without this,
+     `clipit --youtube-login` fails with "Access blocked". In Testing, Google ends the login 7 days after you sign in,
+     so posting stops until you run `--youtube-login` again, every week; or
+   - fill in **Branding** (app name, support email), then in **Audience** click **Publish app** so it says
+     **In production**. The login then lasts. Google may ask to verify apps that use the YouTube upload scope, but you
+     don't need that to use it yourself: click through the "Google hasn't verified this app" warning when you sign in.
 4. In **Clients**, create a **Desktop app** client, download its JSON and save it as `~/.clipit/youtube_client.json`
    (Windows: `C:\Users\<you>\.clipit\youtube_client.json`).
 5. Run `clipit --youtube-login` and pick the channel to post to. The login is saved in `~/.clipit/youtube_token.json`.
