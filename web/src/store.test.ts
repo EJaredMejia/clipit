@@ -1,13 +1,12 @@
 // The deck's decide / undo bookkeeping and the post text autosave, against a fake server.
+// Nothing here waits a fixed time or a fixed number of ticks: how long a save's follow-up work takes differs between
+// machines (CI caught one). Tests await the actions themselves, or vi.waitFor the request they expect.
 import { afterEach, expect, test, vi } from "vitest";
-import { type Clip, deal, decide, flushTexts, saveText, set, setDraft, startFling, textStatus, undo, useClipit, verdictsSettled } from "./store";
+import { type Clip, deal, decide, flushTexts, saveText, set, setDraft, startFling, textStatus, undo, useClipit } from "./store";
 
 const drafts = () => useClipit.getState().drafts;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const tick = async () => {
-  for (let i = 0; i < 20; i++) await Promise.resolve();
-};
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 const clip = (id: number): Clip => ({
   id, vod_id: "v1", idx: id, file: `v1/clips/${id}.mp4`, start_s: 0, end_s: 20, title: `clip ${id}`, hook: "", caption: "",
@@ -22,7 +21,7 @@ afterEach(() => {
 
 // A fake server: /api/data serves the clips with the verdicts saved so far. Verdict saves follow plan[i] =
 // { fail, ms } for the i-th one, and each records whether every earlier save had finished when it was sent.
-async function deck(plan: { fail?: boolean; ms?: number }[], steps: () => void) {
+async function deck(plan: { fail?: boolean; ms?: number }[], steps: () => unknown[]) {
   let clips = [clip(1), clip(2)];
   const calls: { verdict: string | null; afterEarlier: boolean; done: boolean }[] = [];
   vi.stubGlobal("fetch", async (url: string, opts: RequestInit) => {
@@ -39,10 +38,7 @@ async function deck(plan: { fail?: boolean; ms?: number }[], steps: () => void) 
   });
   set({ data: { vods: [], clips }, etag: "", queue: [1, 2], history: [], inflight: new Map(), deckShown: null, flinging: false });
   deal(); // dealt in a known order: both are already in the queue
-  steps();
-  await sleep(50);
-  await verdictsSettled();
-  await sleep(50); // decide() / undo() finish after their save settles
+  await Promise.all(steps()); // each decide() / undo() resolves once its save and its follow-up are done
   expect(calls.every((c) => c.afterEarlier)).toBe(true); // one verdict write at a time
   expect(useClipit.getState().inflight.size).toBe(0); // none left marked pending
   return { sent: calls.map((c) => c.verdict), history: useClipit.getState().history.map((e) => e.id), queue: useClipit.getState().queue };
@@ -50,31 +46,21 @@ async function deck(plan: { fail?: boolean; ms?: number }[], steps: () => void) 
 const fling = (verdict: "keep" | "skip") => startFling() && decide(verdict); // a key press: no animation
 
 test("keep, undo, keep again with the first save failing late: the later keep and its undo entry survive", async () => {
-  const got = await deck([{ fail: true, ms: 80 }], () => {
-    fling("keep");
-    undo();
-    fling("keep");
-  });
+  const got = await deck([{ fail: true, ms: 80 }], () => [fling("keep"), undo(), fling("keep")]);
   expect(got).toEqual({ sent: ["keep", null, "keep"], history: [1], queue: [2] });
 });
 
 test("a lone failed keep puts the card back on top, with nothing to undo", async () => {
-  expect(await deck([{ fail: true }], () => fling("keep"))).toEqual({ sent: ["keep"], history: [], queue: [1, 2] });
+  expect(await deck([{ fail: true }], () => [fling("keep")])).toEqual({ sent: ["keep"], history: [], queue: [1, 2] });
 });
 
 test("when undo's save fails, the keep stays decided and undoable", async () => {
-  const got = await deck([{}, { fail: true }], () => {
-    fling("keep");
-    undo();
-  });
+  const got = await deck([{}, { fail: true }], () => [fling("keep"), undo()]);
   expect(got).toEqual({ sent: ["keep", null], history: [1], queue: [2] });
 });
 
 test("a quick keep then undo is saved in that order, card back on top", async () => {
-  const got = await deck([{ ms: 80 }, {}], () => {
-    fling("keep");
-    undo();
-  });
+  const got = await deck([{ ms: 80 }, {}], () => [fling("keep"), undo()]);
   expect(got).toEqual({ sent: ["keep", null], history: [], queue: [1, 2] });
 });
 
@@ -85,87 +71,92 @@ test("a card can't be flung twice while it's flying away", () => {
   expect(startFling()).toBe(false);
 });
 
-// Text saves: each resolves only when the test says so, true for 200 and false for a server error.
+// Text saves: each waits until the test answers it, true for 200 and false for a server error. sent() waits until the
+// page has sent the matching request, however many awaits the page needed to get there.
 function textServer() {
-  const pending: { field: string; text: string; reply: (ok: boolean) => void }[] = [];
+  const requests: { field: string; text: string; answered: boolean; reply: (ok: boolean) => void }[] = [];
   vi.stubGlobal("fetch", (url: string, opts: RequestInit) => {
     if (url === "/api/data") return Promise.resolve(json({ vods: [], clips: [] }));
     const body = JSON.parse(String(opts.body));
-    return new Promise((resolve) => pending.push({ ...body, reply: (ok) => resolve(ok ? json({ ok: true }) : json({ error: "x" }, 500)) }));
+    return new Promise((resolve) => {
+      const request = { ...body, answered: false, reply: (ok: boolean) => ((request.answered = true), resolve(ok ? json({ ok: true }) : json({ error: "x" }, 500))) };
+      requests.push(request);
+    });
   });
-  return pending;
+  const sent = (text: string) =>
+    vi.waitFor(() => {
+      const request = requests.find((r) => r.text === text && !r.answered);
+      if (!request) throw new Error(`"${text}" wasn't sent`);
+      return request;
+    });
+  return { requests, sent };
 }
 
 test("a slow save can't erase newer typing", async () => {
-  const pending = textServer();
+  const { requests, sent } = textServer();
   setDraft("1:text:title", "First");
   const first = saveText(1, "title");
-  await tick();
+  const slow = await sent("First");
   setDraft("1:text:title", "Latest");
   expect(saveText(1, "title")).toBe(first); // one save at a time per field
-  pending[0].reply(true);
-  await tick();
-  pending[1].reply(true);
+  slow.reply(true);
+  (await sent("Latest")).reply(true);
   expect(await first).toBe(true);
-  expect(pending.map((p) => p.text)).toEqual(["First", "Latest"]);
+  expect(requests.map((r) => r.text)).toEqual(["First", "Latest"]);
   expect("1:text:title" in drafts()).toBe(false);
 });
 
 test("a failed save keeps the draft and says so, and the next save sends it", async () => {
-  const pending = textServer();
+  const { sent } = textServer();
   setDraft("1:text:youtube", "Keep on failure");
   const failed = saveText(1, "youtube");
-  await tick();
-  pending[0].reply(false);
+  (await sent("Keep on failure")).reply(false);
   expect(await failed).toBe(false);
   expect(drafts()["1:text:youtube"]).toBe("Keep on failure");
   expect(textStatus("1:text:youtube")).toMatch(/Couldn't save/);
   const retry = saveText(1, "youtube");
-  await tick();
-  pending[1].reply(true);
+  (await sent("Keep on failure")).reply(true);
   expect(await retry).toBe(true);
   expect("1:text:youtube" in drafts()).toBe(false);
   expect(textStatus("1:text:youtube")).toBe("Saved automatically");
 });
 
 test("an empty title is never sent, an empty description is", async () => {
-  const pending = textServer();
+  const { requests, sent } = textServer();
   setDraft("1:text:title", "   ");
   expect(await saveText(1, "title")).toBe(false);
   expect(drafts()["1:text:title"]).toBe("   ");
   expect(textStatus("1:text:title")).toBe("Title is required");
-  expect(pending).toEqual([]);
+  expect(requests).toEqual([]);
   setDraft("1:text:youtube", "");
   const empty = saveText(1, "youtube");
-  await tick();
-  pending[0].reply(true);
+  (await sent("")).reply(true);
   expect(await empty).toBe(true);
 });
 
 test("before posting, every field's latest draft is saved, even one typed while the other was still saving", async () => {
-  const pending = textServer();
+  const { sent } = textServer();
   setDraft("1:text:title", "First title");
   setDraft("1:text:youtube", "New description");
   let flushed: boolean | null = null;
   const flushing = flushTexts(1, ["title", "youtube"]).then((ok) => (flushed = ok));
-  await tick();
-  expect(pending.length).toBe(2);
-  pending.find((p) => p.field === "title")!.reply(true);
-  await tick();
+  const description = await sent("New description");
+  (await sent("First title")).reply(true);
+  // the title's save has finished entirely (not just its request) while the description is still saving
+  await vi.waitFor(() => expect(textStatus("1:text:title")).toBe("Saved automatically"));
+  await vi.waitFor(() => expect("1:text:title" in drafts()).toBe(false));
   setDraft("1:text:title", "Latest title");
   const latest = saveText(1, "title");
-  await tick();
-  pending.find((p) => p.field === "youtube")!.reply(true);
-  await tick();
+  description.reply(true);
+  const title = await sent("Latest title");
   expect(flushed).toBe(null); // still waiting for the latest title
-  pending.find((p) => p.text === "Latest title")!.reply(true);
+  title.reply(true);
   await latest;
   await flushing;
   expect(flushed).toBe(true);
 
   setDraft("1:text:title", "Failed title");
   const failing = flushTexts(1, ["title", "youtube"]);
-  await tick();
-  pending.at(-1)!.reply(false);
+  (await sent("Failed title")).reply(false);
   expect(await failing).toBe(false); // the page says so and never asks to post
 });
