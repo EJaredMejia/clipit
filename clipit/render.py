@@ -8,6 +8,30 @@ from clipit.facecam import TOP
 from clipit.util import REMOTE, mmss, sh, write_atomic
 
 RENDER_TIMEOUT = 1800
+# Posting policy includes the creators historically associated with FaZe, regardless of later roster changes.
+FAZE_STREAMERS = frozenset(
+    {
+        "stableronaldo",
+        "lacy",
+        "jasontheween",
+        "silky",
+        "adapt",
+        "yourragegaming",
+        "yourrage",
+        "plaqueboymax",
+        "banks",
+        "rug",
+        "rain",
+        "apex",
+        "temperrr",
+        "swagg",
+        "jsmooth",
+        "kaysan",
+        "natehill",
+        "replays",
+        "cloakzy",
+    }
+)
 
 ASS_HEADER = """[Script Info]
 ScriptType: v4.00+
@@ -123,6 +147,10 @@ def post_texts(clip: dict) -> tuple[str, str]:
     The credit is added here, never by the AI, so injected chat can't make it tag or link someone else."""
     login = clip["streamer"]
     tags = ([login] if login else []) + [t for t in clip.get("hashtags", []) if t.lower() != login.lower()]
+    if login.lower() in FAZE_STREAMERS or login.lower().startswith("faze"):
+        # Enforce this in code even when the AI omits it or returns a differently cased duplicate.
+        tags = [t for t in tags if t.lower() != "stableronaldo"]
+        tags.append("stableronaldo")
     credit = f"Credit: twitch.tv/{login}" if login else ""
     yt_tags = tags if "shorts" in map(str.lower, tags) else [*tags, "shorts"]
 
