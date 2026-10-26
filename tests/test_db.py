@@ -239,3 +239,12 @@ def test_editing_an_old_clip_keeps_the_caption_it_showed_as_description(conn):
     (cid,) = conn.execute("SELECT id FROM clips").fetchone()
     db.set_text(conn, cid, "title", "new")
     assert tuple(conn.execute("SELECT title, youtube FROM clips").fetchone()) == ("new", "c")
+
+
+def test_a_description_the_user_cleared_stays_empty(conn):
+    db.record_manual(conn, "v1", "u")
+    db.save_clips(conn, "v1", [CLIP])
+    (cid,) = conn.execute("SELECT id FROM clips").fetchone()
+    db.set_text(conn, cid, "youtube", "")  # the user's choice: post it with no description
+    db.set_text(conn, cid, "title", "later edit")
+    assert tuple(conn.execute("SELECT title, youtube FROM clips").fetchone()) == ("later edit", "")

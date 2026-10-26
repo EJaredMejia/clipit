@@ -167,6 +167,38 @@ test("saves of two fields that overlap both show, whichever finishes first", asy
   expect([shown.title, shown.youtube]).toEqual(["New title", "New description"]);
 });
 
+test("a cleared description stays cleared when a title save overlapping it answers last", async () => {
+  const server = { ...clip(1), title: "Old title", youtube: "Description", caption: "Caption" };
+  const answers: Record<string, () => void> = {};
+  set({ data: { vods: [], clips: [{ ...server }] }, etag: "" });
+  vi.stubGlobal("fetch", async (url: string, opts: RequestInit) => {
+    if (url === "/api/data") {
+      // like dashboard.py: an ETag, and 304 when the page already has this data
+      const etag = JSON.stringify(server);
+      if ((opts.headers as Record<string, string>)["If-None-Match"] === etag) return new Response(null, { status: 304 });
+      const reply = json({ vods: [], clips: [{ ...server }] });
+      reply.headers.set("ETag", etag);
+      return reply;
+    }
+    const { field, text } = JSON.parse(String(opts.body));
+    // stored as it arrives, like db.set_text (an empty description takes the caption only on a never-edited clip)
+    Object.assign(server, { youtube: !server.edited && !server.youtube ? server.caption : server.youtube, [field]: text, edited: 1 });
+    await new Promise<void>((done) => (answers[field] = done)); // the reply waits for the test
+    return json({ ok: true });
+  });
+  const answer = async (field: string) => (await vi.waitFor(() => answers[field] ?? Promise.reject(new Error(`${field} not sent`))))();
+  setDraft("1:text:title", "New title");
+  const title = saveText(1, "title"); // reaches the server first
+  setDraft("1:text:youtube", "");
+  const youtube = saveText(1, "youtube");
+  await vi.waitFor(() => expect(server.youtube).toBe(""));
+  await answer("youtube");
+  expect(await youtube).toBe(true);
+  await answer("title"); // but its answer comes last
+  expect(await title).toBe(true);
+  expect(description(useClipit.getState().data.clips[0])).toBe("");
+});
+
 test("a failed save keeps the draft and says so, and the next save sends it", async () => {
   const { sent } = textServer();
   setDraft("1:text:youtube", "Keep on failure");
