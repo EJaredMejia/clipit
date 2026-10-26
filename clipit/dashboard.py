@@ -26,7 +26,12 @@ from pathlib import Path
 from clipit import db, youtube
 from clipit.util import ClipitError, log, logger
 
-STATIC = {"/": ("dashboard.html", "text/html"), "/app.js": ("dashboard.js", "text/javascript")}
+# the page, built from web/ by `npm run build` (committed, so running clipit needs no Node)
+STATIC = {
+    "/": ("web/index.html", "text/html"),
+    "/assets/app.js": ("web/assets/app.js", "text/javascript"),
+    "/assets/app.css": ("web/assets/app.css", "text/css"),
+}
 CSP = "default-src 'self'; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
 CHUNK = 1 << 20  # video bytes per range response: short responses keep a paused player from holding a thread open
 MAX_BODY = 32768  # a 5,000-character description, in UTF-8 and JSON escaped

@@ -223,5 +223,14 @@ pre-commit install          # lint + format on every commit
 ruff check . && ruff format --check . && pyright && pytest -q
 ```
 
-All four checks also run in GitHub Actions on pushes to `main` and on pull requests (Linux and macOS). The code
+The dashboard page is a React app in `web/`. Running clipit doesn't need Node: the built page is committed in
+`clipit/web/`. To change the page you need Node 22.12+:
+
+```bash
+cd web && npm ci
+npm run dev                 # http://localhost:5173, live reload, talks to a running clipit --dashboard
+npm test && npm run build   # then commit clipit/web/ along with web/src/
+```
+
+All these checks also run in GitHub Actions on pushes to `main` and on pull requests (Linux and macOS). The code
 layout, the coding conventions and the rules every change must follow are in [AGENTS.md](AGENTS.md).

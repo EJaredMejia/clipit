@@ -293,8 +293,9 @@ def set_text(conn: sqlite3.Connection, clip_id: int, field: str, text: str) -> b
     """The user's own title / YouTube description / TikTok caption, kept from then on. False when there's no such clip."""
     if field not in TEXT_FIELDS:
         raise ValueError(f"not an editable field: {field}")
-    # an old clip's empty description meant "use the caption": keep showing that, since an edited clip's text is taken as is
-    sql = f"UPDATE clips SET youtube = IIF(youtube = '', caption, youtube), {field} = ?, edited = 1 WHERE id = ?"  # noqa: S608 (field is checked above)
+    # an old clip's empty description meant "use the caption": keep showing that on its first edit. After that the text is
+    # the user's as is, so a description they cleared stays empty.
+    sql = f"UPDATE clips SET youtube = IIF(NOT edited AND youtube = '', caption, youtube), {field} = ?, edited = 1 WHERE id = ?"  # noqa: S608 (field is checked above)
     return conn.execute(sql, (text, clip_id)).rowcount == 1
 
 
