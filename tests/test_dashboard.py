@@ -211,6 +211,67 @@ def test_post_text_edits(site):
     assert db.overview(conn)["clips"][0]["title"] == "New <title>"
 
 
+@pytest.mark.skipif(not NODE, reason="needs Node.js (CI installs it)")
+def test_text_autosave_keeps_latest_draft(tmp_path):
+    """A slow save cannot erase newer typing; failures retain the draft for retry."""
+    assert NODE
+    harness = (Path(__file__).parent / "dashboard_deck.js").read_text(encoding="utf-8")
+    prelude = harness.split("// SCENARIOS\n")[0]
+    page = (Path(dashboard.__file__).parent / "dashboard.js").read_text(encoding="utf-8")
+    scenarios = r"""
+(async () => {
+  const assert = require("node:assert/strict");
+  const sent = [];
+  let release;
+  save = async (path, body) => {
+    sent.push(body.text);
+    if (sent.length === 1) await new Promise((resolve) => { release = resolve; });
+    return true;
+  };
+  drafts["1:text:title"] = "First";
+  const first = saveText(1, "title");
+  await Promise.resolve();
+  drafts["1:text:title"] = "Latest";
+  assert.equal(saveText(1, "title"), first);
+  release();
+  assert.equal(await first, true);
+  assert.deepEqual(sent, ["First", "Latest"]);
+  assert.equal("1:text:title" in drafts, false);
+  save = async () => false;
+  drafts["1:text:youtube"] = "Keep on failure";
+  assert.equal(await saveText(1, "youtube"), false);
+  assert.equal(drafts["1:text:youtube"], "Keep on failure");
+  save = async () => true;
+  assert.equal(await saveText(1, "youtube"), true);
+  assert.equal("1:text:youtube" in drafts, false);
+  drafts["1:text:title"] = "   ";
+  assert.equal(await saveText(1, "title"), false);
+  assert.equal(drafts["1:text:title"], "   ");
+  drafts["1:text:youtube"] = "";
+  assert.equal(await saveText(1, "youtube"), true);
+})().catch((e) => { console.error(e); process.exitCode = 1; });
+"""
+    script = tmp_path / "autosave.cjs"
+    script.write_text(f"{prelude}\n{page}\n{scenarios}", encoding="utf-8")
+    result = subprocess.run([NODE, str(script)], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(not NODE, reason="needs Node.js (CI installs it)")
+def test_autosave_review_regressions(tmp_path):
+    """Exercise posting races, deferred detail redraws, and rebuilt save errors in the page script."""
+    assert NODE
+    tests = Path(__file__).parent
+    prelude = (tests / "dashboard_deck.js").read_text(encoding="utf-8").split("// SCENARIOS\n")[0]
+    page = (Path(dashboard.__file__).parent / "dashboard.js").read_text(encoding="utf-8")
+    prelude += "\nconst documentListeners = {}; document.addEventListener = (name, fn) => { documentListeners[name] = fn; };\n"
+    scenarios = (tests / "dashboard_autosave_review.js").read_text(encoding="utf-8")
+    script = tmp_path / "autosave_review.cjs"
+    script.write_text(f"{prelude}\n{page}\n{scenarios}", encoding="utf-8")
+    result = subprocess.run([NODE, str(script)], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stderr
+
+
 def test_delete_removes_clip_and_video_only_inside_out(site: Site, tmp_path: Path) -> None:
     base, conn, (cid, outside) = site
     video = tmp_path / "out" / "v1" / "clips" / "01_a.mp4"

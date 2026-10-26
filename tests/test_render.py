@@ -1,3 +1,5 @@
+import pytest
+
 from clipit import render, util
 
 WORDS = [[10.0, 10.4, "oh"], [10.4, 10.8, "my"], [10.8, 11.2, "god"], [13.0, 13.5, "no"]]
@@ -30,6 +32,24 @@ def test_post_texts_credit_the_streamer_then_hashtags():
 def test_post_texts_without_a_known_streamer_have_no_credit():
     tiktok, youtube = render.post_texts({"description": "wow", "streamer": "", "hashtags": []})
     assert (tiktok, youtube) == ("wow", "wow\n\n#shorts")
+
+
+@pytest.mark.parametrize(
+    "streamer", ["lacy", "JasonTheWeen", "silky", "adapt", "yourragegaming", "plaqueboymax", "FaZeRug", "stableronaldo"]
+)
+@pytest.mark.parametrize("hashtags", [[], ["gaming"], ["StableRonaldo", "gaming"]])
+@pytest.mark.parametrize("description", ["A wild moment.", "A wild #StableRonaldo moment."])
+def test_faze_descriptions_always_include_ronaldo_once(streamer, hashtags, description):
+    clip = {"description": description, "streamer": streamer, "hashtags": hashtags}
+    for text in render.post_texts(clip):
+        assert text.split().count("#stableronaldo") == 1
+        assert text.lower().split().count("#stableronaldo") == 1
+        assert f"Credit: twitch.tv/{streamer}" in text
+
+
+def test_other_streamers_do_not_get_the_faze_hashtag():
+    for text in render.post_texts({"description": "wow", "streamer": "caseoh_", "hashtags": ["gaming"]}):
+        assert "#stableronaldo" not in text
 
 
 def test_helpers():

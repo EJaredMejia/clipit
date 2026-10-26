@@ -159,6 +159,9 @@ have the rights to: three copyright strikes delete a channel.
   - **Blurred fill + full frame** when there's no webcam, e.g. a camera-only or no-cam stream.
 - `posts.md`: per clip, the title (for Shorts), the TikTok caption and YouTube description, the trend it fits, and a sound to add in the app.
   Both texts are the AI's description, then `Credit: twitch.tv/<streamer>`, then `#<streamer>` and 3-5 hashtags (YouTube also gets `#shorts`).
+  FaZe creator clips always include `#stableronaldo` in both descriptions, without duplicates. This posting rule
+  covers the known FaZe creators (including former members such as Lacy) and Twitch logins starting with `faze`;
+  additional logins can be added to `FAZE_STREAMERS` in `clipit/render.py`.
   The credit is added by Clipit, not the AI, so chat can't trick it into tagging someone else.
 
 `out/clipit.db` (SQLite) is the catalog: a `vods` table with every processed VOD and its status, a `clips` table
