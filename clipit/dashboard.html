@@ -128,6 +128,7 @@
   .toolbar input, .toolbar select, .upload input { padding: 0.45rem 0.7rem; border: 1px solid var(--line); border-radius: 8px;
                                                     background: var(--panel); min-width: 0; }
   .toolbar input { flex: 1 1 16rem; }
+  #purge[hidden] { display: none; } /* .ghost's display would show it anyway */
   #count { color: var(--muted); font-size: 0.85rem; margin-left: auto; }
 
   .split { display: grid; grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.2fr); gap: 1.25rem; align-items: start; }
@@ -270,6 +271,7 @@
         <option value="streamer">By streamer</option>
       </select>
       <span id="count"></span>
+      <button id="purge" type="button" class="ghost" hidden>Delete all skipped</button>
     </div>
     <div class="split" id="split">
       <ul id="list" aria-label="Clips"></ul>

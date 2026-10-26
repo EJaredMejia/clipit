@@ -260,6 +260,30 @@ def clip_file(conn: sqlite3.Connection, clip_id: int) -> str | None:
     return row and row["file"]
 
 
+@contextlib.contextmanager
+def deleting_clip(conn: sqlite3.Connection, clip_id: int, only_skipped: bool = False) -> Iterator[str | None]:
+    """Remove the clip and its upload records, yielding its file for the block to delete. All or nothing: if the block
+    raises (the file couldn't be deleted), the row stays. Yields None when there's no such clip, it's being uploaded,
+    or only_skipped and it isn't skipped (anymore: another tab may have kept it since the list was read)."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        rows = conn.execute(
+            """DELETE FROM clips WHERE id = ? AND id NOT IN (SELECT clip_id FROM uploads WHERE status = 'uploading')
+                   AND (NOT ? OR verdict = 'skip')
+               RETURNING file""",
+            (clip_id, only_skipped),
+        ).fetchall()
+        yield rows[0]["file"] if rows else None
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def skipped(conn: sqlite3.Connection) -> list[int]:
+    return [r[0] for r in conn.execute("SELECT id FROM clips WHERE verdict = 'skip'")]
+
+
 def set_verdict(conn: sqlite3.Connection, clip_id: int, verdict: str | None) -> bool:
     """'keep', 'skip', or None to undo. False when there's no such clip."""
     return conn.execute("UPDATE clips SET verdict = ? WHERE id = ?", (verdict, clip_id)).rowcount == 1

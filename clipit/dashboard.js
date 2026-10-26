@@ -18,6 +18,7 @@ const SORTS = {
 const POLL_MS = 5000;
 const FETCH_MS = 15000; // every request has a deadline, so a stalled server shows an error instead of hanging
 const POST_MS = 15 * 60000; // posting to YouTube sends the whole video from this PC
+const DELETE_NOTE = "The video is deleted and clipit forgets it. Anything already posted stays up. This can't be undone."; // every clip, any status
 
 const $ = (id) => document.getElementById(id);
 let data = { vods: [], clips: [] };
@@ -92,6 +93,7 @@ async function load() {
 }
 
 async function save(path, body) {
+  let reply;
   try {
     const r = await fetch(path, {
       method: "POST",
@@ -99,13 +101,14 @@ async function save(path, body) {
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(FETCH_MS),
     });
-    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    reply = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(reply.error || `HTTP ${r.status}`);
   } catch (e) {
     setStatus(`Couldn't save (${e.message})`, true);
     return false;
   }
   await load();
-  return true;
+  return reply;
 }
 
 // Verdict writes go out one at a time, in order: a quick Keep then Undo must land as Keep then Undo.
@@ -167,6 +170,7 @@ function visible() {
 function renderList() {
   const rows = visible();
   $("count").textContent = `${rows.length} of ${data.clips.length} clips`;
+  $("purge").hidden = view !== "skip" || !rows.length;
   $("list").replaceChildren(...rows.map(row));
   if (!rows.length) {
     const why = data.clips.length ? "No clips match these filters." : "No clips yet. Run clipit on a VOD, or clipit --poll.";
@@ -245,7 +249,7 @@ function detail(c) {
       h("button", { type: "button", class: "ghost", "aria-label": "Close clip", onclick: () => select(null) }, "✕"),
     ),
     meta(h("b", {}, streamer), link(atTime(c.vod_url, c.start_s), `VOD at ${hms(c.start_s)}`), secs(c), `AI score ${score(c.score)}/10`),
-    h("div", { class: "file" }, fileTools(c), h("span", { class: "path" }, c.file)),
+    h("div", { class: "file" }, fileTools(c), deleteButton(c), h("span", { class: "path" }, c.file)),
     // one block per platform, in the order you post: copy the text, upload the file, mark it posted
     h("h3", {}, "TikTok"),
     editable(c, "caption", "Caption", c.caption, 2200, "tiktok"),
@@ -485,6 +489,35 @@ function fileTools(c) {
   });
   return show;
 }
+
+// Removes the clip from the catalog and deletes its video. Not while it's being uploaded: the server refuses that too.
+function deleteButton(c) {
+  if (Object.values(c.uploads).some((u) => u.status === "uploading")) return "";
+  return h(
+    "button",
+    {
+      type: "button",
+      class: "ghost",
+      onclick: async () => {
+        if (!confirm(`Delete this clip? ${DELETE_NOTE}`)) return;
+        $("player").replaceChildren(); // let go of the file: Windows can't delete a video that's being read
+        shown = { id: null, file: null, key: "" }; // so a failed delete puts the player back
+        if (await save("/api/delete", { clip: c.id })) {
+          if (selected === c.id) select(null); // the user may have opened another clip meanwhile
+        } else renderDetail();
+      },
+    },
+    "Delete",
+  );
+}
+
+$("purge").addEventListener("click", async () => {
+  const skipped = data.clips.filter(VIEWS.skip[1]);
+  if (!confirm(`Delete all ${skipped.length} skipped clips? ${DELETE_NOTE}`)) return;
+  if (data.clips.find((x) => x.id === selected)?.verdict === "skip") select(null); // let go of the playing video
+  const r = await save("/api/delete-skipped", { skipped: true });
+  if (r?.failed) alert(`${r.failed} clip(s) weren't deleted: their video is open in another program. Close it and try again.`);
+});
 
 function shuffle(a) {
   for (let i = a.length - 1; i > 0; i--) {

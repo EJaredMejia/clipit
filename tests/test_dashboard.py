@@ -1,5 +1,6 @@
 import json
 import shutil
+import sqlite3
 import subprocess
 import threading
 import urllib.error
@@ -9,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from clipit import dashboard, db, youtube
+
+Site = tuple[str, sqlite3.Connection, list[int]]  # what the site fixture yields: base url, db, clip ids
 
 CLIP = {"idx": 1, "file": "v1/clips/01_a.mp4", "start": 1.0, "end": 20.0, "title": "<img src=x onerror=alert(1)>",
         "hook": "h", "caption": "c", "youtube": "y", "streamer": "s", "trend": "", "sound": "", "score": 8.0, "why": ""}  # fmt: skip
@@ -267,3 +270,69 @@ def test_autosave_review_regressions(tmp_path):
     script.write_text(f"{prelude}\n{page}\n{scenarios}", encoding="utf-8")
     result = subprocess.run([NODE, str(script)], capture_output=True, text=True, timeout=60)
     assert result.returncode == 0, result.stderr
+
+
+def test_delete_removes_clip_and_video_only_inside_out(site: Site, tmp_path: Path) -> None:
+    base, conn, (cid, outside) = site
+    video = tmp_path / "out" / "v1" / "clips" / "01_a.mp4"
+    db.claim_clip_upload(conn, cid, "youtube")
+    assert call(base + "/api/delete", {"clip": cid})[0] == 404  # mid-upload: refused
+    assert video.exists()
+    db.set_upload(conn, cid, "youtube", "https://youtu.be/x")
+    assert call(base + "/api/delete", {"clip": cid})[0] == 200
+    assert not video.exists() and db.clip_file(conn, cid) is None
+    assert conn.execute("SELECT count(*) FROM uploads").fetchone()[0] == 0
+    assert call(base + "/api/delete", {"clip": outside})[0] == 200
+    assert (tmp_path / "secret.txt").exists()  # its db path points outside out/: the row goes, the file stays
+
+
+def test_delete_is_all_or_nothing_when_the_video_is_locked(site: Site, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    base, conn, (cid, other) = site
+    clock = [0.0]
+
+    def locked(self: Path, missing_ok: bool = False) -> None:
+        raise PermissionError("in use")  # what Windows says while another program has the file open
+
+    def sleep(s: float) -> None:
+        clock[0] += s
+
+    monkeypatch.setattr(dashboard.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(dashboard.time, "sleep", sleep)
+    monkeypatch.setattr(Path, "unlink", locked)
+    status, _, body = call(base + "/api/delete", {"clip": cid})
+    assert status == 409 and b"open in another program" in body
+    assert db.clip_file(conn, cid) and (tmp_path / "out" / "v1" / "clips" / "01_a.mp4").exists()  # row and file both stay
+    assert clock[0] >= dashboard.DELETE_WAIT  # it waited for the lock to go before giving up
+    (tmp_path / "out" / "v1" / "clips" / "03_b.mp4").write_bytes(VIDEO)
+    db.save_clips(conn, "v1", [CLIP, {**CLIP, "start": 30.0, "end": 50.0, "file": "v1/../../secret.txt"},
+                               {**CLIP, "start": 60.0, "end": 80.0, "file": "v1/clips/03_b.mp4"}])  # fmt: skip
+    for (c,) in conn.execute("SELECT id FROM clips").fetchall():
+        db.set_verdict(conn, c, "skip")
+    clock[0] = 0.0
+    status, _, body = call(base + "/api/delete-skipped", {"skipped": True})
+    assert status == 200 and json.loads(body) == {"deleted": 1, "failed": 2}  # only the one outside out/ had nothing to unlink
+    assert clock[0] < 2 * dashboard.DELETE_WAIT  # one wait for the whole batch, not one per locked video
+    assert other not in [c["id"] for c in db.overview(conn)["clips"]]
+
+
+def test_delete_skipped_spares_a_clip_kept_since(site: Site) -> None:
+    _, conn, (cid, _) = site
+    with db.deleting_clip(conn, cid, only_skipped=True) as file:  # another tab undid the skip after the list was read
+        assert file is None
+    assert db.clip_file(conn, cid)
+
+
+def test_delete_skipped(site: Site, tmp_path: Path) -> None:
+    base, conn, (cid, other) = site
+    db.set_verdict(conn, cid, "skip")
+    status, _, body = call(base + "/api/delete-skipped", {"skipped": True})
+    assert status == 200 and json.loads(body) == {"deleted": 1, "failed": 0}
+    assert not (tmp_path / "out" / "v1" / "clips" / "01_a.mp4").exists()
+    assert [c["id"] for c in db.overview(conn)["clips"]] == [other]
+    db.set_verdict(conn, other, "skip")
+    for body, ctype in [(b"{}", "application/json"), (b"[]", "application/json"), (b"{bad", "application/json"),
+                        (b"", "application/json"), (b'{"skipped": true}', "text/plain")]:  # fmt: skip
+        req = urllib.request.Request(base + "/api/delete-skipped", body, {"Content-Type": ctype})
+        with pytest.raises(urllib.error.HTTPError):  # empty, broken or non-JSON requests delete nothing
+            urllib.request.urlopen(req, timeout=10)
+    assert db.clip_file(conn, other)

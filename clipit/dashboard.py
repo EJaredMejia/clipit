@@ -1,7 +1,7 @@
 """The local dashboard: every VOD and clip, playable, with your keep/skip call and where each clip was posted.
 
 A standard-library HTTP server on 127.0.0.1. The page polls /api/data and saves through /api/verdict, /api/upload and
-/api/text (the user's edits to the post text);
+/api/text (the user's edits to the post text); /api/delete and /api/delete-skipped remove clips and their videos;
 every database read and write goes through clipit.db. /api/reveal opens a clip's folder in the file manager, and
 /api/youtube posts a clip to YouTube Shorts right away (clipit.youtube, the same code --upload runs).
 
@@ -19,6 +19,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+import time
 import webbrowser
 from pathlib import Path
 
@@ -31,6 +32,7 @@ CHUNK = 1 << 20  # video bytes per range response: short responses keep a paused
 MAX_BODY = 32768  # a 5,000-character description, in UTF-8 and JSON escaped
 MAX_URL = 500
 REVEAL_TIMEOUT = 15
+DELETE_WAIT = 2.0  # seconds a locked video gets to be let go
 
 
 def make_server(out: Path, port: int) -> http.server.ThreadingHTTPServer:
@@ -87,6 +89,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self.ours():
             return
         req = self.read_json()
+        # asked for in so many words: an empty or broken body (read_json gives {}) must never delete anything
+        if self.path == "/api/delete-skipped" and req.get("skipped") is True:
+            deleted = failed = 0
+            deadline = time.monotonic() + DELETE_WAIT  # one wait for all: the page stops waiting after 15 s
+            with self.conn() as conn:
+                for clip in db.skipped(conn):
+                    try:
+                        deleted += self.delete(conn, clip, deadline, only_skipped=True)
+                    except OSError:
+                        failed += 1
+            return self.send(200, json.dumps({"deleted": deleted, "failed": failed}).encode())
         clip = req.get("clip")
         if not isinstance(clip, int) or isinstance(clip, bool):
             return self.send(400, b'{"error": "expected JSON with a clip id"}')
@@ -99,6 +112,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/text" and valid_text(req.get("field"), req.get("text")):
             with self.conn() as conn:
                 found = db.set_text(conn, clip, req["field"], req["text"])
+        elif self.path == "/api/delete":
+            try:
+                with self.conn() as conn:
+                    found = self.delete(conn, clip, time.monotonic() + DELETE_WAIT)
+            except OSError:
+                return self.send(409, b'{"error": "couldn\'t delete the video. Is it open in another program?"}')
         elif self.path == "/api/reveal":
             if not (path := self.clip_path(clip)):
                 return self.send(404, b'{"error": "no video"}')
@@ -152,6 +171,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             file = db.clip_file(conn, clip_id)
         path = (self.out / file).resolve() if file else None
         return path if path and path.is_relative_to(self.out) and path.is_file() else None
+
+    def delete(self, conn: sqlite3.Connection, clip_id: int, deadline: float, only_skipped: bool = False) -> bool:
+        """Delete the clip's row and its video together, or neither (OSError: the file couldn't be deleted by
+        `deadline`, a time.monotonic()). False when there's no such clip, it's being uploaded, or it isn't skipped."""
+        with db.deleting_clip(conn, clip_id, only_skipped) as file:
+            path = (self.out / file).resolve() if file else None
+            if path and path.is_relative_to(self.out):  # a db path pointing outside out/ isn't ours to delete
+                while True:
+                    try:
+                        path.unlink(missing_ok=True)
+                        break
+                    except PermissionError:  # Windows: open somewhere, often our own player's last range read
+                        if time.monotonic() >= deadline:
+                            logger.warning("couldn't delete %s: it's open in another program", path)
+                            raise
+                        time.sleep(0.2)
+        return file is not None
 
     def video(self, clip_id: int) -> None:
         if not (path := self.clip_path(clip_id)):
