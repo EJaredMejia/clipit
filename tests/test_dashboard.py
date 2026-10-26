@@ -1,5 +1,6 @@
 import json
 import shutil
+import sqlite3
 import subprocess
 import threading
 import urllib.error
@@ -9,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from clipit import dashboard, db, youtube
+
+Site = tuple[str, sqlite3.Connection, list[int]]  # what the site fixture yields: base url, db, clip ids
 
 CLIP = {"idx": 1, "file": "v1/clips/01_a.mp4", "start": 1.0, "end": 20.0, "title": "<img src=x onerror=alert(1)>",
         "hook": "h", "caption": "c", "youtube": "y", "streamer": "s", "trend": "", "sound": "", "score": 8.0, "why": ""}  # fmt: skip
@@ -208,7 +211,7 @@ def test_post_text_edits(site):
     assert db.overview(conn)["clips"][0]["title"] == "New <title>"
 
 
-def test_delete_removes_clip_and_video_only_inside_out(site, tmp_path):
+def test_delete_removes_clip_and_video_only_inside_out(site: Site, tmp_path: Path) -> None:
     base, conn, (cid, outside) = site
     video = tmp_path / "out" / "v1" / "clips" / "01_a.mp4"
     db.claim_clip_upload(conn, cid, "youtube")
@@ -222,14 +225,14 @@ def test_delete_removes_clip_and_video_only_inside_out(site, tmp_path):
     assert (tmp_path / "secret.txt").exists()  # its db path points outside out/: the row goes, the file stays
 
 
-def test_delete_is_all_or_nothing_when_the_video_is_locked(site, tmp_path, monkeypatch):
+def test_delete_is_all_or_nothing_when_the_video_is_locked(site: Site, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     base, conn, (cid, other) = site
     clock = [0.0]
 
-    def locked(self, missing_ok=False):
+    def locked(self: Path, missing_ok: bool = False) -> None:
         raise PermissionError("in use")  # what Windows says while another program has the file open
 
-    def sleep(s):
+    def sleep(s: float) -> None:
         clock[0] += s
 
     monkeypatch.setattr(dashboard.time, "monotonic", lambda: clock[0])
@@ -251,14 +254,14 @@ def test_delete_is_all_or_nothing_when_the_video_is_locked(site, tmp_path, monke
     assert other not in [c["id"] for c in db.overview(conn)["clips"]]
 
 
-def test_delete_skipped_spares_a_clip_kept_since(site):
+def test_delete_skipped_spares_a_clip_kept_since(site: Site) -> None:
     _, conn, (cid, _) = site
     with db.deleting_clip(conn, cid, only_skipped=True) as file:  # another tab undid the skip after the list was read
         assert file is None
     assert db.clip_file(conn, cid)
 
 
-def test_delete_skipped(site, tmp_path):
+def test_delete_skipped(site: Site, tmp_path: Path) -> None:
     base, conn, (cid, other) = site
     db.set_verdict(conn, cid, "skip")
     status, _, body = call(base + "/api/delete-skipped", {})
