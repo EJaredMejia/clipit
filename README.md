@@ -34,6 +34,16 @@ pip install -c requirements.lock -e .
 
 This installs the `clipit` command, with every dependency pinned by `requirements.lock`.
 
+Or, faster, with [uv](https://docs.astral.sh/uv/) (it still makes a `.venv`, and can fetch Python 3.11+ if you don't have it):
+
+```bash
+uv venv
+source .venv/bin/activate              # Windows: .venv\Scripts\activate
+uv pip install -c requirements.lock -e .
+```
+
+Skip `uv sync` and `uv run`: they resolve their own versions into a `uv.lock` instead of using `requirements.lock`.
+
 ### Choosing an AI
 
 - **Claude Code** (the default): install it, run `claude` once and type `/login`.
@@ -202,7 +212,7 @@ The publish commands will read the clips to post from the `clips` table in `out/
 ## Contributing
 
 ```bash
-pip install -c requirements.lock -e ".[dev]"
+pip install -c requirements.lock -e ".[dev]"   # or: uv pip install -c requirements.lock -e ".[dev]"
 pre-commit install          # lint + format on every commit
 ruff check . && ruff format --check . && pyright && pytest -q
 ```

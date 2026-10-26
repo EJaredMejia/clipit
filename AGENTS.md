@@ -10,6 +10,7 @@ input, and running for weeks without anyone watching.
 
 ```bash
 python -m pip install -c requirements.lock -e ".[dev]"   # install, versions pinned by the lockfile
+uv pip install -c requirements.lock -e ".[dev]"          # same with uv (after `uv venv`); CI uses pip
 pre-commit install                                       # once per clone: lint + format on every commit
 ruff check .                                             # lint, must pass
 ruff format .                                            # format (CI runs `ruff format --check .`)
