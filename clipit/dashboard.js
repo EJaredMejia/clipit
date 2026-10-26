@@ -18,6 +18,7 @@ const SORTS = {
 const POLL_MS = 5000;
 const FETCH_MS = 15000; // every request has a deadline, so a stalled server shows an error instead of hanging
 const POST_MS = 15 * 60000; // posting to YouTube sends the whole video from this PC
+const DELETE_NOTE = "The video is deleted and clipit forgets it. Anything already posted stays up. This can't be undone."; // every clip, any status
 
 const $ = (id) => document.getElementById(id);
 let data = { vods: [], clips: [] };
@@ -441,14 +442,13 @@ function fileTools(c) {
 // Removes the clip from the catalog and deletes its video. Not while it's being uploaded: the server refuses that too.
 function deleteButton(c) {
   if (Object.values(c.uploads).some((u) => u.status === "uploading")) return "";
-  const gone = posted(c) ? " Its posts stay up, clipit just forgets them." : "";
   return h(
     "button",
     {
       type: "button",
       class: "ghost",
       onclick: async () => {
-        if (!confirm(`Delete this clip's video and remove it from clipit? This can't be undone.${gone}`)) return;
+        if (!confirm(`Delete this clip? ${DELETE_NOTE}`)) return;
         $("player").replaceChildren(); // let go of the file: Windows can't delete a video that's being read
         shown = { id: null, file: null, key: "" }; // so a failed delete puts the player back
         if (await save("/api/delete", { clip: c.id })) select(null);
@@ -461,9 +461,7 @@ function deleteButton(c) {
 
 $("purge").addEventListener("click", async () => {
   const skipped = data.clips.filter(VIEWS.skip[1]);
-  const live = skipped.filter((c) => posted(c)).length;
-  const gone = live ? ` ${live} of them were posted: those posts stay up, clipit just forgets them.` : "";
-  if (!confirm(`Delete all ${skipped.length} skipped clips and their videos? This can't be undone.${gone}`)) return;
+  if (!confirm(`Delete all ${skipped.length} skipped clips? ${DELETE_NOTE}`)) return;
   if (data.clips.find((x) => x.id === selected)?.verdict === "skip") select(null); // let go of the playing video
   const r = await save("/api/delete-skipped", {});
   if (r?.failed) alert(`${r.failed} clip(s) weren't deleted: their video is open in another program. Close it and try again.`);
