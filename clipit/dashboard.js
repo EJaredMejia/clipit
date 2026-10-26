@@ -502,8 +502,9 @@ function deleteButton(c) {
         if (!confirm(`Delete this clip? ${DELETE_NOTE}`)) return;
         $("player").replaceChildren(); // let go of the file: Windows can't delete a video that's being read
         shown = { id: null, file: null, key: "" }; // so a failed delete puts the player back
-        if (await save("/api/delete", { clip: c.id })) select(null);
-        else renderDetail();
+        if (await save("/api/delete", { clip: c.id })) {
+          if (selected === c.id) select(null); // the user may have opened another clip meanwhile
+        } else renderDetail();
       },
     },
     "Delete",
@@ -514,7 +515,7 @@ $("purge").addEventListener("click", async () => {
   const skipped = data.clips.filter(VIEWS.skip[1]);
   if (!confirm(`Delete all ${skipped.length} skipped clips? ${DELETE_NOTE}`)) return;
   if (data.clips.find((x) => x.id === selected)?.verdict === "skip") select(null); // let go of the playing video
-  const r = await save("/api/delete-skipped", {});
+  const r = await save("/api/delete-skipped", { skipped: true });
   if (r?.failed) alert(`${r.failed} clip(s) weren't deleted: their video is open in another program. Close it and try again.`);
 });
 

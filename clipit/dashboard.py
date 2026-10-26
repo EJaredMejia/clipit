@@ -89,7 +89,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self.ours():
             return
         req = self.read_json()
-        if self.path == "/api/delete-skipped" and self.headers.get_content_type() == "application/json":
+        # asked for in so many words: an empty or broken body (read_json gives {}) must never delete anything
+        if self.path == "/api/delete-skipped" and req.get("skipped") is True:
             deleted = failed = 0
             deadline = time.monotonic() + DELETE_WAIT  # one wait for all: the page stops waiting after 15 s
             with self.conn() as conn:

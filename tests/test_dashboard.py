@@ -309,7 +309,7 @@ def test_delete_is_all_or_nothing_when_the_video_is_locked(site: Site, tmp_path:
     for (c,) in conn.execute("SELECT id FROM clips").fetchall():
         db.set_verdict(conn, c, "skip")
     clock[0] = 0.0
-    status, _, body = call(base + "/api/delete-skipped", {})
+    status, _, body = call(base + "/api/delete-skipped", {"skipped": True})
     assert status == 200 and json.loads(body) == {"deleted": 1, "failed": 2}  # only the one outside out/ had nothing to unlink
     assert clock[0] < 2 * dashboard.DELETE_WAIT  # one wait for the whole batch, not one per locked video
     assert other not in [c["id"] for c in db.overview(conn)["clips"]]
@@ -325,10 +325,14 @@ def test_delete_skipped_spares_a_clip_kept_since(site: Site) -> None:
 def test_delete_skipped(site: Site, tmp_path: Path) -> None:
     base, conn, (cid, other) = site
     db.set_verdict(conn, cid, "skip")
-    status, _, body = call(base + "/api/delete-skipped", {})
+    status, _, body = call(base + "/api/delete-skipped", {"skipped": True})
     assert status == 200 and json.loads(body) == {"deleted": 1, "failed": 0}
     assert not (tmp_path / "out" / "v1" / "clips" / "01_a.mp4").exists()
     assert [c["id"] for c in db.overview(conn)["clips"]] == [other]
-    req = urllib.request.Request(base + "/api/delete-skipped", b"{}", {"Content-Type": "text/plain"})
-    with pytest.raises(urllib.error.HTTPError):  # writes are JSON only
-        urllib.request.urlopen(req, timeout=10)
+    db.set_verdict(conn, other, "skip")
+    for body, ctype in [(b"{}", "application/json"), (b"[]", "application/json"), (b"{bad", "application/json"),
+                        (b"", "application/json"), (b'{"skipped": true}', "text/plain")]:  # fmt: skip
+        req = urllib.request.Request(base + "/api/delete-skipped", body, {"Content-Type": ctype})
+        with pytest.raises(urllib.error.HTTPError):  # empty, broken or non-JSON requests delete nothing
+            urllib.request.urlopen(req, timeout=10)
+    assert db.clip_file(conn, other)
