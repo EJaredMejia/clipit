@@ -260,6 +260,21 @@ def clip_file(conn: sqlite3.Connection, clip_id: int) -> str | None:
     return row and row["file"]
 
 
+def delete_clip(conn: sqlite3.Connection, clip_id: int) -> str | None:
+    """Remove the clip and its upload records. Returns its file, for the caller to delete; None when there's no such
+    clip or it's being uploaded right now."""
+    row = conn.execute(f"DELETE FROM clips WHERE id = ? AND {_NOT_UPLOADING} RETURNING file", (clip_id,)).fetchone()  # noqa: S608 (constant)
+    return row and row["file"]
+
+
+def delete_skipped(conn: sqlite3.Connection) -> list[str]:
+    """Remove every clip the user skipped (except one being uploaded right now). Returns their files, for the caller to delete."""
+    return [r["file"] for r in conn.execute(f"DELETE FROM clips WHERE verdict = 'skip' AND {_NOT_UPLOADING} RETURNING file")]  # noqa: S608 (constant)
+
+
+_NOT_UPLOADING = "id NOT IN (SELECT clip_id FROM uploads WHERE status = 'uploading')"  # deleting it would break the upload
+
+
 def set_verdict(conn: sqlite3.Connection, clip_id: int, verdict: str | None) -> bool:
     """'keep', 'skip', or None to undo. False when there's no such clip."""
     return conn.execute("UPDATE clips SET verdict = ? WHERE id = ?", (verdict, clip_id)).rowcount == 1

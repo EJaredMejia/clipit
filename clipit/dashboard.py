@@ -1,7 +1,7 @@
 """The local dashboard: every VOD and clip, playable, with your keep/skip call and where each clip was posted.
 
 A standard-library HTTP server on 127.0.0.1. The page polls /api/data and saves through /api/verdict, /api/upload and
-/api/text (the user's edits to the post text);
+/api/text (the user's edits to the post text); /api/delete and /api/delete-skipped remove clips and their videos;
 every database read and write goes through clipit.db. /api/reveal opens a clip's folder in the file manager, and
 /api/youtube posts a clip to YouTube Shorts right away (clipit.youtube, the same code --upload runs).
 
@@ -87,6 +87,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self.ours():
             return
         req = self.read_json()
+        if self.path == "/api/delete-skipped" and self.headers.get_content_type() == "application/json":
+            with self.conn() as conn:
+                files = db.delete_skipped(conn)
+            self.remove(files)
+            return self.send(200, json.dumps({"deleted": len(files)}).encode())
         clip = req.get("clip")
         if not isinstance(clip, int) or isinstance(clip, bool):
             return self.send(400, b'{"error": "expected JSON with a clip id"}')
@@ -99,6 +104,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/text" and valid_text(req.get("field"), req.get("text")):
             with self.conn() as conn:
                 found = db.set_text(conn, clip, req["field"], req["text"])
+        elif self.path == "/api/delete":
+            with self.conn() as conn:
+                file = db.delete_clip(conn, clip)
+            found = file is not None
+            self.remove([file] if file else [])
         elif self.path == "/api/reveal":
             if not (path := self.clip_path(clip)):
                 return self.send(404, b'{"error": "no video"}')
@@ -152,6 +162,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
             file = db.clip_file(conn, clip_id)
         path = (self.out / file).resolve() if file else None
         return path if path and path.is_relative_to(self.out) and path.is_file() else None
+
+    def remove(self, files: list[str]) -> None:
+        """Delete the videos of clips just removed from the catalog, never anything outside out/."""
+        for file in files:
+            path = (self.out / file).resolve()
+            if path.is_relative_to(self.out):
+                try:
+                    path.unlink(missing_ok=True)
+                except OSError as e:  # e.g. Windows: the player is still reading it. The catalog is what counts.
+                    logger.warning("couldn't delete %s: %s", path, e)
 
     def video(self, clip_id: int) -> None:
         if not (path := self.clip_path(clip_id)):

@@ -165,6 +165,7 @@ function visible() {
 function renderList() {
   const rows = visible();
   $("count").textContent = `${rows.length} of ${data.clips.length} clips`;
+  $("purge").hidden = view !== "skip" || !rows.length;
   $("list").replaceChildren(...rows.map(row));
   if (!rows.length) {
     const why = data.clips.length ? "No clips match these filters." : "No clips yet. Run clipit on a VOD, or clipit --poll.";
@@ -241,7 +242,7 @@ function detail(c) {
       h("button", { type: "button", class: "ghost", "aria-label": "Close clip", onclick: () => select(null) }, "✕"),
     ),
     meta(h("b", {}, streamer), link(atTime(c.vod_url, c.start_s), `VOD at ${hms(c.start_s)}`), secs(c), `AI score ${score(c.score)}/10`),
-    h("div", { class: "file" }, fileTools(c), h("span", { class: "path" }, c.file)),
+    h("div", { class: "file" }, fileTools(c), deleteButton(c), h("span", { class: "path" }, c.file)),
     // one block per platform, in the order you post: copy the text, upload the file, mark it posted
     h("h3", {}, "TikTok"),
     editable(c, "caption", "Caption", c.caption, 2200, "tiktok"),
@@ -434,6 +435,30 @@ function fileTools(c) {
   });
   return show;
 }
+
+// Removes the clip from the catalog and deletes its video. Not while it's being uploaded: the server refuses that too.
+function deleteButton(c) {
+  if (Object.values(c.uploads).some((u) => u.status === "uploading")) return "";
+  const gone = posted(c) ? " Its posts stay up, clipit just forgets them." : "";
+  return h(
+    "button",
+    {
+      type: "button",
+      class: "ghost",
+      onclick: async () => {
+        if (confirm(`Delete this clip's video and remove it from clipit? This can't be undone.${gone}`)) {
+          if (await save("/api/delete", { clip: c.id })) select(null);
+        }
+      },
+    },
+    "Delete",
+  );
+}
+
+$("purge").addEventListener("click", async () => {
+  const n = data.clips.filter(VIEWS.skip[1]).length;
+  if (confirm(`Delete all ${n} skipped clips and their videos? This can't be undone.`)) await save("/api/delete-skipped", {});
+});
 
 function shuffle(a) {
   for (let i = a.length - 1; i > 0; i--) {

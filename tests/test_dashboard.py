@@ -206,3 +206,29 @@ def test_post_text_edits(site):
     assert call(base + "/api/text", {"clip": 999, "field": "title", "text": "t"})[0] == 404
     assert call(base + "/api/text", {"clip": cid, "field": "title", "text": "t"}, Origin="https://evil.example")[0] == 403
     assert db.overview(conn)["clips"][0]["title"] == "New <title>"
+
+
+def test_delete_removes_clip_and_video_only_inside_out(site, tmp_path):
+    base, conn, (cid, outside) = site
+    video = tmp_path / "out" / "v1" / "clips" / "01_a.mp4"
+    db.claim_clip_upload(conn, cid, "youtube")
+    assert call(base + "/api/delete", {"clip": cid})[0] == 404  # mid-upload: refused
+    assert video.exists()
+    db.set_upload(conn, cid, "youtube", "https://youtu.be/x")
+    assert call(base + "/api/delete", {"clip": cid})[0] == 200
+    assert not video.exists() and db.clip_file(conn, cid) is None
+    assert conn.execute("SELECT count(*) FROM uploads").fetchone()[0] == 0
+    assert call(base + "/api/delete", {"clip": outside})[0] == 200
+    assert (tmp_path / "secret.txt").exists()  # its db path points outside out/: the row goes, the file stays
+
+
+def test_delete_skipped(site, tmp_path):
+    base, conn, (cid, other) = site
+    db.set_verdict(conn, cid, "skip")
+    status, _, body = call(base + "/api/delete-skipped", {})
+    assert status == 200 and json.loads(body) == {"deleted": 1}
+    assert not (tmp_path / "out" / "v1" / "clips" / "01_a.mp4").exists()
+    assert [c["id"] for c in db.overview(conn)["clips"]] == [other]
+    req = urllib.request.Request(base + "/api/delete-skipped", b"{}", {"Content-Type": "text/plain"})
+    with pytest.raises(urllib.error.HTTPError):  # writes are JSON only
+        urllib.request.urlopen(req, timeout=10)
