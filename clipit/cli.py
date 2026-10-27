@@ -8,13 +8,16 @@ clipit --poll --dry-run    (only show which VODs it would clip)
 clipit --dashboard         (browse every VOD and clip, mark clips keep/skip and posted)
 clipit --youtube-login     (once: sign in to the YouTube channel to post to)
 clipit --poll --upload     (also post the newest clip you kept to YouTube Shorts, a few a day)
+clipit --poll --upload --every 45   (keep running: one pass every 45 minutes, no Task Scheduler needed)
 """
 
 import argparse
 import io
 import logging
 import shutil
+import sqlite3
 import sys
+import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
@@ -74,7 +77,18 @@ def main() -> None:
         help=f"post the newest clip you marked Keep to YouTube Shorts, at most {youtube.PER_DAY} a day and "
         f"{youtube.GAP.seconds // 3600}h apart. Add it to the --poll timer",
     )
+    ap.add_argument(
+        "--every",
+        type=float,
+        metavar="MINUTES",
+        help="--poll / --upload: keep running, one pass every MINUTES (a failed pass is logged and the next one still runs)",
+    )
     a = ap.parse_args()
+    if a.every is not None:
+        if a.every <= 0:
+            ap.error("--every needs a positive number of minutes")
+        if not (a.poll or a.upload) or any((a.url, a.dashboard, a.youtube_login, a.refresh_trends)):
+            ap.error("--every only repeats --poll and --upload")
     if isinstance(sys.stdout, io.TextIOWrapper):  # not when stdout was swapped (tests, some service wrappers)
         sys.stdout.reconfigure(errors="replace")  # emoji in stream titles crash cp1252 consoles
     if not any((a.url, a.refresh_trends, a.poll, a.dashboard, a.youtube_login, a.upload)):
@@ -84,31 +98,44 @@ def main() -> None:
     setup_logging(a.out)
     conn = db.connect(a.out / "clipit.db")
     try:
-        if a.refresh_trends:
-            if not a.trends_ai:
-                raise ClipitError('No AI for trend research. Install Claude Code or Codex CLI, or pass --trends-ai "<command>"')
-            log("researching current trends (web search)...")
-            ai.refresh_trends(a.trends_ai)
-            log(f"wrote {ai.TRENDS}")
-        if a.youtube_login:
-            youtube.login()
-        if a.upload and a.dry_run:
-            log("dry run: not posting to YouTube")
-        elif a.upload:
-            try:
-                youtube.upload_next(conn, a.out)
-            except Exception:  # logged, and retried on a later run: the rest of this run (polling) still happens
-                logger.exception("YouTube upload failed")
-        if a.url:
-            work, clips = process_vod(a.url, a.clips, a.ai, a.whisper, a.out)
-            db.record_manual(conn, work.name, a.url)
-            db.save_clips(conn, work.name, [{**c, "file": f"{work.name}/{c['file']}"} for c in clips])
-        if a.poll:
-            poll.poll(conn, a.top, a.small, a.lang.upper(), a.dry_run, a.out, n_clips=a.clips, ai_cmd=a.ai, whisper=a.whisper)
-        if a.dashboard:
-            dashboard.serve(a.out, a.port)
+        if a.every:
+            while True:
+                try:
+                    run(a, conn)
+                except Exception:  # unattended: one bad pass must not stop the loop
+                    logger.exception("pass failed")
+                log(f"next pass in {a.every:g} min")
+                time.sleep(a.every * 60)
+        run(a, conn)
     except ClipitError as e:
         logger.error("%s", e)
         sys.exit(1)
     finally:
         conn.close()
+
+
+def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
+    """One run of everything the flags ask for."""
+    if a.refresh_trends:
+        if not a.trends_ai:
+            raise ClipitError('No AI for trend research. Install Claude Code or Codex CLI, or pass --trends-ai "<command>"')
+        log("researching current trends (web search)...")
+        ai.refresh_trends(a.trends_ai)
+        log(f"wrote {ai.TRENDS}")
+    if a.youtube_login:
+        youtube.login()
+    if a.upload and a.dry_run:
+        log("dry run: not posting to YouTube")
+    elif a.upload:
+        try:
+            youtube.upload_next(conn, a.out)
+        except Exception:  # logged, and retried on a later run: the rest of this run (polling) still happens
+            logger.exception("YouTube upload failed")
+    if a.url:
+        work, clips = process_vod(a.url, a.clips, a.ai, a.whisper, a.out)
+        db.record_manual(conn, work.name, a.url)
+        db.save_clips(conn, work.name, [{**c, "file": f"{work.name}/{c['file']}"} for c in clips])
+    if a.poll:
+        poll.poll(conn, a.top, a.small, a.lang.upper(), a.dry_run, a.out, n_clips=a.clips, ai_cmd=a.ai, whisper=a.whisper)
+    if a.dashboard:
+        dashboard.serve(a.out, a.port)
