@@ -29,6 +29,12 @@ def test_post_texts_credit_the_streamer_then_hashtags():
     assert youtube.endswith("#caseoh_ #gaming #shorts") and "#shorts" not in tiktok
 
 
+def test_post_texts_credit_kick_streamers_on_kick():
+    clip = {"description": "wow", "streamer": "a-log-burner", "site": "kick.com", "hashtags": ["gaming"]}
+    tiktok, _ = render.post_texts(clip)
+    assert tiktok == "wow\n\nCredit: kick.com/a-log-burner\n\n#alogburner #gaming"  # a - would end the hashtag
+
+
 def test_post_texts_without_a_known_streamer_have_no_credit():
     tiktok, youtube = render.post_texts({"description": "wow", "streamer": "", "hashtags": []})
     assert (tiktok, youtube) == ("wow", "wow\n\n#shorts")

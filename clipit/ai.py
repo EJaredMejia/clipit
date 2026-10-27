@@ -141,7 +141,7 @@ def build_prompt(info: dict, cands: list[dict], n: int, trends: str) -> str:
     for i, c in enumerate(cands, 1):
         lines = [f"[{s['start']:.1f}] {s['text']}" for s in c["segments"]] or ["(no speech)"]
         msgs = c["chat"][:: max(1, len(c["chat"]) // 30)][:30]
-        chat = " | ".join(m[:80] for _, m in msgs) or "(no chat)"
+        chat = " | ".join(m[1][:80] for m in msgs) or "(no chat)"
         blocks.append(f"### Candidate {i}: {c['start']}-{c['end']}s ({c['stats']})\n" + "\n".join(lines) + f"\nChat: {chat}")
 
     def fenced(s) -> str:  # untrusted text must not be able to close the <stream_data> block early

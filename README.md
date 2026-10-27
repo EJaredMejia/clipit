@@ -1,6 +1,6 @@
 # Clipit
 
-Turn hours-long Twitch streams into short vertical clips for TikTok and YouTube Shorts.
+Turn hours-long Twitch and Kick streams into short vertical clips for TikTok and YouTube Shorts.
 
 Clipit finds the best moments of a VOD from chat activity and audio, has an AI pick the cuts and write the post text,
 and renders ready-to-post 9:16 videos with captions. It works with whatever AI you have on your machine: Claude Code,
@@ -8,8 +8,8 @@ Codex CLI, a local model through Ollama, or any other AI CLI.
 
 ## Features
 
-- **Clip one stream.** Give it a Twitch VOD link and get 1080x1920 clips with a hook, word-by-word captions, a title, and ready-to-paste TikTok and YouTube text that credits the streamer and adds hashtags.
-- **Clip live streamers automatically.** Checks who's live on Twitch, picks the biggest streamers plus some smaller ones, and clips each one's latest finished stream. Built to run unattended on a timer.
+- **Clip one stream.** Give it a Twitch or Kick VOD link and get 1080x1920 clips with a hook, word-by-word captions, a title, and ready-to-paste TikTok and YouTube text that credits the streamer and adds hashtags.
+- **Clip live streamers automatically.** Checks who's live on Twitch and Kick, picks the biggest streamers plus some smaller ones, and clips each one's latest finished stream. Built to run unattended on a timer.
 - **Follow trends.** The AI researches what's working on TikTok and Shorts this week, and the clip picks and captions follow it.
 - **Facecam layout.** Finds the streamer's webcam overlay and stacks it above the gameplay.
 - **Light on bandwidth.** Downloads only the audio to find moments (about 360 MB for 4 hours instead of 12 GB of video), then only the seconds of video it renders.
@@ -80,7 +80,10 @@ clipit --poll
 
 Each pass:
 
-1. Reads Twitch's live streams: the top 30 overall plus the top 30 of each of the 30 biggest categories, about 800 streams.
+1. Reads Twitch's live streams (the top 30 overall plus the top 30 of each of the 30 biggest categories, about 800
+   streams) and Kick's top 500. A name live on both sites is clipped on both, since the same name can belong to two
+   different people: skip a simulcast's repeats in the dashboard. If one site's API is down, the pass goes on with the
+   other.
 2. **Big streamers:** the 6 biggest (`--top`). For each, it clips their latest *finished* VOD, ignoring a stream that's still live. A channel with no usable VOD gives its slot to the next one.
 3. **Smaller streamers** (300-2,000 viewers): picked at random, at most 4 VODs a day (`--small`), so they're included without crowding out the big ones.
 4. Skips VODs that ended more than 2 days ago and anything already done. Only English streams by default (`--lang ""` for any).
@@ -153,7 +156,7 @@ have the rights to: three copyright strikes delete a channel.
 
 | Option | Default | Description |
 |---|---|---|
-| `URL` | | Twitch VOD link. Other sites yt-dlp supports work too, without chat. |
+| `URL` | | Twitch or Kick VOD link (`https://kick.com/<channel>/videos/<id>`). Other sites yt-dlp supports work too, without chat. |
 | `-n`, `--clips N` | `6` | Clips per VOD. |
 | `--ai CMD` | Claude Code, then Codex | The AI that picks clips: `codex` uses the isolated built-in provider; other values are commands that read a prompt on stdin and print the answer. **Don't give custom commands tools**: prompts contain Twitch chat written by strangers. |
 | `--trends-ai CMD` | Claude Code, then Codex | The AI for `--refresh-trends`, which needs web search. Use `codex` for Codex with web search only. |
@@ -178,7 +181,7 @@ have the rights to: three copyright strikes delete a channel.
   - **Facecam on top, gameplay below** when a webcam overlay is on screen during that clip. Found automatically, per clip.
   - **Blurred fill + full frame** when there's no webcam, e.g. a camera-only or no-cam stream.
 - `posts.md`: per clip, the title (for Shorts), the TikTok caption and YouTube description, the trend it fits, and a sound to add in the app.
-  Both texts are the AI's description, then `Credit: twitch.tv/<streamer>`, then `#<streamer>` and 3-5 hashtags (YouTube also gets `#shorts`).
+  Both texts are the AI's description, then `Credit: twitch.tv/<streamer>` (or `kick.com/<streamer>`), then `#<streamer>` and 3-5 hashtags (YouTube also gets `#shorts`).
   FaZe creator clips always include `#stableronaldo` in both descriptions, without duplicates. This posting rule
   covers the known FaZe creators (including former members such as Lacy) and Twitch logins starting with `faze`;
   additional logins can be added to `FAZE_STREAMERS` in `clipit/render.py`.

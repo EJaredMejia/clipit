@@ -19,10 +19,27 @@ STREAMS = [
 
 
 def test_candidates_big_first_then_small_in_range_and_language():
-    got = poll.candidates(STREAMS, "EN", random.Random(1))
+    streams = [(*s, poll.twitch) for s in STREAMS]
+    got = [(tier, s[0]) for tier, s in poll.candidates(streams, "EN", random.Random(1))]
     assert got[:3] == [("top", "big1"), ("top", "big2"), ("top", "mid")]
     assert sorted(got[3:]) == [("small", "s1"), ("small", "s2")]
-    assert ("top", "es") in poll.candidates(STREAMS, "")
+    assert "es" in [s[0] for _, s in poll.candidates(streams, "")]
+
+
+def test_live_streams_keep_both_sites_and_survive_one_being_down(monkeypatch):
+    monkeypatch.setattr(poll.kick, "live_streams", lambda: [("xqc", 90000, "EN"), ("kickonly", 1000, "EN")])
+    monkeypatch.setattr(poll.twitch, "live_streams", lambda: [("xQc", 50000, "EN"), ("big1", 30000, "EN")])
+    got = [(s[0], s[3]) for s in poll.live_streams()]
+    assert got == [("xqc", poll.kick), ("xQc", poll.twitch), ("big1", poll.twitch), ("kickonly", poll.kick)]
+
+    def down():
+        raise ClipitError("Kick API: 503")
+
+    monkeypatch.setattr(poll.kick, "live_streams", down)
+    assert [s[0] for s in poll.live_streams()] == ["xQc", "big1"]  # Kick down: Twitch still clipped
+    monkeypatch.setattr(poll.twitch, "live_streams", down)
+    with pytest.raises(ClipitError, match="any site"):
+        poll.live_streams()
 
 
 def test_vod_age_counts_from_when_the_stream_ended():
@@ -36,6 +53,7 @@ def world(tmp_path, monkeypatch):
     fresh = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=5)).isoformat()
     vods = {"big1": "1", "mid": "3", "s1": "4", "s2": "5"}
     monkeypatch.setattr(poll.twitch, "live_streams", lambda: STREAMS)
+    monkeypatch.setattr(poll.kick, "live_streams", lambda: [])
     monkeypatch.setattr(
         poll.twitch,
         "latest_vod",

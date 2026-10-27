@@ -46,7 +46,7 @@ ignore = [
     "S602",  # shell=True is the --ai design: the command is the user's own config, untrusted text only goes to stdin
     "S603",  # subprocess with list args (ffmpeg / yt-dlp) is the normal, safe form
     "S607",  # ffmpeg is resolved from PATH on purpose
-    "S310",  # urllib only ever opens the fixed https://gql.twitch.tv URL
+    "S310",  # urllib only ever opens fixed https://gql.twitch.tv and Kick API URLs
     "S311",  # random only picks which small streamer to clip, not security
     "E731",  # log = logger.info
     "E501",  # long lines are prompt/subtitle data inside strings; keep code lines near 130 by hand

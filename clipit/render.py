@@ -146,7 +146,8 @@ def post_texts(clip: dict) -> tuple[str, str]:
     """(TikTok caption, YouTube description): the AI's description, a credit to the streamer, then the hashtags.
     The credit is added here, never by the AI, so injected chat can't make it tag or link someone else."""
     login = clip["streamer"]
-    tags = ([login] if login else []) + [t for t in clip.get("hashtags", []) if t.lower() != login.lower()]
+    tag = login.replace("-", "")
+    tags = ([tag] if tag else []) + [t for t in clip.get("hashtags", []) if t.lower() != tag.lower()]
     description = clip["description"]
     if login.lower() == "kaicenat":
         tags = [t for t in tags if t.lower() not in {"amp", "rakai"}]
@@ -157,7 +158,7 @@ def post_texts(clip: dict) -> tuple[str, str]:
         tags = [t for t in tags if t.lower() != "stableronaldo"]
         tags.append("stableronaldo")
         description = re.sub(r"\s*#stableronaldo\b", "", description, flags=re.IGNORECASE).strip()
-    credit = f"Credit: twitch.tv/{login}" if login else ""
+    credit = f"Credit: {clip.get('site') or 'twitch.tv'}/{login}" if login else ""
     yt_tags = tags if "shorts" in map(str.lower, tags) else [*tags, "shorts"]
 
     def text(hashtags: list[str]) -> str:

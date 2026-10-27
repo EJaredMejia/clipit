@@ -46,6 +46,7 @@ VODs to process; `cli.py` is the only place that parses flags, sets up logging, 
 | `db.py` | the SQLite catalog: schema migrations, claiming VODs, recording clips |
 | `source.py` | yt-dlp: VOD info, audio download, stream URLs |
 | `twitch.py` | Twitch's public API: chat replay, live streams, latest VODs |
+| `kick.py` | the same for Kick, through the JSON API its website uses, throttled to stay under its rate limit |
 | `poll.py` | picks which streamers to clip and runs the pipeline on each, never the same VOD twice |
 | `moments.py` | loudness + chat scoring, picks candidate windows |
 | `transcribe.py` | Whisper on the candidate windows |
@@ -110,7 +111,7 @@ recorded by hand from the dashboard until then.
 - **Every subprocess, network call and AI call has a timeout.** A hang must turn into an error the poller can record,
   never a stuck process. `util.sh` requires one. For streamed reads (`Popen`), use a watchdog timer that kills the process.
 - ffmpeg inputs that are URLs get `util.REMOTE` (the protocol whitelist).
-- The Twitch GQL API is unofficial. Expect it to change, and fail loudly (`ClipitError`, logged warnings), never silently.
+- The Twitch GQL API and Kick's web API are unofficial. Expect it to change, and fail loudly (`ClipitError`, logged warnings), never silently.
 
 ### Posting
 - Post only through a platform's official API, never by automating its website: that's what gets channels banned.
@@ -136,7 +137,7 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
   `web/src/safety.test.ts` fails on them), links only http(s) URLs (`safeUrl`), and its server only answers its own
   page (Host and Origin checks, JSON-only writes, no inline scripts under its CSP). The dev server's proxy vouches for
   the dev page's Origin only (`web/vite.config.ts`); never loosen the Origin check in `dashboard.py` for it.
-- Post text credits the streamer from yt-dlp's checked Twitch login (`pipeline.streamer`), added in code by
+- Post text credits the streamer from yt-dlp's checked Twitch or Kick login (`pipeline.streamer`), added in code by
   `render.post_texts`: the AI is told not to write links or @mentions.
 
 ### Errors and logging
