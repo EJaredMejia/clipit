@@ -208,7 +208,8 @@ def test_claim_upload_skips_stale_and_hand_run_clips(conn):
     (manual,) = [r[0] for r in conn.execute("SELECT id FROM clips WHERE vod_id = 'v2'")]
     db.set_verdict(conn, manual, "keep")
     conn.execute("UPDATE clips SET created_at = ? WHERE id = ?", (T0.isoformat(), manual))
-    assert db.claim_upload(conn, "youtube", 3, datetime.timedelta(hours=1), now=T0)["id"] == old  # not the newer hand-run one
+    row = db.claim_upload(conn, "youtube", 3, datetime.timedelta(hours=1), now=T0)
+    assert row and row["id"] == old  # not the newer hand-run one
 
 
 def test_claim_upload_takes_kept_first_then_high_scoring_unreviewed(conn):
