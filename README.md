@@ -89,8 +89,10 @@ Each pass:
 4. Skips VODs that ended more than 2 days ago and anything already done. Only English streams by default (`--lang ""` for any).
 5. Each VOD is claimed in the database before processing, so two overlapping passes never do the same one. Finished VODs are never redone. Failed ones retry up to 3 times, at least an hour apart, and a pass that crashed mid-VOD is taken over 30 minutes after it stopped refreshing its claim. Downloaded audio is deleted after each VOD to save disk.
 
-Run it on a timer (launchd on macOS, Task Scheduler on Windows) every 30-60 minutes. A pass with new VODs takes about
-10 minutes per VOD. Logs go to `out/logs/clipit.log`.
+Run it every 30-60 minutes: either leave `clipit --poll --every 45` running (one pass, then waits 45 minutes, forever;
+a failed pass is logged and the next still runs), or put `clipit --poll` on a timer (launchd on macOS, Task Scheduler
+on Windows), which also survives reboots. A pass with new VODs takes about 10 minutes per VOD. Logs go to
+`out/logs/clipit.log`.
 
 ### Refresh trends
 
@@ -145,7 +147,7 @@ Set up once (free, about 15 minutes):
 To post one clip right away, open it in the dashboard and click **Post to YouTube now**. That post counts toward the
 pace of the automatic ones.
 
-Then add `--upload` to the timer: `clipit --poll --upload`. Each run posts at most one clip, and only when one is due.
+Then add `--upload` to the timer: `clipit --poll --upload`, or `clipit --poll --upload --every 45`. Each run posts at most one clip, and only when one is due.
 Posted clips show in the dashboard with their link. A failed upload is retried on a later run, up to 3 times at least
 an hour apart, and the error is in `out/logs/clipit.log`.
 
