@@ -3,7 +3,7 @@
 clipit https://www.twitch.tv/videos/2906456464
 clipit URL --clips 10 --ai "ollama run qwen3:30b"
 clipit --refresh-trends
-clipit --poll              (clip the latest VODs of big + smaller live streamers; run it on a timer)
+clipit --poll              (clip the latest VODs of trending, big and smaller streamers; run it on a timer)
 clipit --poll --dry-run    (only show which VODs it would clip)
 clipit --dashboard         (browse every VOD and clip, mark clips keep/skip and posted)
 clipit --youtube-login     (once: sign in to the YouTube channel to post to)
@@ -56,7 +56,9 @@ def main() -> None:
         "--refresh-trends", action="store_true", help="have the AI research current TikTok/Shorts trends into trends.md"
     )
     ap.add_argument("--poll", action="store_true", help="pick live streamers automatically and clip their latest finished VOD")
-    ap.add_argument("--top", type=int, default=6, help="--poll: how many of the biggest live streamers to clip (default 6)")
+    ap.add_argument(
+        "--top", type=int, default=6, help="--poll: how many trending, then biggest live, streamers to clip (default 6)"
+    )
     ap.add_argument(
         "--small",
         type=int,
@@ -84,6 +86,13 @@ def main() -> None:
     setup_logging(a.out)
     conn = db.connect(a.out / "clipit.db")
     try:
+        age = ai.trends_age()
+        if a.poll and not a.dry_run and a.trends_ai and (age is None or age > ai.TRENDS_MAX_AGE):
+            log("trend research is stale, redoing it so polling clips who everyone is talking about...")
+            try:
+                ai.refresh_trends(a.trends_ai)
+            except Exception:  # polling still runs, on the older list or by viewers
+                logger.exception("trend research failed")
         if a.refresh_trends:
             if not a.trends_ai:
                 raise ClipitError('No AI for trend research. Install Claude Code or Codex CLI, or pass --trends-ai "<command>"')

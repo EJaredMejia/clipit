@@ -1,3 +1,4 @@
+import os
 import subprocess
 import sys
 
@@ -84,6 +85,20 @@ def test_pick_clips_names_the_streamer(monkeypatch, tmp_path):
     (c,) = ai.pick_clips("fake", {"duration": 100, "uploader": "kaicenat"}, [], 3, tmp_path)
     assert c["hook"] == "Kai Cenat: Lets Rakai stream" and c["title"] == "Kai Cenat: Rakai takes over"
     assert c["description"] == "Kai Cenat hands over."
+
+
+def test_trending_streamers_read_from_the_brief_checked_and_only_while_fresh(monkeypatch, tmp_path):
+    monkeypatch.setattr(ai, "TRENDS", tmp_path / "trends.md")
+    assert ai.trending_streamers() == []  # never researched
+    ai.TRENDS.write_text(
+        "_Updated 2026-10-27_\n## Streamers everyone is talking about\n- kick:Clavicular\n* `twitch:stableronaldo`\n"
+        "- kick:clavicular\n- twitch:../etc\n- twitch:a b\n- youtube:someone\nThe kick:fake line is prose.\n",
+        encoding="utf-8",
+    )
+    assert ai.trending_streamers() == [("kick", "clavicular"), ("twitch", "stableronaldo")]
+    old = ai.TRENDS.stat().st_mtime - 3 * 86400
+    os.utime(ai.TRENDS, (old, old))
+    assert ai.trending_streamers() == []  # last week's buzz is gone
 
 
 def test_hashtags_are_checked_words_only():
