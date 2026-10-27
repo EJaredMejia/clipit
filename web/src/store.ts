@@ -40,6 +40,7 @@ export type Vod = {
   attempts: number;
   error: string | null;
   claimed_at: string | null;
+  running_at: string | null; // a run started by hand is using its files
   finished_at: string | null;
 };
 export type Data = { vods: Vod[]; clips: Clip[] };

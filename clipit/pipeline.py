@@ -63,10 +63,16 @@ def get_chat(info: dict) -> list:
 
 
 def process_vod(
-    url: str, n_clips: int = 6, ai_cmd: str | None = None, whisper: str = "turbo", out_root: Path = ROOT / "out"
+    url: str,
+    n_clips: int = 6,
+    ai_cmd: str | None = None,
+    whisper: str = "turbo",
+    out_root: Path = ROOT / "out",
+    info: dict | None = None,
 ) -> tuple[Path, list[dict]]:
-    """Make up to n_clips clips from a VOD. Returns (work folder, rendered clips). Raises ClipitError when it can't."""
-    info = source.fetch_info(url)
+    """Make up to n_clips clips from a VOD. Returns (work folder, rendered clips). Raises ClipitError when it can't.
+    `info` is source.fetch_info(url), when the caller already has it."""
+    info = info or source.fetch_info(url)
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(info["id"])):  # it becomes a folder name
         raise ClipitError(f"unexpected video id {info['id']!r}")
     dur = float(info["duration"])

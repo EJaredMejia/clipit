@@ -305,3 +305,17 @@ def test_delete_vod_refuses_one_being_processed(tmp_path: Path) -> None:
         assert clips is None
     with db.deleting_vod(conn, "v2", now=utcnow() + db.STALE_CLAIM * 2) as clips:  # a crashed run's stale claim
         assert clips == []
+
+
+def test_delete_vod_refuses_one_a_manual_run_is_using(tmp_path: Path) -> None:
+    conn = db.connect(tmp_path / "clipit.db")
+    db.record_manual(conn, "v3", "u")
+    with db.running(conn, "v3"):  # clipit <url> rerunning a done VOD: its status stays 'done'
+        assert db.status(conn, "v3") == "done"
+        with db.deleting_vod(conn, "v3") as clips:
+            assert clips is None
+        with db.deleting_vod(conn, "v3", now=utcnow() + db.STALE_CLAIM * 2) as clips:  # it crashed long ago
+            assert clips == []
+            conn.execute("UPDATE vods SET deleted = 0")  # undo, to check the lease is let go below
+    with db.deleting_vod(conn, "v3") as clips:
+        assert clips == []

@@ -63,10 +63,13 @@ export function Vods() {
   );
 }
 
-// Not while it's being processed: the server refuses that too.
+const STALE_MS = 30 * 60000; // db.STALE_CLAIM: a claim (or running_at) older than this was a crashed run
+const live = (iso: string | null) => !!iso && Date.now() - Date.parse(iso) < STALE_MS;
+
+// Not while a run is using its files: the server refuses that too (db.busy).
 function DeleteVod({ vod: v }: { vod: Vod }) {
   const [asking, setAsking] = useState(false);
-  if (v.status === "processing") return null;
+  if ((v.status === "processing" && live(v.claimed_at)) || live(v.running_at)) return null;
   return (
     <>
       <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete VOD ${v.id}`} onClick={() => setAsking(true)}>
