@@ -79,11 +79,14 @@ def test_picks_cached_before_descriptions_keep_their_caption(stages):
     assert long["description"] == "x" * pipeline.ai.TEXT_FIELDS["description"]
 
 
-def test_streamer_is_only_a_checked_twitch_login():
-    assert pipeline.streamer({"extractor": "twitch:vod", "uploader_id": "caseoh_"}) == "caseoh_"
-    assert pipeline.streamer({"extractor": "twitch:vod", "uploader_id": "x y\n#evil"}) == ""
-    assert pipeline.streamer({"extractor": "youtube", "uploader_id": "someone"}) == ""  # not a twitch.tv login
-    assert pipeline.streamer({"extractor": "twitch:vod"}) == ""
+def test_streamer_is_only_a_checked_twitch_or_kick_login():
+    assert pipeline.streamer({"extractor": "twitch:vod", "uploader_id": "caseoh_"}) == ("caseoh_", "twitch.tv")
+    assert pipeline.streamer({"extractor": "kick:vod", "uploader_id": "a-log-burner"}) == ("a-log-burner", "kick.com")
+    assert pipeline.streamer({"extractor": "twitch:vod", "uploader_id": "a-log-burner"}) == ("", "")  # no - on Twitch
+    assert pipeline.streamer({"extractor": "twitch:vod", "uploader_id": "x y\n#evil"}) == ("", "")
+    assert pipeline.streamer({"extractor": "kick:vod", "uploader_id": "x y\n#evil"}) == ("", "")
+    assert pipeline.streamer({"extractor": "youtube", "uploader_id": "someone"}) == ("", "")  # not a twitch.tv login
+    assert pipeline.streamer({"extractor": "twitch:vod"}) == ("", "")
 
 
 def test_clip_file_changes_with_the_time_range():

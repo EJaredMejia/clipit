@@ -21,6 +21,11 @@ def test_chat_spike_is_shifted_earlier_by_chat_lag():
     assert rate[150] == 80  # hype messages count double
 
 
+def test_sampled_chat_counts_by_weight():
+    _, _, rate = moments.signals(300, np.full(300, 50.0), [[150, "hello", 2.5], [150, "KEKW", 4.0], [151, "hi"]])
+    assert rate[150] == 2.5 + 8 and rate[151] == 1
+
+
 def test_windows_never_overlap_and_stay_inside_the_vod():
     score = np.zeros(1000)
     score[[10, 50, 990]] = [3, 2, 1]

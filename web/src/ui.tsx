@@ -56,7 +56,9 @@ export const ClipFacts = ({ clip: c, className }: { clip: Clip; className?: stri
     className={className}
     parts={[
       <b className="font-semibold text-foreground">
-        {/^\w+$/.test(c.streamer) ? link(`https://www.twitch.tv/${c.streamer}`, c.streamer) : c.streamer || "unknown streamer"}
+        {/^[\w-]+$/.test(c.streamer)
+          ? link(`${c.vod_url?.startsWith("https://kick.com/") ? "https://kick.com" : "https://www.twitch.tv"}/${c.streamer}`, c.streamer)
+          : c.streamer || "unknown streamer"}
       </b>,
       link(atTime(c.vod_url, c.start_s), `VOD at ${hms(c.start_s)}`),
       secs(c),

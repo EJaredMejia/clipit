@@ -49,9 +49,9 @@ def signals(duration: float, loud: np.ndarray, chat: list) -> tuple[np.ndarray, 
     db = np.zeros(n)
     db[: min(n, len(loud))] = loud[:n]
     c = np.zeros(n)
-    for t, msg in chat:
+    for t, msg, *weight in chat:  # Kick's sampled chat carries a weight, see kick.fetch_chat
         if t < n:
-            c[int(t)] += 2 if HYPE.search(msg) else 1
+            c[int(t)] += (2 if HYPE.search(msg) else 1) * (weight[0] if weight else 1)
     score = z(smooth(db, 5))
     if c.any():
         score = 0.5 * score + z(np.roll(smooth(c, 15), -CHAT_LAG))

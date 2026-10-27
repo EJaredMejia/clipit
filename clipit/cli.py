@@ -37,7 +37,7 @@ def setup_logging(out: Path) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(prog="clipit", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("url", nargs="?", help="Twitch VOD link (other yt-dlp sites work too, without chat)")
+    ap.add_argument("url", nargs="?", help="Twitch or Kick VOD link (other yt-dlp sites work too, without chat)")
     ap.add_argument("-n", "--clips", type=int, default=6, help="how many clips to make per VOD (default 6)")
     ap.add_argument(
         "--ai",

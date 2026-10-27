@@ -67,6 +67,11 @@ def latest_vod(login: str) -> dict | None:
     return next((v for v in vods if v["status"] == "RECORDED"), None)
 
 
+def vod_ref(login: str, vod: dict) -> tuple[str, str]:
+    """(catalog id, URL): the id is yt-dlp's, so it matches the pipeline's out/<id>/ folder."""
+    return f"v{vod['id']}", f"https://www.twitch.tv/videos/{vod['id']}"
+
+
 def gql_comments(vid: str, t: int) -> dict | None:
     body = [
         {

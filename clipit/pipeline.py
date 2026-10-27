@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-from clipit import ai, facecam, moments, render, source, transcribe, twitch
+from clipit import ai, facecam, kick, moments, render, source, transcribe, twitch
 from clipit.util import ROOT, ClipitError, log, logger, mmss, slug, write_atomic
 
 MAX_DURATION = 48 * 3600  # bounds disk use (~2.5 GB of audio); longer VODs are skipped
@@ -37,21 +37,27 @@ def clip_file(rank: int, clip: dict) -> str:
     return f"clips/{rank:02d}_{slug(clip['title'])}_{clip['start']:.1f}-{clip['end']:.1f}.mp4"
 
 
-def streamer(info: dict) -> str:
-    """The Twitch login to credit in the post text, '' for other sites. Checked: it lands in text and hashtags."""
-    login = str(info.get("uploader_id") or "")
-    twitch_vod = info.get("extractor", "").startswith("twitch:vod")
-    return login if twitch_vod and re.fullmatch(r"[A-Za-z0-9_]{1,25}", login) else ""
+def streamer(info: dict) -> tuple[str, str]:
+    """(login, site) to credit in the post text, ('', '') for other sites. Checked: it lands in text and hashtags."""
+    login, extractor = str(info.get("uploader_id") or ""), info.get("extractor", "")
+    if extractor.startswith("twitch:vod") and re.fullmatch(r"[A-Za-z0-9_]{1,25}", login):
+        return login, "twitch.tv"
+    if extractor == "kick:vod" and re.fullmatch(r"[A-Za-z0-9_-]{1,40}", login):
+        return login, "kick.com"
+    return "", ""
 
 
 def get_chat(info: dict) -> list:
-    if not info.get("extractor", "").startswith("twitch:vod"):
+    extractor = info.get("extractor", "")
+    if not extractor.startswith("twitch:vod") and extractor != "kick:vod":
         return []  # other sites: no chat replay, loudness alone picks the moments
     log("fetching chat replay")
     try:
+        if extractor == "kick:vod":
+            return kick.fetch_chat(int(info["channel_id"]), float(info["timestamp"]), info["duration"])
         return twitch.fetch_chat(info["id"].lstrip("v"), info["duration"])
     except Exception as e:
-        # Chat is the strongest signal for Twitch: fail the VOD so it's retried later, rather than make worse clips.
+        # Chat is the strongest signal: fail the VOD so it's retried later, rather than make worse clips.
         # (A VOD with chat disabled isn't an error: it just returns no messages.)
         raise ClipitError(f"couldn't fetch chat replay ({type(e).__name__}: {e}), will retry later") from e
 
@@ -125,11 +131,11 @@ def process_vod(
     log(f"{len(layouts)} webcam layout(s) found" if layouts else "no webcam found: blurred-fill layout")
     (work / "clips").mkdir(exist_ok=True)
     words = [w for segs in tr.values() for s in segs for w in s["words"]]
-    rendered, login = [], streamer(info)
+    rendered, (login, site) = [], streamer(info)
     for i, c in enumerate(picks, 1):
         # picks.json cached before descriptions existed; capped like a new one, so credit + hashtags still fit TikTok's limit
         c.setdefault("description", c.get("caption", "")[: ai.TEXT_FIELDS["description"]])
-        c["idx"], c["file"], c["streamer"] = i, clip_file(i, c), login
+        c["idx"], c["file"], c["streamer"], c["site"] = i, clip_file(i, c), login, site
         c["caption"], c["youtube"] = render.post_texts(c)
         out = work / c["file"]
         if not out.exists():
