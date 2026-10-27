@@ -191,10 +191,11 @@ def test_cli_passes_explicit_codex_to_the_pipeline(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.sys, "argv", ["clipit", "https://www.twitch.tv/videos/123", "--ai", "codex", "--out", str(tmp_path)])
     received = []
 
-    def process(url, count, provider, whisper, out):
+    def process(url, count, provider, whisper, out, info):
         received.append((url, count, provider, whisper, out))
         return out / "v123", []
 
+    monkeypatch.setattr(cli.source, "fetch_info", lambda url: {"id": "v123", "duration": 60})
     monkeypatch.setattr(cli, "process_vod", process)
     cli.main()
     assert received == [("https://www.twitch.tv/videos/123", 6, "codex", "turbo", tmp_path)]

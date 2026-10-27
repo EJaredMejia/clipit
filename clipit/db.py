@@ -96,6 +96,15 @@ MIGRATIONS = [
     """
     ALTER TABLE clips ADD COLUMN edited INTEGER NOT NULL DEFAULT 0;
     """,
+    # The user deleted the VOD in the dashboard (every file but the clip videos): the row stays, keeping its clips,
+    # so polling never clips it again.
+    """
+    ALTER TABLE vods ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;
+    """,
+    # A run the user started by hand is using the VOD's files, refreshed like a claim (polling runs hold a claim).
+    """
+    ALTER TABLE vods ADD COLUMN running_at TEXT;
+    """,
 ]
 TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")
@@ -149,8 +158,14 @@ def claim(conn: sqlite3.Connection, vod_id: str, url: str, login: str | None, ti
 
 
 @contextlib.contextmanager
-def heartbeat(conn: sqlite3.Connection, vod_id: str) -> Iterator[None]:
-    """Refresh the VOD's claim while the block runs, so a long but alive run is never taken for a crashed one."""
+def heartbeat(conn: sqlite3.Connection, vod_id: str, manual: bool = False) -> Iterator[None]:
+    """Refresh the VOD's claim (manual: its running_at) while the block runs, so a long but alive run is never taken
+    for a crashed one."""
+    sql = (
+        "UPDATE vods SET running_at = ? WHERE id = ? AND running_at IS NOT NULL"
+        if manual
+        else "UPDATE vods SET claimed_at = ? WHERE id = ? AND status = 'processing'"
+    )
     path = conn.execute("PRAGMA database_list").fetchone()["file"]
     stop = threading.Event()
 
@@ -159,9 +174,7 @@ def heartbeat(conn: sqlite3.Connection, vod_id: str) -> Iterator[None]:
         try:
             while not stop.wait(HEARTBEAT.total_seconds()):
                 try:
-                    own.execute(
-                        "UPDATE vods SET claimed_at = ? WHERE id = ? AND status = 'processing'", (utcnow().isoformat(), vod_id)
-                    )
+                    own.execute(sql, (utcnow().isoformat(), vod_id))
                 except sqlite3.Error:
                     logger.warning("could not refresh the claim on %s", vod_id, exc_info=True)
         finally:
@@ -174,6 +187,24 @@ def heartbeat(conn: sqlite3.Connection, vod_id: str) -> Iterator[None]:
     finally:
         stop.set()
         t.join()
+
+
+@contextlib.contextmanager
+def running(conn: sqlite3.Connection, vod_id: str) -> Iterator[None]:
+    """Mark a run the user started by hand as using the VOD's files, so the dashboard doesn't delete them meanwhile.
+    Its status stays as it was: a failed rerun of a done VOD mustn't make the poller retry it."""
+    conn.execute("UPDATE vods SET running_at = ? WHERE id = ?", (utcnow().isoformat(), vod_id))
+    try:
+        with heartbeat(conn, vod_id, manual=True):
+            yield
+    finally:
+        conn.execute("UPDATE vods SET running_at = NULL WHERE id = ?", (vod_id,))
+
+
+def busy(row: sqlite3.Row, now: datetime.datetime) -> bool:
+    """A run is using the VOD's files: a live claim (polling) or a live running_at (a run started by hand)."""
+    claimed = row["status"] == "processing" and now - _ts(row["claimed_at"]) < STALE_CLAIM
+    return claimed or bool(row["running_at"]) and now - _ts(row["running_at"]) < STALE_CLAIM
 
 
 def finish(conn: sqlite3.Connection, vod_id: str, error: str | None = None, now=None) -> None:
@@ -189,7 +220,7 @@ def record_manual(conn: sqlite3.Connection, vod_id: str, url: str) -> None:
     conn.execute(
         """INSERT INTO vods (id, url, tier, status, attempts, claimed_at, finished_at)
            VALUES (?, ?, 'manual', 'done', 1, ?, ?)
-           ON CONFLICT (id) DO UPDATE SET status = 'done', error = NULL, finished_at = excluded.finished_at""",
+           ON CONFLICT (id) DO UPDATE SET status = 'done', error = NULL, deleted = 0, finished_at = excluded.finished_at""",
         (vod_id, url, now, now),
     )
 
@@ -245,8 +276,8 @@ def overview(conn: sqlite3.Connection) -> dict:
     )
     vods = conn.execute(
         """SELECT id, url, COALESCE(login, (SELECT streamer FROM clips WHERE vod_id = vods.id AND streamer != ''), '')
-                      AS streamer, tier, status, attempts, error, claimed_at, finished_at
-           FROM vods ORDER BY COALESCE(finished_at, claimed_at) DESC"""
+                      AS streamer, tier, status, attempts, error, claimed_at, running_at, finished_at
+           FROM vods WHERE NOT deleted ORDER BY COALESCE(finished_at, claimed_at) DESC"""
     )
     return {
         "vods": [dict(r) for r in vods],
@@ -274,6 +305,26 @@ def deleting_clip(conn: sqlite3.Connection, clip_id: int, only_skipped: bool = F
             (clip_id, only_skipped),
         ).fetchall()
         yield rows[0]["file"] if rows else None
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+@contextlib.contextmanager
+def deleting_vod(conn: sqlite3.Connection, vod_id: str, now=None) -> Iterator[list[str] | None]:
+    """Hide the VOD but keep its clips: the row stays as 'done' and deleted, so its clips keep their VOD and polling
+    never clips it again. Yields its clips' videos (relative to the out folder) for the block to delete every other
+    file it has; all or nothing, like deleting_clip. Yields None (and changes nothing) when there's no such VOD or a
+    run is using its files (db.busy)."""
+    now = now or utcnow()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute("SELECT status, claimed_at, running_at FROM vods WHERE id = ? AND NOT deleted", (vod_id,)).fetchone()
+        ok = bool(row) and not busy(row, now)
+        if ok:
+            conn.execute("UPDATE vods SET deleted = 1, status = 'done', error = NULL WHERE id = ?", (vod_id,))
+        yield [r[0] for r in conn.execute("SELECT file FROM clips WHERE vod_id = ?", (vod_id,))] if ok else None
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")

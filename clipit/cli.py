@@ -21,7 +21,7 @@ import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from clipit import ai, dashboard, db, poll, youtube
+from clipit import ai, dashboard, db, poll, source, youtube
 from clipit.pipeline import process_vod
 from clipit.util import ROOT, ClipitError, log, logger
 
@@ -132,7 +132,9 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
         except Exception:  # logged, and retried on a later run: the rest of this run (polling) still happens
             logger.exception("YouTube upload failed")
     if a.url:
-        work, clips = process_vod(a.url, a.clips, a.ai, a.whisper, a.out)
+        info = source.fetch_info(a.url)  # its id first, to mark the VOD's files in use (the dashboard can delete them)
+        with db.running(conn, str(info["id"])):
+            work, clips = process_vod(a.url, a.clips, a.ai, a.whisper, a.out, info=info)
         db.record_manual(conn, work.name, a.url)
         db.save_clips(conn, work.name, [{**c, "file": f"{work.name}/{c['file']}"} for c in clips])
     if a.poll:
