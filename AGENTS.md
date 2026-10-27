@@ -149,6 +149,8 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
 - Python 3.11+, type hints on every public function (pyright checks them), imports sorted by ruff.
 - Silence pyright only for wrong third-party stubs, with `# pyright: ignore[rule]` and the reason on the same line.
 - New logic gets a pytest test in `tests/`, using fakes (`monkeypatch`, `tmp_path`) instead of the network.
+  A test must be able to catch a real bug: never test help text or other wording, that a fake returns what you
+  gave it, a one-line `if x is None: raise`, or every entry of a constant list (one example per rule is enough).
 - New dependency: add it to `pyproject.toml`, then regenerate the lockfile
   (`pip freeze --exclude-editable > requirements.lock`) and say why in the commit. For the page: `npm install <pkg>`
   in `web/` (it updates `package-lock.json`), and say why in the commit.

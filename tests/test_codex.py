@@ -23,12 +23,6 @@ CATALOG = json.dumps(
 )
 
 
-def test_find_cli_prefers_path(monkeypatch, tmp_path):
-    monkeypatch.setattr(codex.shutil, "which", lambda _: "/installed/codex")
-    monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
-    assert codex.find_cli() == "/installed/codex"
-
-
 def test_find_cli_uses_newest_windows_desktop_bundle(monkeypatch, tmp_path):
     monkeypatch.setattr(codex.shutil, "which", lambda _: None)
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
@@ -143,12 +137,6 @@ def test_ask_times_out_catalog_and_generation(monkeypatch, stage):
     monkeypatch.setattr(codex.subprocess, "run", fake_run)
     with pytest.raises(ClipitError, match="timed out after 9s"):
         codex.ask("prompt", timeout=9)
-
-
-def test_ask_missing_cli_has_install_and_login_hint(monkeypatch):
-    monkeypatch.setattr(codex, "find_cli", lambda: None)
-    with pytest.raises(ClipitError, match="Codex CLI not found"):
-        codex.ask("prompt")
 
 
 def test_defaults_fall_back_to_codex_and_explicit_alias_avoids_the_shell(monkeypatch):

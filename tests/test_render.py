@@ -40,9 +40,7 @@ def test_post_texts_without_a_known_streamer_have_no_credit():
     assert (tiktok, youtube) == ("wow", "wow\n\n#shorts")
 
 
-@pytest.mark.parametrize(
-    "streamer", ["lacy", "JasonTheWeen", "silky", "adapt", "yourragegaming", "plaqueboymax", "FaZeRug", "stableronaldo"]
-)
+@pytest.mark.parametrize("streamer", ["JasonTheWeen", "FaZeRug"])  # one listed, any case; one by its prefix
 @pytest.mark.parametrize("hashtags", [[], ["gaming"], ["StableRonaldo", "gaming"]])
 @pytest.mark.parametrize("description", ["A wild moment.", "A wild #StableRonaldo moment."])
 def test_faze_descriptions_always_include_ronaldo_once(streamer, hashtags, description):

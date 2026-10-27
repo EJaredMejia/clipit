@@ -2,7 +2,7 @@ import datetime
 
 import pytest
 
-from clipit import cli, db, youtube
+from clipit import db, youtube
 from clipit.util import ClipitError
 
 CLIP = {
@@ -143,13 +143,3 @@ def test_hourly_uploads_wait_a_full_hour_and_keep_the_rolling_daily_limit(conn, 
     now[0] = start + datetime.timedelta(hours=24, seconds=1)
     assert youtube.upload_next(conn, tmp_path) == "https://youtube.com/shorts/post4"
     assert len(set(sent)) == 4  # each eligible clip is sent once
-
-
-def test_upload_help_describes_the_hourly_interval(monkeypatch, capsys):
-    monkeypatch.setattr(cli.ai, "default_ai", lambda: None)
-    monkeypatch.setattr(cli.ai, "default_trends_ai", lambda: None)
-    monkeypatch.setattr(cli.sys, "argv", ["clipit", "--help"])
-    with pytest.raises(SystemExit) as result:
-        cli.main()
-    assert result.value.code == 0
-    assert "1h apart" in " ".join(capsys.readouterr().out.split())
