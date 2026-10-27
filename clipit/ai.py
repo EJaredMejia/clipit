@@ -73,10 +73,16 @@ Streamer: {streamer}
 """
 
 TRENDS_PROMPT = """Today is {date}. Search the web for what is working RIGHT NOW on TikTok and YouTube Shorts for
-Twitch / streamer / gaming clip accounts. Write a concise markdown brief (max ~40 bullets) with sections:
-Formats & hooks trending now, Trending sounds/memes that fit stream clips, Hashtags that work now,
-Events/seasonal moments in the next 2 weeks, Editing style (length, captions, pacing).
-Start with a line "_Updated {date}_". Output only the markdown."""
+Twitch / streamer / gaming clip accounts. Write a concise markdown brief (max ~40 bullets).
+Start with a line "_Updated {date}_", then a section "Streamers everyone is talking about": up to 10 Twitch or Kick
+streamers whose clips are blowing up on TikTok, Shorts and X this week, most talked-about first, one per line written
+exactly as `- twitch:<login>` or `- kick:<slug>` (the channel name from their twitch.tv or kick.com URL, on the site
+they stream on), nothing else on the line. Then sections: Formats & hooks trending now, Trending sounds/memes that fit
+stream clips, Hashtags that work now, Events/seasonal moments in the next 2 weeks, Editing style (length, captions,
+pacing). Output only the markdown."""
+TRENDING = re.compile(r"^\s*[-*]\s*`?(twitch|kick):([A-Za-z0-9_-]{2,40})`?\s*$", re.M | re.I)
+TRENDS_MAX_AGE = datetime.timedelta(hours=12)  # --poll redoes the research when it's older than this
+MAX_TRENDING = 10
 
 
 def _claude() -> str | None:
@@ -134,6 +140,24 @@ def refresh_trends(cmd: str) -> None:
     prompt = TRENDS_PROMPT.format(date=datetime.date.today())
     reply = codex.ask(prompt, web_search=True, timeout=AI_TIMEOUT) if cmd == "codex" else ask_ai(cmd, prompt)
     write_atomic(TRENDS, reply[:MAX_TRENDS_CHARS])
+
+
+def trends_age() -> datetime.timedelta | None:
+    """How long ago trends.md was researched, or None if it never was."""
+    if not TRENDS.exists():
+        return None
+    return datetime.datetime.now() - datetime.datetime.fromtimestamp(TRENDS.stat().st_mtime)
+
+
+def trending_streamers(max_age: datetime.timedelta = datetime.timedelta(days=2)) -> list[tuple[str, str]]:
+    """(site, channel) of the streamers trends.md says everyone is talking about, most talked-about first.
+
+    From the open web, so only well-formed channel names pass; an old brief gives none (last week's buzz is gone)."""
+    age = trends_age()
+    if age is None or age > max_age:
+        return []
+    found = [(site.lower(), name.lower()) for site, name in TRENDING.findall(TRENDS.read_text(encoding="utf-8"))]
+    return list(dict.fromkeys(found))[:MAX_TRENDING]
 
 
 def build_prompt(info: dict, cands: list[dict], n: int, trends: str) -> str:

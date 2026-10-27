@@ -26,6 +26,27 @@ def test_candidates_big_first_then_small_in_range_and_language():
     assert "es" in [s[0] for _, s in poll.candidates(streams, "")]
 
 
+def test_candidates_alternate_sites_in_each_tier():
+    tw = [("t1", 90000, "EN", poll.twitch), ("t2", 80000, "EN", poll.twitch), ("t3", 70000, "EN", poll.twitch)]
+    tw += [("ts1", 1000, "EN", poll.twitch), ("ts2", 900, "EN", poll.twitch)]
+    ki = [("k1", 20000, "EN", poll.kick), ("ks1", 500, "EN", poll.kick)]
+    got = [(tier, s[0]) for tier, s in poll.candidates(tw + ki, "EN", random.Random(1))]
+    assert got[:4] == [("top", "k1"), ("top", "t1"), ("top", "t2"), ("top", "t3")]
+    assert got[4][1] == "ks1" and sorted(got[5:]) == [("small", "ts1"), ("small", "ts2")]
+
+
+def test_trending_streamers_come_first_live_or_not_and_only_once():
+    streams = [("big1", 30000, "EN", poll.twitch), ("Clavicular", 9000, "EN", poll.kick), ("s1", 1500, "EN", poll.twitch)]
+    trending = [("kick", "stableronaldo"), ("kick", "clavicular")]
+    got = [(tier, s[0], s[3]) for tier, s in poll.candidates(streams, "EN", trending=trending)]
+    assert got == [
+        ("top", "stableronaldo", poll.kick),  # offline is fine: we clip the latest finished VOD
+        ("top", "clavicular", poll.kick),
+        ("top", "big1", poll.twitch),
+        ("small", "s1", poll.twitch),
+    ]
+
+
 def test_live_streams_keep_both_sites_and_survive_one_being_down(monkeypatch):
     monkeypatch.setattr(poll.kick, "live_streams", lambda: [("xqc", 90000, "EN"), ("kickonly", 1000, "EN")])
     monkeypatch.setattr(poll.twitch, "live_streams", lambda: [("xQc", 50000, "EN"), ("big1", 30000, "EN")])
@@ -54,6 +75,7 @@ def world(tmp_path, monkeypatch):
     vods = {"big1": "1", "mid": "3", "s1": "4", "s2": "5"}
     monkeypatch.setattr(poll.twitch, "live_streams", lambda: STREAMS)
     monkeypatch.setattr(poll.kick, "live_streams", lambda: [])
+    monkeypatch.setattr(poll.ai, "trending_streamers", lambda: [])
     monkeypatch.setattr(
         poll.twitch,
         "latest_vod",
@@ -117,6 +139,21 @@ def test_one_streamers_vod_lookup_failing_does_not_end_the_pass(world, monkeypat
     monkeypatch.setattr(poll.twitch, "latest_vod", flaky)
     poll.poll(conn, top_n=2, small_per_day=0, lang="EN", out_root=out)
     assert calls == ["v3"]  # big1 skipped, big2 has no VOD, mid still processed
+
+
+def test_trending_streamers_still_clipped_when_both_live_lists_are_down(world, monkeypatch):
+    conn, calls, tmp_path = world
+
+    def down():
+        raise ClipitError("API down")
+
+    monkeypatch.setattr(poll.twitch, "live_streams", down)
+    monkeypatch.setattr(poll.kick, "live_streams", down)
+    with pytest.raises(ClipitError, match="any site"):  # nothing trending either: the pass fails loudly
+        poll.poll(conn, out_root=tmp_path)
+    monkeypatch.setattr(poll.ai, "trending_streamers", lambda: [("twitch", "big1")])
+    poll.poll(conn, out_root=tmp_path)
+    assert calls == ["v1"]
 
 
 def test_dry_run_touches_nothing(world):
