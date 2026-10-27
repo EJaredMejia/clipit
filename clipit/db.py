@@ -436,12 +436,15 @@ def _take_upload(conn: sqlite3.Connection, clip_id: int, platform: str, now: dat
     )
 
 
-def fail_upload(conn: sqlite3.Connection, clip_id: int, platform: str, error: str, retry: bool = True) -> None:
-    """retry False: never claimed automatically again (the post may exist); the user can still post it by hand."""
+def fail_upload(
+    conn: sqlite3.Connection, clip_id: int, platform: str, error: str, retry: bool = True, spent: bool = True
+) -> None:
+    """retry False: never claimed automatically again (the post may exist); the user can still post it by hand.
+    spent False: the attempt doesn't count toward MAX_ATTEMPTS (the platform's daily limit, not the clip, was the problem)."""
     conn.execute(
-        """UPDATE uploads SET status = 'failed', error = ?, attempts = IIF(?, attempts, MAX(attempts, ?))
+        """UPDATE uploads SET status = 'failed', error = ?, attempts = IIF(?, attempts - NOT ?, MAX(attempts, ?))
            WHERE clip_id = ? AND platform = ? AND status = 'uploading'""",
-        (error, retry, MAX_ATTEMPTS, clip_id, platform),
+        (error, retry, spent, MAX_ATTEMPTS, clip_id, platform),
     )
 
 

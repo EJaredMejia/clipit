@@ -125,7 +125,7 @@ recorded by hand from the dashboard until then.
 - Post only through a platform's official API, never by automating its website: that's what gets channels banned.
 - Automatic posting takes only clips from polled VODs in the last `db.FRESH` (an old clip rides a trend that has
   passed): ones the user marked Keep first, then unreviewed ones the clip-picking AI scored `db.AUTO_SCORE` or more,
-  never one marked Skip, a few a day (`youtube.PER_DAY`, `youtube.GAP`). The user chose this over review-only posting.
+  never one marked Skip, up to 10 a day (`youtube.PER_DAY`, `youtube.GAP`). The user chose this over review-only posting.
   The dashboard's "Post to YouTube now" is the user posting by hand, like uploading in YouTube Studio: any clip, no
   pacing, but it counts toward the pace of the automatic posts.
 - Each upload is claimed in `uploads` before it's sent (`db.claim_upload`, `db.claim_clip_upload`), so a clip is never
