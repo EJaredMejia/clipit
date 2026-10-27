@@ -373,8 +373,8 @@ def set_upload(conn: sqlite3.Connection, clip_id: int, platform: str, url: str |
 def claim_upload(
     conn: sqlite3.Connection, platform: str, per_day: int, gap: datetime.timedelta, now: datetime.datetime | None = None
 ) -> sqlite3.Row | None:
-    """Atomically take the next clip to post automatically, if the pacing allows: from a polled VOD in the last FRESH
-    (clips from old or hand-run VODs are posted only by hand), not on platform yet, kept by the user or unreviewed with
+    """Atomically take the next clip to post automatically, if the pacing allows: from a VOD polling took in the last FRESH
+    (a hand rerun doesn't renew it; clips from old or hand-run VODs are posted only by hand), not on platform yet, kept by the user or unreviewed with
     an AI score of AUTO_SCORE+ (never skipped), kept first, then newest. At most per_day posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
     The upload then ends with set_upload (posted) or fail_upload (retried later, up to MAX_ATTEMPTS)."""
     now = now or utcnow()
@@ -390,7 +390,7 @@ def claim_upload(
                 """SELECT c.id, c.file, c.title, c.youtube, c.caption, c.edited FROM clips c
                    JOIN vods v ON v.id = c.vod_id
                    LEFT JOIN uploads u ON u.clip_id = c.id AND u.platform = ?
-                   WHERE (c.verdict = 'keep' OR c.verdict IS NULL AND c.score >= ?) AND v.tier != 'manual' AND c.created_at >= ?
+                   WHERE (c.verdict = 'keep' OR c.verdict IS NULL AND c.score >= ?) AND v.tier != 'manual' AND v.claimed_at >= ?
                      AND (u.clip_id IS NULL OR (u.status = 'failed' AND u.attempts < ? AND u.uploaded_at < ?))
                    ORDER BY c.verdict IS NULL, c.created_at DESC, c.idx LIMIT 1""",
                 (platform, AUTO_SCORE, (now - FRESH).isoformat(), MAX_ATTEMPTS, (now - RETRY_AFTER).isoformat()),

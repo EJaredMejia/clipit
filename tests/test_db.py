@@ -201,15 +201,20 @@ def test_claim_upload_posts_the_newest_kept_clips_at_the_paced_rate(conn):
 
 
 def test_claim_upload_skips_stale_and_hand_run_clips(conn):
-    (old,) = kept_clips(conn, 1)
-    assert db.claim_upload(conn, "youtube", 3, datetime.timedelta(hours=1), now=T0 + db.FRESH * 2) is None  # trend passed
-    db.record_manual(conn, "v2", "u")
+    kept_clips(conn, 1)  # polling took v1 at T0
+    later = T0 + db.FRESH * 2
+    db.record_manual(conn, "v1", "u")  # rerun by hand once its trend passed, finding a new moment
+    db.save_clips(conn, "v1", [{**CLIP, "idx": 0, "start": 0.0, "end": 20.0}, {**CLIP, "idx": 1, "start": 900.0, "end": 920.0}])
+    db.record_manual(conn, "v2", "u")  # a VOD run by hand only
     db.save_clips(conn, "v2", [CLIP])
+    (rerun,) = [r[0] for r in conn.execute("SELECT id FROM clips WHERE vod_id = 'v1' AND start_s = 900")]
     (manual,) = [r[0] for r in conn.execute("SELECT id FROM clips WHERE vod_id = 'v2'")]
-    db.set_verdict(conn, manual, "keep")
-    conn.execute("UPDATE clips SET created_at = ? WHERE id = ?", (T0.isoformat(), manual))
-    row = db.claim_upload(conn, "youtube", 3, datetime.timedelta(hours=1), now=T0)
-    assert row and row["id"] == old  # not the newer hand-run one
+    for cid, made in ((rerun, later), (manual, later + datetime.timedelta(minutes=1))):
+        db.set_verdict(conn, cid, "keep")
+        conn.execute("UPDATE clips SET created_at = ? WHERE id = ?", (made.isoformat(), cid))
+    assert db.claim_upload(conn, "youtube", 9, datetime.timedelta(0), now=later) is None  # the rerun doesn't renew v1
+    row = db.claim_upload(conn, "youtube", 9, datetime.timedelta(0), now=T0)
+    assert row and row["id"] == rerun  # v1 is fresh at T0; the newer hand-run clip never goes up automatically
 
 
 def test_claim_upload_takes_kept_first_then_high_scoring_unreviewed(conn):
