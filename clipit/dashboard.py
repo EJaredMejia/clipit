@@ -1,7 +1,8 @@
 """The local dashboard: every VOD and clip, playable, with your keep/skip call and where each clip was posted.
 
 A standard-library HTTP server on 127.0.0.1. The page polls /api/data and saves through /api/verdict, /api/upload and
-/api/text (the user's edits to the post text); /api/delete and /api/delete-skipped remove clips and their videos;
+/api/text (the user's edits to the post text); /api/delete and /api/delete-skipped remove clips and their videos,
+/api/delete-vod a VOD and every file of it but its clip videos (chat, transcripts, audio...);
 every database read and write goes through clipit.db. /api/reveal opens a clip's folder in the file manager, and
 /api/youtube posts a clip to YouTube Shorts right away (clipit.youtube, the same code --upload runs).
 
@@ -105,6 +106,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     except OSError:
                         failed += 1
             return self.send(200, json.dumps({"deleted": deleted, "failed": failed}).encode())
+        if self.path == "/api/delete-vod":
+            vod = req.get("vod")
+            if not isinstance(vod, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", vod):  # pipeline's folder name rule
+                return self.send(400, b'{"error": "expected JSON with a VOD id"}')
+            try:
+                with self.conn() as conn:
+                    found = self.delete_vod(conn, vod, time.monotonic() + DELETE_WAIT)
+            except OSError:
+                return self.send(409, b'{"error": "couldn\'t delete the VOD files. Is one open in another program?"}')
+            return self.send(200 if found else 404, b'{"ok": true}' if found else b'{"error": "no such VOD, or it is busy"}')
         clip = req.get("clip")
         if not isinstance(clip, int) or isinstance(clip, bool):
             return self.send(400, b'{"error": "expected JSON with a clip id"}')
@@ -183,16 +194,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
         with db.deleting_clip(conn, clip_id, only_skipped) as file:
             path = (self.out / file).resolve() if file else None
             if path and path.is_relative_to(self.out):  # a db path pointing outside out/ isn't ours to delete
-                while True:
-                    try:
-                        path.unlink(missing_ok=True)
-                        break
-                    except PermissionError:  # Windows: open somewhere, often our own player's last range read
-                        if time.monotonic() >= deadline:
-                            logger.warning("couldn't delete %s: it's open in another program", path)
-                            raise
-                        time.sleep(0.2)
+                remove(path, deadline)
         return file is not None
+
+    def delete_vod(self, conn: sqlite3.Connection, vod_id: str, deadline: float) -> bool:
+        """Hide the VOD and delete every file it has but clip videos: audio, chat, transcripts, AI reply, posts.md.
+        If a file stays open past `deadline` (OSError), the VOD stays; what was deleted by then is only cache.
+        False when there's no such VOD or it's being processed."""
+        with db.deleting_vod(conn, vod_id) as clips:
+            if clips is None:
+                return False
+            folder = self.out / vod_id
+            # renders the AI dropped since are clip videos too, so every video in clips/ stays
+            keep = {(self.out / f).resolve() for f in clips} | {p.resolve() for p in folder.glob("clips/*.mp4")}
+            for path in sorted(folder.rglob("*"), reverse=True) if folder.is_dir() else []:  # a folder after its files
+                real = path.resolve()
+                if not any(k == real or k.is_relative_to(real) for k in keep):  # not a clip video or a folder holding one
+                    remove(path, deadline)
+            with contextlib.suppress(OSError):
+                folder.rmdir()  # gone too when it held no clips
+        return True
 
     def video(self, clip_id: int) -> None:
         if not (path := self.clip_path(clip_id)):
@@ -235,6 +256,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+
+def remove(path: Path, deadline: float) -> None:
+    """Delete the file (or empty folder), waiting until `deadline`, a time.monotonic(), while it's open (PermissionError)."""
+    while True:
+        try:
+            path.rmdir() if path.is_dir() and not path.is_symlink() else path.unlink(missing_ok=True)
+            return
+        except PermissionError:  # Windows: open somewhere, often our own player's last range read
+            if time.monotonic() >= deadline:
+                logger.warning("couldn't delete %s: it's open in another program", path)
+                raise
+            time.sleep(0.2)
 
 
 def reveal(path: Path) -> None:

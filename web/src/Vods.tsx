@@ -1,8 +1,11 @@
 // The VODs tab: every stream clipit picked up, how it went, and why the failed ones failed.
+import { Trash2 } from "lucide-react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useClipit } from "./store";
-import { link, when } from "./ui";
+import { deleteVod, useClipit, type Vod } from "./store";
+import { Confirm, link, when } from "./ui";
 
 const STATUS_STYLE: Record<string, string> = {
   done: "bg-keep-bg text-keep",
@@ -20,8 +23,8 @@ export function Vods() {
       <Table>
         <TableHeader>
           <TableRow className="hover:bg-transparent">
-            {["VOD", "Streamer", "Status", "Clips", "Tier", "Finished"].map((h) => (
-              <TableHead key={h} className={`h-11 font-heading text-muted-foreground first:pl-5 ${h === "Clips" ? "text-right" : ""}`}>
+            {["VOD", "Streamer", "Status", "Clips", "Tier", "Finished", ""].map((h) => (
+              <TableHead key={h || "delete"} className={`h-11 font-heading text-muted-foreground first:pl-5 ${h === "Clips" ? "text-right" : ""}`}>
                 {h}
               </TableHead>
             ))}
@@ -42,11 +45,14 @@ export function Vods() {
               <TableCell className="py-3 text-right font-heading text-base tabular-nums">{String(count[v.id] || 0)}</TableCell>
               <TableCell className="py-3 text-muted-foreground">{v.tier}</TableCell>
               <TableCell className="py-3 text-muted-foreground tabular-nums">{when(v.finished_at || v.claimed_at)}</TableCell>
+              <TableCell className="py-2 pr-4 text-right">
+                <DeleteVod vod={v} />
+              </TableCell>
             </TableRow>
           ))}
           {loaded && !vods.length && (
             <TableRow>
-              <TableCell colSpan={6} className="py-16 text-center text-muted-foreground">
+              <TableCell colSpan={7} className="py-16 text-center text-muted-foreground">
                 No VODs yet. Run clipit on a VOD, or clipit --poll.
               </TableCell>
             </TableRow>
@@ -54,5 +60,30 @@ export function Vods() {
         </TableBody>
       </Table>
     </div>
+  );
+}
+
+const STALE_MS = 30 * 60000; // db.STALE_CLAIM: a claim (or running_at) older than this was a crashed run
+const live = (iso: string | null) => !!iso && Date.now() - Date.parse(iso) < STALE_MS;
+
+// Not while a run is using its files: the server refuses that too (db.busy).
+function DeleteVod({ vod: v }: { vod: Vod }) {
+  const [asking, setAsking] = useState(false);
+  if ((v.status === "processing" && live(v.claimed_at)) || live(v.running_at)) return null;
+  return (
+    <>
+      <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete VOD ${v.id}`} onClick={() => setAsking(true)}>
+        <Trash2 />
+      </Button>
+      <Confirm
+        open={asking}
+        onOpenChange={setAsking}
+        title="Delete this VOD?"
+        body="Its chat, transcripts, audio and everything else clipit saved for it are deleted, and polling won't clip it again. Its clips and their videos stay. This can't be undone."
+        action="Delete VOD"
+        destructive
+        onConfirm={() => void deleteVod(v.id)}
+      />
+    </>
   );
 }

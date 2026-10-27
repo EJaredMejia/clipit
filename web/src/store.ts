@@ -40,6 +40,7 @@ export type Vod = {
   attempts: number;
   error: string | null;
   claimed_at: string | null;
+  running_at: string | null; // a run started by hand is using its files
   finished_at: string | null;
 };
 export type Data = { vods: Vod[]; clips: Clip[] };
@@ -230,6 +231,9 @@ export async function deleteSkipped(): Promise<number> {
   release([]);
   return reply && typeof reply.failed === "number" ? reply.failed : 0;
 }
+
+// Deletes the VOD and every file of it (chat, transcripts, audio...) but the clip videos: its clips stay.
+export const deleteVod = (id: string) => save("/api/delete-vod", { vod: id });
 
 // Post text autosave: one ordered save per clip field.
 const running = new Map<string, Promise<boolean>>();

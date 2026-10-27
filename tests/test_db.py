@@ -94,7 +94,7 @@ def test_a_deleted_clips_id_is_never_reused(conn):
 def test_migration_keeps_clips_saved_under_the_old_schema(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:1])
     old = db.connect(tmp_path / "x.db")
-    db.record_manual(old, "v1", "u")
+    old.execute("INSERT INTO vods (id, url, tier, status) VALUES ('v1', 'u', 'manual', 'done')")  # written by the old code
     old.execute("""INSERT INTO clips (vod_id, idx, file, start_s, end_s, title, hook, caption, trend, sound, score, why,
                    created_at) VALUES ('v1', 1, 'f', 1, 20, 't', 'h', 'c', '', '', 8, '', 'now')""")
     old.close()
