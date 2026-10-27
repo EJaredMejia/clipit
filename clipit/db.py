@@ -110,6 +110,7 @@ TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user 
 PLATFORMS = ("tiktok", "youtube")
 
 FRESH = datetime.timedelta(days=2)  # automatic posts: older clips ride a trend that has passed
+AUTO_SCORE = 8  # automatic posts: an unreviewed clip goes up if the clip-picking AI scored it this high (1-10)
 STALE_CLAIM = datetime.timedelta(minutes=30)  # a 'processing' row not refreshed for this long was a crashed run
 HEARTBEAT = datetime.timedelta(minutes=5)  # how often a live run refreshes its claim, well under STALE_CLAIM
 MAX_ATTEMPTS = 3
@@ -372,9 +373,9 @@ def set_upload(conn: sqlite3.Connection, clip_id: int, platform: str, url: str |
 def claim_upload(
     conn: sqlite3.Connection, platform: str, per_day: int, gap: datetime.timedelta, now: datetime.datetime | None = None
 ) -> sqlite3.Row | None:
-    """Atomically take the newest clip the user kept from a polled VOD in the last FRESH that isn't on platform yet,
-    if the pacing allows (clips from old or hand-run VODs are posted only by hand): at most per_day
-    posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
+    """Atomically take the next clip to post automatically, if the pacing allows: from a polled VOD in the last FRESH
+    (clips from old or hand-run VODs are posted only by hand), not on platform yet, kept by the user or unreviewed with
+    an AI score of AUTO_SCORE+ (never skipped), kept first, then newest. At most per_day posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
     The upload then ends with set_upload (posted) or fail_upload (retried later, up to MAX_ATTEMPTS)."""
     now = now or utcnow()
     conn.execute("BEGIN IMMEDIATE")  # two overlapping runs must not both post, nor both see room in the pacing
@@ -389,10 +390,10 @@ def claim_upload(
                 """SELECT c.id, c.file, c.title, c.youtube, c.caption, c.edited FROM clips c
                    JOIN vods v ON v.id = c.vod_id
                    LEFT JOIN uploads u ON u.clip_id = c.id AND u.platform = ?
-                   WHERE c.verdict = 'keep' AND v.tier != 'manual' AND c.created_at >= ?
+                   WHERE (c.verdict = 'keep' OR c.verdict IS NULL AND c.score >= ?) AND v.tier != 'manual' AND c.created_at >= ?
                      AND (u.clip_id IS NULL OR (u.status = 'failed' AND u.attempts < ? AND u.uploaded_at < ?))
-                   ORDER BY c.created_at DESC, c.idx LIMIT 1""",
-                (platform, (now - FRESH).isoformat(), MAX_ATTEMPTS, (now - RETRY_AFTER).isoformat()),
+                   ORDER BY c.verdict IS NULL, c.created_at DESC, c.idx LIMIT 1""",
+                (platform, AUTO_SCORE, (now - FRESH).isoformat(), MAX_ATTEMPTS, (now - RETRY_AFTER).isoformat()),
             ).fetchone()
         if clip:
             _take_upload(conn, clip["id"], platform, now)

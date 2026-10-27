@@ -124,8 +124,9 @@ It only listens on your own machine (127.0.0.1) and refuses requests from other 
 
 ### Post to YouTube Shorts
 
-Clipit posts the clips you marked **Keep** in the dashboard, from VODs polled in the last 2 days (older trends have
-passed), to your channel, through YouTube's official API: newest first, public, at most 3 in any 24-hour period and at least 1 hour apart. Clips you skipped or haven't reviewed are never posted.
+Clipit posts clips from VODs polled in the last 2 days (older trends have passed) to your channel, through YouTube's
+official API: the ones you marked **Keep** first, then ones you haven't reviewed that the AI scored 8/10 or more,
+newest first, public, at most 3 in any 24-hour period and at least 1 hour apart. Clips you skipped are never posted.
 
 Set up once (free, about 15 minutes):
 
@@ -173,7 +174,7 @@ have the rights to: three copyright strikes delete a channel.
 | `--dashboard` | | Open the dashboard in your browser. |
 | `--port N` | `8765` | With `--dashboard`: the port on 127.0.0.1. |
 | `--youtube-login` | | Sign in to the YouTube channel to post to. Once. |
-| `--upload` | | Post the newest clip you kept to YouTube Shorts, if one is due. |
+| `--upload` | | Post a fresh clip you kept, or the AI scored 8+, to YouTube Shorts, if one is due. |
 
 ## Output
 

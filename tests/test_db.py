@@ -184,6 +184,7 @@ def test_claim_upload_posts_the_newest_kept_clips_at_the_paced_rate(conn):
     a, b, skipped, unreviewed, c = kept_clips(conn, 5)
     db.set_verdict(conn, skipped, "skip")
     db.set_verdict(conn, unreviewed, None)
+    conn.execute("UPDATE clips SET score = ? WHERE id = ?", (db.AUTO_SCORE - 1, unreviewed))  # below the AI's bar
     h = datetime.timedelta(hours=1)
 
     def claim(at):
@@ -208,6 +209,15 @@ def test_claim_upload_skips_stale_and_hand_run_clips(conn):
     db.set_verdict(conn, manual, "keep")
     conn.execute("UPDATE clips SET created_at = ? WHERE id = ?", (T0.isoformat(), manual))
     assert db.claim_upload(conn, "youtube", 3, datetime.timedelta(hours=1), now=T0)["id"] == old  # not the newer hand-run one
+
+
+def test_claim_upload_takes_kept_first_then_high_scoring_unreviewed(conn):
+    low, high, kept, skipped = kept_clips(conn, 4)
+    for cid, verdict, score in ((low, None, db.AUTO_SCORE - 1), (high, None, db.AUTO_SCORE), (skipped, "skip", 10)):
+        db.set_verdict(conn, cid, verdict)
+        conn.execute("UPDATE clips SET score = ? WHERE id = ?", (score, cid))
+    claimed = [db.claim_upload(conn, "youtube", 9, datetime.timedelta(0), now=T0) for _ in range(3)]
+    assert [r and r["id"] for r in claimed] == [kept, high, None]  # the skipped clip is newest and scores 10
 
 
 def test_failed_uploads_retry_after_a_wait_then_give_up(conn):

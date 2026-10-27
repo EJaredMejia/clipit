@@ -7,7 +7,7 @@ clipit --poll              (clip the latest VODs of trending, big and smaller st
 clipit --poll --dry-run    (only show which VODs it would clip)
 clipit --dashboard         (browse every VOD and clip, mark clips keep/skip and posted)
 clipit --youtube-login     (once: sign in to the YouTube channel to post to)
-clipit --poll --upload     (also post the newest clip you kept to YouTube Shorts, a few a day)
+clipit --poll --upload     (also post the best fresh clip to YouTube Shorts, a few a day)
 clipit --poll --upload --every 45   (keep running: one pass every 45 minutes, no Task Scheduler needed)
 """
 
@@ -89,7 +89,7 @@ def main() -> None:
     ap.add_argument(
         "--upload",
         action="store_true",
-        help=f"post the newest clip you marked Keep to YouTube Shorts, at most {youtube.PER_DAY} a day and "
+        help=f"post a fresh clip you kept, or the AI scored {db.AUTO_SCORE}+, to YouTube Shorts, at most {youtube.PER_DAY} a day and "
         f"{youtube.GAP.seconds // 3600}h apart. Add it to the --poll timer",
     )
     ap.add_argument(
