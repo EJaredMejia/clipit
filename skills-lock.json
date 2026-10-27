@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "skills": {
+    "babysit-pr": {
+      "source": "openai/codex",
+      "ref": "a770e5b8470d3320eb53a56a286ea4a0a70a1f59",
+      "sourceType": "github",
+      "skillPath": ".codex/skills/babysit-pr/SKILL.md",
+      "computedHash": "fac391d7638d6d8dd3024315f9504d51dcf848a0d325f47db26156d9d6909925"
+    }
+  }
+}
