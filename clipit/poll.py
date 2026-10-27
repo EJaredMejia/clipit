@@ -80,7 +80,13 @@ def poll(
     top_left = top_n
     trending = ai.trending_streamers()
     log(f"trending streamers: {', '.join(f'{site}:{name}' for site, name in trending) or 'none (run --refresh-trends)'}")
-    for tier, (login, _, _, site) in candidates(live_streams(), lang, trending=trending):
+    try:
+        live = live_streams()
+    except ClipitError:
+        if not trending:
+            raise
+        live = []  # both live lists down (each logged): the trending streamers' VODs may still be reachable
+    for tier, (login, _, _, site) in candidates(live, lang, trending=trending):
         if (top_left if tier == "top" else small_left) <= 0:
             continue
         try:

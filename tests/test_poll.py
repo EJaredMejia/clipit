@@ -141,6 +141,21 @@ def test_one_streamers_vod_lookup_failing_does_not_end_the_pass(world, monkeypat
     assert calls == ["v3"]  # big1 skipped, big2 has no VOD, mid still processed
 
 
+def test_trending_streamers_still_clipped_when_both_live_lists_are_down(world, monkeypatch):
+    conn, calls, tmp_path = world
+
+    def down():
+        raise ClipitError("API down")
+
+    monkeypatch.setattr(poll.twitch, "live_streams", down)
+    monkeypatch.setattr(poll.kick, "live_streams", down)
+    with pytest.raises(ClipitError, match="any site"):  # nothing trending either: the pass fails loudly
+        poll.poll(conn, out_root=tmp_path)
+    monkeypatch.setattr(poll.ai, "trending_streamers", lambda: [("twitch", "big1")])
+    poll.poll(conn, out_root=tmp_path)
+    assert calls == ["v1"]
+
+
 def test_dry_run_touches_nothing(world):
     conn, calls, out = world
     poll.poll(conn, top_n=2, small_per_day=1, lang="EN", dry_run=True, out_root=out)

@@ -35,6 +35,18 @@ def setup_logging(out: Path) -> None:
     logger.addHandler(console)
 
 
+def refresh_stale_trends(trends_ai: str | None) -> None:
+    """Redo trend research older than ai.TRENDS_MAX_AGE, so polling clips who everyone is talking about now."""
+    age = ai.trends_age()
+    if not trends_ai or (age is not None and age <= ai.TRENDS_MAX_AGE):
+        return
+    log("trend research is stale, redoing it so polling clips who everyone is talking about...")
+    try:
+        ai.refresh_trends(trends_ai)
+    except Exception:  # polling still runs, on the older list or by viewers
+        logger.exception("trend research failed")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="clipit", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("url", nargs="?", help="Twitch or Kick VOD link (other yt-dlp sites work too, without chat)")
@@ -86,13 +98,8 @@ def main() -> None:
     setup_logging(a.out)
     conn = db.connect(a.out / "clipit.db")
     try:
-        age = ai.trends_age()
-        if a.poll and not a.dry_run and a.trends_ai and (age is None or age > ai.TRENDS_MAX_AGE):
-            log("trend research is stale, redoing it so polling clips who everyone is talking about...")
-            try:
-                ai.refresh_trends(a.trends_ai)
-            except Exception:  # polling still runs, on the older list or by viewers
-                logger.exception("trend research failed")
+        if a.poll and not a.dry_run and not a.refresh_trends:  # --refresh-trends does it below, a dry run touches nothing
+            refresh_stale_trends(a.trends_ai)
         if a.refresh_trends:
             if not a.trends_ai:
                 raise ClipitError('No AI for trend research. Install Claude Code or Codex CLI, or pass --trends-ai "<command>"')
