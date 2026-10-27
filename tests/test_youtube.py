@@ -1,6 +1,8 @@
 import datetime
 
+import httplib2
 import pytest
+from googleapiclient.errors import HttpError
 
 from clipit import db, youtube
 from clipit.util import ClipitError
@@ -59,6 +61,16 @@ def test_a_failed_upload_is_recorded_for_a_retry(conn, tmp_path, monkeypatch):
     assert tuple(row) == ("failed", 1, "RuntimeError: quota")
 
 
+def test_hitting_the_daily_quota_costs_the_clip_no_attempt(conn, tmp_path, monkeypatch):
+    def over_quota(*_):
+        raise HttpError(httplib2.Response({"status": "403"}), b'{"error": {"errors": [{"reason": "quotaExceeded"}]}}')
+
+    monkeypatch.setattr(youtube, "_upload", over_quota)
+    with pytest.raises(HttpError):
+        youtube.upload_next(conn, tmp_path)
+    assert tuple(conn.execute("SELECT status, attempts FROM uploads").fetchone()) == ("failed", 0)
+
+
 def test_without_a_login_nothing_is_claimed(conn, tmp_path, monkeypatch):
     monkeypatch.undo()  # the real _credentials
     monkeypatch.setattr(youtube, "TOKEN", tmp_path / "missing.json")
@@ -112,6 +124,7 @@ def test_only_an_upload_that_started_sending_counts_as_maybe_posted(monkeypatch,
 def test_hourly_uploads_wait_a_full_hour_and_keep_the_rolling_daily_limit(conn, tmp_path, monkeypatch):
     now = [datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)]
     start = now[0]
+    monkeypatch.setattr(youtube, "PER_DAY", 3)  # the rolling window, not the configured number, is under test
     monkeypatch.setattr(db, "utcnow", lambda: now[0])
     monkeypatch.setattr(youtube, "utcnow", lambda: now[0])
     db.save_clips(

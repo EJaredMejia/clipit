@@ -17,6 +17,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
 from clipit import db
@@ -26,7 +27,8 @@ HOME = Path.home() / ".clipit"
 CLIENT = HOME / "youtube_client.json"
 TOKEN = HOME / "youtube_token.json"
 SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]  # posting only: it can't read or manage the channel
-PER_DAY = 3
+PER_DAY = 10  # YouTube's default API quota fits about 6 uploads a day: past that a post waits (QUOTA) until a raise
+QUOTA = (b"quotaExceeded", b"uploadLimitExceeded")  # daily limits: hitting one costs the clip no attempt
 GAP = datetime.timedelta(hours=1)
 STUCK = datetime.timedelta(hours=2)  # an upload still unfinished this long after it started belongs to a run that died
 
@@ -95,7 +97,9 @@ def _post(conn: sqlite3.Connection, creds: Credentials, clip: sqlite3.Row, out: 
             raise ClipitError(f"clip file {clip['file']} is outside {out}")
         video = _upload(creds, video_file, metadata(clip))
     except Exception as e:  # retried on a later run (up to db.MAX_ATTEMPTS), unless the video may already be up
-        db.fail_upload(conn, clip["id"], "youtube", f"{type(e).__name__}: {e}"[:1000], retry=not isinstance(e, MaybePosted))
+        spent = not (isinstance(e, HttpError) and any(q in e.content for q in QUOTA))
+        error = f"{type(e).__name__}: {e}"[:1000]
+        db.fail_upload(conn, clip["id"], "youtube", error, retry=not isinstance(e, MaybePosted), spent=spent)
         raise
     url = f"https://youtube.com/shorts/{video['id']}"
     db.set_upload(conn, clip["id"], "youtube", url)
