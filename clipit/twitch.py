@@ -26,8 +26,19 @@ VODS = """query($login: String!) {
 RETRY_WAITS = (2, 4, 8, 16, 30, 30)  # seconds between attempts: rides out ~90 s of network trouble (seen: DNS failures)
 
 
+def errors(reply: Any) -> list[str]:
+    """The error messages in a GQL reply, a single response or a batch."""
+    return [
+        str(e.get("message", e)) if isinstance(e, dict) else str(e)
+        for r in (reply if isinstance(reply, list) else [reply])
+        if isinstance(r, dict)
+        for e in r.get("errors") or []
+    ]
+
+
 def post(body: dict | list) -> Any:
-    """POST to Twitch GQL and return the decoded JSON, retrying network errors and garbled responses with backoff."""
+    """POST to Twitch GQL and return the decoded JSON, retrying network errors, garbled responses and Twitch's own
+    passing failures ("service error", "service timeout": seen in a live run) with backoff."""
     req = urllib.request.Request(
         "https://gql.twitch.tv/gql",
         json.dumps(body).encode(),
@@ -35,16 +46,19 @@ def post(body: dict | list) -> Any:
     )
     for wait in RETRY_WAITS:
         try:
-            return json.load(urllib.request.urlopen(req, timeout=30))
+            reply = json.load(urllib.request.urlopen(req, timeout=30))
+            if not any(m.startswith("service ") for m in errors(reply)):
+                return reply
         except (OSError, ValueError):
-            time.sleep(wait)
-    return json.load(urllib.request.urlopen(req, timeout=30))  # last attempt: its error propagates
+            pass
+        time.sleep(wait)
+    return json.load(urllib.request.urlopen(req, timeout=30))  # last attempt: its error is the caller's to raise
 
 
 def gql(query: str, variables: dict | None = None) -> dict:
     d = post({"query": query, "variables": variables or {}})
-    if d.get("errors"):
-        raise ClipitError(f"Twitch API: {d['errors'][0]['message']}")
+    if e := errors(d):
+        raise ClipitError(f"Twitch API: {e[0]}")
     return d["data"]
 
 
@@ -80,7 +94,13 @@ def gql_comments(vid: str, t: int) -> dict | None:
             "extensions": {"persistedQuery": {"version": 1, "sha256Hash": GQL_HASH}},
         }
     ]
-    return post(body)[0]["data"]["video"]["comments"]
+    reply = post(body)
+    if e := errors(reply):  # e.g. PersistedQueryNotFound: Twitch retired the chat query's hash
+        raise ClipitError(f"Twitch chat API: {e[0]}")
+    try:
+        return reply[0]["data"]["video"]["comments"]
+    except (KeyError, IndexError, TypeError):
+        raise ClipitError(f"Twitch chat API: unexpected reply {str(reply)[:200]}") from None
 
 
 def fetch_chat(vid: str, duration: float, slice_len: int = 300) -> list[list]:

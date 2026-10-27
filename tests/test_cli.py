@@ -1,9 +1,44 @@
+import datetime
 import sys
 from pathlib import Path
 
 import pytest
 
 from clipit import cli, poll, youtube
+from clipit.util import ClipitError
+
+
+@pytest.fixture
+def research(monkeypatch):
+    """Fake trend research: records each call, fails when told to."""
+    calls, state = [], {"age": None, "fail": False}
+
+    def refresh(cmd):
+        calls.append(cmd)
+        if state["fail"]:
+            raise ClipitError("web search down")
+
+    monkeypatch.setattr(cli.ai, "trends_age", lambda: state["age"])
+    monkeypatch.setattr(cli.ai, "refresh_trends", refresh)
+    return calls, state
+
+
+def test_missing_or_stale_trends_are_researched_fresh_ones_are_not(research):
+    calls, state = research
+    cli.refresh_stale_trends("codex")  # never researched
+    state["age"] = cli.ai.TRENDS_MAX_AGE + datetime.timedelta(minutes=1)
+    cli.refresh_stale_trends("codex")
+    state["age"] = cli.ai.TRENDS_MAX_AGE - datetime.timedelta(minutes=1)
+    cli.refresh_stale_trends("codex")
+    cli.refresh_stale_trends(None)  # no AI for research installed
+    assert calls == ["codex", "codex"]
+
+
+def test_failed_research_does_not_stop_polling(research):
+    calls, state = research
+    state["fail"] = True
+    cli.refresh_stale_trends("codex")  # logged, not raised
+    assert calls == ["codex"]
 
 
 class Stop(Exception):
@@ -26,13 +61,14 @@ def test_every_repeats_passes_and_survives_a_failed_one(monkeypatch: pytest.Monk
 
     monkeypatch.setattr(sys, "argv", ["clipit", "--poll", "--upload", "--every", "45", "--out", str(tmp_path)])
     monkeypatch.setattr(cli, "setup_logging", lambda out: None)
+    monkeypatch.setattr(cli, "refresh_stale_trends", lambda trends_ai: passes.append("trends"))
     monkeypatch.setattr(cli.shutil, "which", lambda name: name)
     monkeypatch.setattr(poll, "poll", fake_poll)
     monkeypatch.setattr(youtube, "upload_next", lambda conn, out: None)
     monkeypatch.setattr(cli.time, "sleep", fake_sleep)
     with pytest.raises(Stop):
         cli.main()
-    assert passes == ["poll"] * 3  # the failed first pass didn't end the loop
+    assert passes == ["trends", "poll"] * 3  # the failed first pass didn't end the loop; stale trends checked each pass
     assert sleeps == [2700] * 3
 
 

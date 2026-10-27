@@ -3,7 +3,7 @@
 clipit https://www.twitch.tv/videos/2906456464
 clipit URL --clips 10 --ai "ollama run qwen3:30b"
 clipit --refresh-trends
-clipit --poll              (clip the latest VODs of big + smaller live streamers; run it on a timer)
+clipit --poll              (clip the latest VODs of trending, big and smaller streamers; run it on a timer)
 clipit --poll --dry-run    (only show which VODs it would clip)
 clipit --dashboard         (browse every VOD and clip, mark clips keep/skip and posted)
 clipit --youtube-login     (once: sign in to the YouTube channel to post to)
@@ -39,6 +39,18 @@ def setup_logging(out: Path) -> None:
     logger.addHandler(console)
 
 
+def refresh_stale_trends(trends_ai: str | None) -> None:
+    """Redo trend research older than ai.TRENDS_MAX_AGE, so polling clips who everyone is talking about now."""
+    age = ai.trends_age()
+    if not trends_ai or (age is not None and age <= ai.TRENDS_MAX_AGE):
+        return
+    log("trend research is stale, redoing it so polling clips who everyone is talking about...")
+    try:
+        ai.refresh_trends(trends_ai)
+    except Exception:  # polling still runs, on the older list or by viewers
+        logger.exception("trend research failed")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(prog="clipit", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("url", nargs="?", help="Twitch or Kick VOD link (other yt-dlp sites work too, without chat)")
@@ -60,7 +72,9 @@ def main() -> None:
         "--refresh-trends", action="store_true", help="have the AI research current TikTok/Shorts trends into trends.md"
     )
     ap.add_argument("--poll", action="store_true", help="pick live streamers automatically and clip their latest finished VOD")
-    ap.add_argument("--top", type=int, default=6, help="--poll: how many of the biggest live streamers to clip (default 6)")
+    ap.add_argument(
+        "--top", type=int, default=6, help="--poll: how many trending, then biggest live, streamers to clip (default 6)"
+    )
     ap.add_argument(
         "--small",
         type=int,
@@ -117,6 +131,8 @@ def main() -> None:
 
 def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
     """One run of everything the flags ask for."""
+    if a.poll and not a.dry_run and not a.refresh_trends:  # --refresh-trends does it below, a dry run touches nothing
+        refresh_stale_trends(a.trends_ai)
     if a.refresh_trends:
         if not a.trends_ai:
             raise ClipitError('No AI for trend research. Install Claude Code or Codex CLI, or pass --trends-ai "<command>"')

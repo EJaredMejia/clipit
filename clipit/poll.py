@@ -1,16 +1,19 @@
 """Decide which streams to clip and run the pipeline on each one's latest finished VOD, on Twitch and Kick.
 
-Big live streamers first, then a few smaller ones (they go viral too). Each VOD is claimed in the
+Streamers everyone is talking about first (from trend research), then big live streamers, then a few smaller ones
+(they go viral too). Each VOD is claimed in the
 SQLite catalog before processing, so overlapping runs never double-process and finished VODs are never redone.
 """
 
 import datetime
+import itertools
 import random
 import sqlite3
+from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
 
-from clipit import db, kick, twitch
+from clipit import ai, db, kick, twitch
 from clipit.pipeline import process_vod
 from clipit.util import ROOT, ClipitError, log, logger, utcnow
 
@@ -37,12 +40,25 @@ def live_streams() -> list[Stream]:
     return sorted(found, key=lambda s: -s[1])
 
 
-def candidates(streams: list[Stream], lang: str, rng: random.Random | None = None) -> list[tuple[str, Stream]]:
-    """(tier, stream) in priority order: big streamers biggest first, then smaller streamers in random order."""
-    streams = [s for s in streams if not lang or s[2] == lang]
+def mix(streams: list[Stream]) -> list[Stream]:
+    """Alternate between sites, keeping each site's order, so Twitch's bigger numbers don't take every slot."""
+    by_site = [[s for s in streams if s[3] is site] for site in SITES]
+    return [s for group in itertools.zip_longest(*by_site) for s in group if s]
+
+
+def candidates(
+    streams: list[Stream], lang: str, rng: random.Random | None = None, trending: Iterable[tuple[str, str]] = ()
+) -> list[tuple[str, Stream]]:
+    """(tier, stream) in priority order: streamers everyone is talking about (live or not), then big live streamers
+    biggest first, then smaller streamers in random order, each viewer tier alternating between Twitch and Kick."""
+    sites = {site.__name__.rsplit(".", 1)[1]: site for site in SITES}
+    hot: list[Stream] = [(name, 0, "", sites[site]) for site, name in trending]
+    picked = {(s[0].lower(), s[3]) for s in hot}  # a trending streamer who's also live would take two slots
+    streams = [s for s in streams if (not lang or s[2] == lang) and (s[0].lower(), s[3]) not in picked]
     small = [s for s in streams if SMALL[0] <= s[1] <= SMALL[1]]
     (rng or random.Random()).shuffle(small)
-    return [("top", s) for s in streams if s[1] > SMALL[1]] + [("small", s) for s in small]
+    top = hot + mix([s for s in streams if s[1] > SMALL[1]])
+    return [("top", s) for s in top] + [("small", s) for s in mix(small)]
 
 
 def ended(vod: dict) -> datetime.datetime:
@@ -62,7 +78,15 @@ def poll(
     now = utcnow()
     small_left = small_per_day - db.small_done_since(conn, now - datetime.timedelta(days=1))
     top_left = top_n
-    for tier, (login, _, _, site) in candidates(live_streams(), lang):
+    trending = ai.trending_streamers()
+    log(f"trending streamers: {', '.join(f'{site}:{name}' for site, name in trending) or 'none (run --refresh-trends)'}")
+    try:
+        live = live_streams()
+    except ClipitError:
+        if not trending:
+            raise
+        live = []  # both live lists down (each logged): the trending streamers' VODs may still be reachable
+    for tier, (login, _, _, site) in candidates(live, lang, trending=trending):
         if (top_left if tier == "top" else small_left) <= 0:
             continue
         try:

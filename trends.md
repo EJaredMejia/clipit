@@ -1,29 +1,60 @@
-_Updated 2026-10-21. Refresh with `python clipit.py --refresh-trends`, or edit by hand._
+_Updated 2026-10-27_
 
-## Formats & hooks that work for stream clips
-- Cold open on the peak: the reaction, scream or "NO WAY" lands in the first 1-2 seconds, with the context after it.
-- "Wait for it" / delayed payoff: hook text promises the moment, the clip ends right as it lands (gets rewatches).
-- Subtle foreshadowing (trending Oct 2026): an early line or detail that pays off at the end. Great for "he said it would happen" clips.
-- Rage / tilt moments, jumpscares, clutch plays, fails, chat or donation roasting the streamer, unhinged one-liners.
-- Deadpan "defending a take nobody asked for" arguments (the "Two Fishes" Love Island audio trend, Oct 2026). Streamer rants about tiny things fit it.
-- Loopable endings: cut on a line that flows back into the first second.
-- Hook text reads like a reaction or a dare, e.g. "he was NOT ready", "chat called it", "this is why he quit".
+## Streamers everyone is talking about
+- kick:bigloaf
+- twitch:caedrel
+- twitch:jynxzi
+- twitch:theburntpeanut
+- twitch:jasontheween
+- twitch:zackrawrr
+- twitch:caseoh_
+- twitch:stableronaldo
+- twitch:kaicenat
+- kick:westcol
 
-## Trending sounds / memes (add in-app when posting, never burned in)
-- "Two Fishes" (Love Island USA S8, Corbin): deadpan, over-the-top arguments about silly takes.
-- Róisín Murphy "Ramalama (Bang Bang)": dramatic reveals, Halloween costume walks.
-- Most stream clips work best with the original audio. Only add a sound under silent or visual gags.
+## Formats & hooks trending now
+- **Put the payoff first.** Open on the funniest, worst or wildest second of the clip, then rewind to show how it happened. Don't open with a greeting.
+- **Drama with context.** Kick IRL drama is pulling the most reach right now (BigLoaf's Streamer Awards threats, the fights tied to ComplexCon and NMS Boxing). Use the format "Clip → what happened → reactions." Add a text card giving the context, and don't add your own judgement.
+- **"Streamer reacts to being clipped."** Pair the original moment with the streamer's later reaction to it in one Short.
+- **Worlds watch-party clips.** Caedrel is #1 on Twitch by hours watched this month because of Worlds. Use his reactions to big plays, and split the screen between the game and his face.
+- **Collabs and duos.** Clips of Jynxzi and TheBurntPeanut together, and anything featuring two big names, keep getting reposted.
+- **Clips from Streamer Awards nominees** (Jynxzi, CaseOh, StableRonaldo, Bartolozzi, iShowSpeed). Frame them as "why X deserves Streamer of the Year" while voting is open, until Oct 31.
+- **Hooks in on-screen text that work:** "He didn't know he was still live", "Chat saw it before he did", "This is why he's nominated", "Wait for it…" (only if the payoff lands before 8s).
+- **Series.** Number your parts ("Part 3") and post at a regular rhythm. It brings viewers back to the profile, on Shorts in particular.
 
-## Hashtags
-- 1-2 broad (#twitch #streamer #gaming), 1-2 for the streamer or game (#caseoh #fortnite), 1 for the moment (#jumpscare #fail #rage).
-- YouTube Shorts: put the hook in the title. #shorts is optional.
+## Trending sounds/memes that fit stream clips
+- **Halloween horror audio** (PeriTune's "Halloween" cute-horror track). Use it under jump scares from horror-game streams.
+- **Ramalama (Bang Bang) drum hit.** It's the costume-reveal walk sound. Use it for a streamer's entrance or a fit check in Halloween costume.
+- **"Two Fishes" (CorbinGPT / Love Island)**: someone defending a terrible take with full confidence. It fits a streamer arguing with chat.
+- **"Be OK" (Ingrid Michaelson)**: an upbeat dance with an embarrassing confession in the text. It fits fail compilations.
+- **Top songs right now:** Tate McRae "Housewife" and JADE "Angel Of My Dreams". Use them for montages and edits, with the music low under the original audio.
+- On YouTube, licensed music caps a Short at 60s. Anything longer needs original or royalty-free audio.
 
-## Events in the next 2 weeks
-- Halloween is Saturday Oct 31, a full weekend: horror games, jumpscares, costume streams, "scariest moment" framing.
-- World Series starts Oct 23: sports reactions and watch-party moments.
+## Hashtags that work now
+- Keep it to 3–5 tags: 1 broad, 1–2 for the niche, 1 for the streamer.
+- Broad: `#twitch` `#kick` `#streamer` `#gaming` `#fyp`
+- Niche: `#twitchclips` `#streamerclips` `#kickclips` `#livestreamfails`
+- Streamer: `#jynxzi` `#caseoh` `#theburntpeanut` `#caedrel` `#kaicenat` `#jasontheween`
+- Timely: `#halloween` `#worlds2026` `#leagueoflegends` `#streamerawards` `#gta6`
 
-## Editing style
-- 20-35 s sweet spot for entertainment clips. Up to 60 s only if the story needs it. Shorts allows up to 3 min, but retention drops.
-- Big word-by-word captions with the current word highlighted. The clip must work on mute.
-- No intros or branding. Cut dead air. End on the payoff.
-- Aim for 90%+ retention. Under 30 s, rewatches can push it past 100%.
+## Events/seasonal moments in the next 2 weeks
+- **Oct 27–31: Halloween.** Expect costume streams, horror-game jump scares and spooky IRL streams. Post Halloween content up to Nov 1, then stop.
+- **Oct 31: Streamer Awards voting closes.** The ceremony is Nov 12 (just after this window). Start building nominee content and "predictions" posts now.
+- **Nov 1–2: Día de los Muertos.** This is a seasonal moment for LatAm Kick audiences (WestCOL, Spreen).
+- **Through Nov 14: LoL Worlds knockout stage**, with the final at Barclays Center, Brooklyn. Caedrel co-stream clips will peak.
+- **~Nov 4: WoW: Forever** (only one source lists this date). Expect clips from WoW streamers like Esfand.
+- **GTA 6 launches Nov 19.** The pre-launch hype window is now. RP streamers' "GTA 6 countdown" content and reactions to new trailers or leaks will pull views.
+
+## Editing style (length, captions, pacing)
+- **Length:** 15–35s is the default. Go to 45–60s only for drama or story clips that have a clear arc. Shorts can run up to 3 min, but retention drops off.
+- **Hook:** The first 1–3s should already show the moment. Cut every pause, loading screen and "uhh".
+- **Captions:** Burn them in, word by word, bold and high-contrast, in the centre-upper safe zone. Most people watch on mute, and YouTube's Clear Screen mode hides the platform's own captions.
+- **Layout:** 9:16 at 1080x1920. Facecam on top, game below (about 40/60), or facecam only for reaction clips. Use 60fps for fast gameplay.
+- **Pacing:** Cut or punch in every 1–2s. Add a zoom on the reaction beat, and freeze-frame plus a text callout on the key moment.
+- **Audio:** Keep the streamer's voice dominant and music at about 10–20%. Use a sound effect only on the punchline.
+- **Loop:** End right as the moment lands so the replay feels seamless. Rewatches lift both algorithms.
+- **Context card:** For drama clips, add a 1-line text card naming who, where and when. Credit the streamer in the caption and blur any doxxing information.
+
+_Note: I couldn't get a direct ranking of this week's viral clips (the clip trackers blocked access or showed old data). The streamer list is based on October Twitch hours-watched rankings, the Streamer Awards nominees and this week's Kick news. I haven't confirmed the `bigloaf` Kick URL. The WoW: Forever date comes from one outlet only._
+
+**Sources:** [Sportskeeda – BigLoaf / NMS Boxing](https://www.sportskeeda.com/us/streamers/news-kick-streamer-bigloaf-threatens-show-streamer-awards-2026-guns-aks-bombs-tanks-blow-whole-twitch-community) · [TwitchMetrics Oct 2026](https://www.twitchmetrics.net/channels/viewership) · [TwitchTracker](https://twitchtracker.com/channels/hours-watched) · [Streamer Awards 2026](https://streamer.guide/blog/streamer-awards-2026-nominees) · [Epidemic Sound – Kick top 10](https://www.epidemicsound.com/blog/most-followed-on-kick/) · [Revid – viral TikTok songs](https://www.revid.ai/viral-tiktok-songs) · [Ramdam TikTok trends](https://www.ramd.am/blog/trends-tiktok) · [NewEngen TikTok trends](https://newengen.com/insights/tiktok-trends/) · [Worlds 2026 final](https://en.wikipedia.org/wiki/2026_League_of_Legends_World_Championship_final) · [itechguides – Nov 2026 games](https://www.itechguides.com/every-major-game-releasing-in-november-2026-besides-gta-6/) · [Subscribr – Shorts structure](https://subscribr.ai/youtube-strategy/perfect-youtube-short-length-structure-hooks) · [AIR – gaming Shorts](https://air.io/youtube-hacks/how-to-make-gaming-shorts-on-youtube)
