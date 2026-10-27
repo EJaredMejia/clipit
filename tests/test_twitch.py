@@ -33,6 +33,45 @@ def test_post_gives_up_after_the_last_retry(monkeypatch):
         twitch.gql("query { ok }")
 
 
+def test_post_retries_twitchs_passing_service_errors(monkeypatch):
+    monkeypatch.setattr(twitch, "RETRY_WAITS", (0, 0, 0))
+    replies = [{"errors": [{"message": "service error"}]}, {"errors": [{"message": "service timeout"}]}, {"data": {"ok": 1}}]
+
+    def flaky(req, timeout):
+        return io.BytesIO(json.dumps(replies.pop(0)).encode())
+
+    monkeypatch.setattr(twitch.urllib.request, "urlopen", flaky)
+    assert twitch.gql("query { ok }") == {"ok": 1} and not replies
+
+
+def test_lasting_gql_errors_fail_loudly(monkeypatch):
+    monkeypatch.setattr(twitch, "RETRY_WAITS", (0,))
+    attempts = []
+
+    def reply(body):
+        def urlopen(req, timeout):
+            attempts.append(1)
+            return io.BytesIO(json.dumps(body).encode())
+
+        return urlopen
+
+    monkeypatch.setattr(twitch.urllib.request, "urlopen", reply({"errors": [{"message": "service error"}]}))
+    with pytest.raises(ClipitError, match="service error"):  # still down after every retry
+        twitch.gql("query { ok }")
+    assert len(attempts) == 2
+    attempts.clear()
+    monkeypatch.setattr(twitch.urllib.request, "urlopen", reply({"errors": [{"message": "Cannot query field"}]}))
+    with pytest.raises(ClipitError, match="Cannot query field"):  # a query Twitch no longer accepts: no retry
+        twitch.gql("query { ok }")
+    assert len(attempts) == 1
+    monkeypatch.setattr(twitch.urllib.request, "urlopen", reply([{"errors": [{"message": "PersistedQueryNotFound"}]}]))
+    with pytest.raises(ClipitError, match="PersistedQueryNotFound"):
+        twitch.gql_comments("1", 0)
+    monkeypatch.setattr(twitch.urllib.request, "urlopen", reply([{"data": {"video": None}}]))
+    with pytest.raises(ClipitError, match="unexpected reply"):  # a deleted VOD, or a changed reply shape
+        twitch.gql_comments("1", 0)
+
+
 def test_chat_failure_fails_the_vod_instead_of_skipping_chat(monkeypatch):
     def broken(*a):
         raise urllib.error.URLError("down")
