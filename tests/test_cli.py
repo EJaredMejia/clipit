@@ -36,8 +36,13 @@ def test_every_repeats_passes_and_survives_a_failed_one(monkeypatch: pytest.Monk
     assert sleeps == [2700] * 3
 
 
-@pytest.mark.parametrize("args", [["--every", "30"], ["--dashboard", "--every", "30"], ["--poll", "--every", "0"]])
-def test_every_rejects_what_it_cannot_repeat(monkeypatch: pytest.MonkeyPatch, args: list[str]) -> None:
-    monkeypatch.setattr(sys, "argv", ["clipit", *args])
-    with pytest.raises(SystemExit):
+@pytest.mark.parametrize(
+    "every",
+    [["--every", "30"], ["--dashboard", "--every", "30"], *(["--poll", "--every", m] for m in ("0", "nan", "inf"))],
+)
+def test_every_rejects_what_it_cannot_repeat(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, every: list[str]) -> None:
+    monkeypatch.setattr(sys, "argv", ["clipit", *every, "--out", str(tmp_path)])
+    monkeypatch.setattr(cli, "setup_logging", lambda out: pytest.fail("got past argument checks"))
+    with pytest.raises(SystemExit) as e:
         cli.main()
+    assert e.value.code == 2  # argparse's usage error

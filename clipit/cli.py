@@ -14,6 +14,7 @@ clipit --poll --upload --every 45   (keep running: one pass every 45 minutes, no
 import argparse
 import io
 import logging
+import math
 import shutil
 import sqlite3
 import sys
@@ -85,7 +86,7 @@ def main() -> None:
     )
     a = ap.parse_args()
     if a.every is not None:
-        if a.every <= 0:
+        if not 0 < a.every < math.inf:  # also false for nan
             ap.error("--every needs a positive number of minutes")
         if not (a.poll or a.upload) or any((a.url, a.dashboard, a.youtube_login, a.refresh_trends)):
             ap.error("--every only repeats --poll and --upload")
