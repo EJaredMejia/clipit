@@ -24,15 +24,17 @@ SITES = (kick, twitch)
 
 def live_streams() -> list[Stream]:
     """Live streams of every site, most viewers first. A site that's down is skipped, so the others still get clipped."""
-    found: dict[str, Stream] = {}
-    for site in SITES:  # twitch last: a streamer live on both (simulcast) is clipped once, from Twitch
+    # A name live on both sites may be two different people, so both are kept: a simulcast is clipped twice, and you
+    # skip the repeats in the dashboard, rather than an unrelated Kick streamer never being clipped.
+    found: list[Stream] = []
+    for site in SITES:
         try:
-            found |= {login.lower(): (login, v, lang, site) for login, v, lang in site.live_streams()}
+            found += [(login, v, lang, site) for login, v, lang in site.live_streams()]
         except Exception:
             logger.warning("could not list live streams on %s", site.__name__, exc_info=True)
     if not found:
         raise ClipitError("could not list live streams on any site")
-    return sorted(found.values(), key=lambda s: -s[1])
+    return sorted(found, key=lambda s: -s[1])
 
 
 def candidates(streams: list[Stream], lang: str, rng: random.Random | None = None) -> list[tuple[str, Stream]]:

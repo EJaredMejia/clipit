@@ -5,6 +5,7 @@ Unofficial like Twitch's GQL: Kick can change it without notice. Failures surfac
 
 import datetime
 import json
+import math
 import re
 import threading
 import time
@@ -91,27 +92,34 @@ def fetch_chat(channel_id: int, start: float, duration: float, slice_len: int = 
     """Chat for a VOD that started at `start` (epoch seconds) as [offset_seconds, text], in parallel slices.
 
     A page holds only ~25 messages, about 1 s of a big streamer's chat (Adin Ross: 3.5 h of requests for 5 h of VOD).
-    So at most MAX_PAGES pages are read: where a page covers less than `step` seconds, the rest of that step is skipped
-    and its messages get a third field, the weight that keeps the chat rate right ([offset, text, weight]).
+    So at most MAX_PAGES pages are read: where a page covers less than `step` seconds, the rest of that step is skipped.
+    Its messages are then spread evenly over the step they stand for (steady chat stays a steady rate, not spikes at each
+    page) and get a third field, the weight that keeps the rate right: [offset, text, weight].
     """
     step = max(1.0, duration / MAX_PAGES)  # seconds of VOD one page may stand for
 
     def one_slice(a):
-        out, seen, cursor = [], set(), int((start + a + slice_len) * 1e6)
+        out, seen, end = [], set(), min(a + slice_len, duration)
+        cursor = int((start + end) * 1e6)
         while cursor > (start + a) * 1e6:  # pages go back in time: stop once one reaches the slice start
             d = history(channel_id, cursor)
             nxt = int(d.get("cursor") or 0)  # the oldest message's time; 0 at the start of the channel's chat
             if not d["messages"] or nxt >= cursor:
                 break
-            covered = (cursor - nxt) / 1e6
-            weight = [step / covered] if covered < step else []
+            page = []
             for m in d["messages"]:
                 t = datetime.datetime.fromisoformat(m["created_at"]).timestamp() - start
-                if m["id"] not in seen and a <= t < a + slice_len and m.get("content"):
+                if m["id"] not in seen and a <= t < end and m.get("content"):
                     seen.add(m["id"])
-                    out.append([t, text(m["content"]), *weight])
+                    page.append([t, text(m["content"])])
+            hi, covered = cursor / 1e6 - start, (cursor - nxt) / 1e6
+            if covered < step and page:  # sampled: this page stands for [lo, hi)
+                lo = max(a, hi - step)
+                w = (hi - lo) / len(page)
+                page = [[lo + (i + 0.5) * w, msg, (hi - lo) / covered] for i, (_, msg) in enumerate(sorted(page))]
+            out += page
             cursor = min(nxt, cursor - int(step * 1e6))
         return out
 
     with ThreadPoolExecutor(4) as ex:  # wait_turn sets the pace; threads only overlap request latency
-        return [m for part in ex.map(one_slice, range(0, int(duration) + 1, slice_len)) for m in part]
+        return [m for part in ex.map(one_slice, range(0, math.ceil(duration), slice_len)) for m in part]

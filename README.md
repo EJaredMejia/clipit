@@ -81,8 +81,9 @@ clipit --poll
 Each pass:
 
 1. Reads Twitch's live streams (the top 30 overall plus the top 30 of each of the 30 biggest categories, about 800
-   streams) and Kick's top 500. A streamer live on both (a simulcast) is clipped once, from Twitch. If one site's API is
-   down, the pass goes on with the other.
+   streams) and Kick's top 500. A name live on both sites is clipped on both, since the same name can belong to two
+   different people: skip a simulcast's repeats in the dashboard. If one site's API is down, the pass goes on with the
+   other.
 2. **Big streamers:** the 6 biggest (`--top`). For each, it clips their latest *finished* VOD, ignoring a stream that's still live. A channel with no usable VOD gives its slot to the next one.
 3. **Smaller streamers** (300-2,000 viewers): picked at random, at most 4 VODs a day (`--small`), so they're included without crowding out the big ones.
 4. Skips VODs that ended more than 2 days ago and anything already done. Only English streams by default (`--lang ""` for any).
