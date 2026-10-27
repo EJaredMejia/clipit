@@ -108,7 +108,7 @@ def fetch_chat(vid: str, duration: float, slice_len: int = 300) -> list[list]:
 
     def one_slice(a):
         b, t, seen, out = a + slice_len, a, set(), []
-        while t < b:
+        while t < b and t <= duration:  # Twitch answers "service error" past the VOD's end, even if the last page had more
             c = gql_comments(vid, t)
             if not c or not c["edges"]:
                 break
