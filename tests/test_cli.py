@@ -51,7 +51,7 @@ def test_every_repeats_passes_and_survives_a_failed_one(monkeypatch: pytest.Monk
 
     def fake_poll(*args: object, **kwargs: object) -> None:
         passes.append("poll")
-        if len(passes) == 1:
+        if passes.count("poll") == 1:
             raise RuntimeError("twitch is down")
 
     def fake_sleep(seconds: float) -> None:
