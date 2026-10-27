@@ -124,8 +124,8 @@ It only listens on your own machine (127.0.0.1) and refuses requests from other 
 
 ### Post to YouTube Shorts
 
-Clipit posts the clips you marked **Keep** in the dashboard to your channel, through YouTube's official API: newest
-first, public, at most 3 in any 24-hour period and at least 1 hour apart. Clips you skipped or haven't reviewed are never posted.
+Clipit posts the clips you marked **Keep** in the dashboard, from VODs polled in the last 2 days (older trends have
+passed), to your channel, through YouTube's official API: newest first, public, at most 3 in any 24-hour period and at least 1 hour apart. Clips you skipped or haven't reviewed are never posted.
 
 Set up once (free, about 15 minutes):
 

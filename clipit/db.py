@@ -109,6 +109,7 @@ MIGRATIONS = [
 TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")
 
+FRESH = datetime.timedelta(days=2)  # automatic posts: older clips ride a trend that has passed
 STALE_CLAIM = datetime.timedelta(minutes=30)  # a 'processing' row not refreshed for this long was a crashed run
 HEARTBEAT = datetime.timedelta(minutes=5)  # how often a live run refreshes its claim, well under STALE_CLAIM
 MAX_ATTEMPTS = 3
@@ -371,7 +372,8 @@ def set_upload(conn: sqlite3.Connection, clip_id: int, platform: str, url: str |
 def claim_upload(
     conn: sqlite3.Connection, platform: str, per_day: int, gap: datetime.timedelta, now: datetime.datetime | None = None
 ) -> sqlite3.Row | None:
-    """Atomically take the newest clip the user kept that isn't on platform yet, if the pacing allows: at most per_day
+    """Atomically take the newest clip the user kept from a polled VOD in the last FRESH that isn't on platform yet,
+    if the pacing allows (clips from old or hand-run VODs are posted only by hand): at most per_day
     posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
     The upload then ends with set_upload (posted) or fail_upload (retried later, up to MAX_ATTEMPTS)."""
     now = now or utcnow()
@@ -385,11 +387,12 @@ def claim_upload(
         if n < per_day and (last is None or now - _ts(last) >= gap):
             clip = conn.execute(
                 """SELECT c.id, c.file, c.title, c.youtube, c.caption, c.edited FROM clips c
+                   JOIN vods v ON v.id = c.vod_id
                    LEFT JOIN uploads u ON u.clip_id = c.id AND u.platform = ?
-                   WHERE c.verdict = 'keep'
+                   WHERE c.verdict = 'keep' AND v.tier != 'manual' AND c.created_at >= ?
                      AND (u.clip_id IS NULL OR (u.status = 'failed' AND u.attempts < ? AND u.uploaded_at < ?))
                    ORDER BY c.created_at DESC, c.idx LIMIT 1""",
-                (platform, MAX_ATTEMPTS, (now - RETRY_AFTER).isoformat()),
+                (platform, (now - FRESH).isoformat(), MAX_ATTEMPTS, (now - RETRY_AFTER).isoformat()),
             ).fetchone()
         if clip:
             _take_upload(conn, clip["id"], platform, now)

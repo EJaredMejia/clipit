@@ -1,7 +1,7 @@
 """Post kept clips to YouTube Shorts through the official YouTube Data API.
 
-Only clips the user marked Keep in the dashboard are posted, newest first, at most PER_DAY a day and GAP apart:
-reviewed, slow posting through the official API is what keeps the channel clear of spam enforcement. Never replace
+Only clips the user marked Keep in the dashboard, from polled VODs of the last db.FRESH, are posted, newest first, at
+most PER_DAY a day and GAP apart: reviewed, slow posting through the official API is what keeps the channel clear of spam enforcement. Never replace
 this with browser automation of YouTube Studio.
 
 Credentials live in ~/.clipit/, outside the repo and the out folder: the OAuth client the user downloads from

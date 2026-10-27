@@ -169,8 +169,9 @@ def test_small_done_since_counts_recent_successes_only(conn):
 
 
 def kept_clips(conn, n: int) -> list[int]:
-    """n clips the user kept, oldest first."""
-    db.record_manual(conn, "v1", "u")
+    """n clips the user kept from a polled VOD, oldest first."""
+    db.claim(conn, "v1", "u", "s", "top", now=T0)
+    db.finish(conn, "v1", now=T0)
     db.save_clips(conn, "v1", [{**CLIP, "idx": i, "start": 100.0 * i, "end": 100.0 * i + 20} for i in range(n)])
     ids = [r[0] for r in conn.execute("SELECT id FROM clips ORDER BY idx")]
     for i, cid in enumerate(ids):
@@ -196,6 +197,17 @@ def test_claim_upload_posts_the_newest_kept_clips_at_the_paced_rate(conn):
     assert claim(25 * h) == a
     assert claim(50 * h) is None  # everything kept is posted
     assert db.claim_upload(conn, "tiktok", 2, 4 * h, now=T0) is not None  # each platform has its own queue
+
+
+def test_claim_upload_skips_stale_and_hand_run_clips(conn):
+    (old,) = kept_clips(conn, 1)
+    assert db.claim_upload(conn, "youtube", 3, datetime.timedelta(hours=1), now=T0 + db.FRESH * 2) is None  # trend passed
+    db.record_manual(conn, "v2", "u")
+    db.save_clips(conn, "v2", [CLIP])
+    (manual,) = [r[0] for r in conn.execute("SELECT id FROM clips WHERE vod_id = 'v2'")]
+    db.set_verdict(conn, manual, "keep")
+    conn.execute("UPDATE clips SET created_at = ? WHERE id = ?", (T0.isoformat(), manual))
+    assert db.claim_upload(conn, "youtube", 3, datetime.timedelta(hours=1), now=T0)["id"] == old  # not the newer hand-run one
 
 
 def test_failed_uploads_retry_after_a_wait_then_give_up(conn):

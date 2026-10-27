@@ -27,7 +27,8 @@ VIDEO = {"id": "abc123", "snippet": {"channelTitle": "My clips"}, "status": {"pr
 def conn(tmp_path, monkeypatch):
     monkeypatch.setattr(youtube, "_credentials", lambda: "creds")
     c = db.connect(tmp_path / "clipit.db")
-    db.record_manual(c, "v1", "u")
+    db.claim(c, "v1", "u", "s", "top")
+    db.finish(c, "v1")
     db.save_clips(c, "v1", [CLIP])
     db.set_verdict(c, c.execute("SELECT id FROM clips").fetchone()[0], "keep")
     yield c
