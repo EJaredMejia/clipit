@@ -80,3 +80,15 @@ def test_chat_failure_fails_the_vod_instead_of_skipping_chat(monkeypatch):
     with pytest.raises(ClipitError, match="retry later"):
         pipeline.get_chat({"extractor": "twitch:vod", "id": "v1", "duration": 60})
     assert pipeline.get_chat({"extractor": "youtube", "id": "x", "duration": 60}) == []
+
+
+def test_fetch_chat_stops_at_the_vods_end(monkeypatch):
+    def comments(vid, t):  # like Twitch: an offset past the end is an error, and the last page still says "more"
+        if t > 100:
+            raise ClipitError("Twitch chat API: service error")
+        node = {"id": str(t), "contentOffsetSeconds": t + 2, "message": {"fragments": [{"text": "hi"}]}}
+        return {"edges": [{"node": node}], "pageInfo": {"hasNextPage": True}}
+
+    monkeypatch.setattr(twitch, "gql_comments", comments)
+    got = twitch.fetch_chat("1", 99.5, slice_len=300)
+    assert got and all(t <= 101.5 for t, _ in got)
