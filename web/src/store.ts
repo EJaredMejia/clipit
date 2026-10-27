@@ -231,6 +231,9 @@ export async function deleteSkipped(): Promise<number> {
   return reply && typeof reply.failed === "number" ? reply.failed : 0;
 }
 
+// Deletes the VOD and every file of it (chat, transcripts, audio...) but the clip videos: its clips stay.
+export const deleteVod = (id: string) => save("/api/delete-vod", { vod: id });
+
 // Post text autosave: one ordered save per clip field.
 const running = new Map<string, Promise<boolean>>();
 export const textStatus = (key: string) => get().textStatus[key] ?? "Saved automatically";

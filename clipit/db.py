@@ -96,6 +96,10 @@ MIGRATIONS = [
     """
     ALTER TABLE clips ADD COLUMN edited INTEGER NOT NULL DEFAULT 0;
     """,
+    # The user deleted the VOD in the dashboard: its clips are gone, the row stays so polling never clips it again.
+    """
+    ALTER TABLE vods ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0;
+    """,
 ]
 TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")
@@ -189,7 +193,7 @@ def record_manual(conn: sqlite3.Connection, vod_id: str, url: str) -> None:
     conn.execute(
         """INSERT INTO vods (id, url, tier, status, attempts, claimed_at, finished_at)
            VALUES (?, ?, 'manual', 'done', 1, ?, ?)
-           ON CONFLICT (id) DO UPDATE SET status = 'done', error = NULL, finished_at = excluded.finished_at""",
+           ON CONFLICT (id) DO UPDATE SET status = 'done', error = NULL, deleted = 0, finished_at = excluded.finished_at""",
         (vod_id, url, now, now),
     )
 
@@ -246,7 +250,7 @@ def overview(conn: sqlite3.Connection) -> dict:
     vods = conn.execute(
         """SELECT id, url, COALESCE(login, (SELECT streamer FROM clips WHERE vod_id = vods.id AND streamer != ''), '')
                       AS streamer, tier, status, attempts, error, claimed_at, finished_at
-           FROM vods ORDER BY COALESCE(finished_at, claimed_at) DESC"""
+           FROM vods WHERE NOT deleted ORDER BY COALESCE(finished_at, claimed_at) DESC"""
     )
     return {
         "vods": [dict(r) for r in vods],
@@ -274,6 +278,26 @@ def deleting_clip(conn: sqlite3.Connection, clip_id: int, only_skipped: bool = F
             (clip_id, only_skipped),
         ).fetchall()
         yield rows[0]["file"] if rows else None
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+@contextlib.contextmanager
+def deleting_vod(conn: sqlite3.Connection, vod_id: str, now=None) -> Iterator[list[str] | None]:
+    """Hide the VOD but keep its clips: the row stays as 'done' and deleted, so its clips keep their VOD and polling
+    never clips it again. Yields its clips' videos (relative to the out folder) for the block to delete every other
+    file it has; all or nothing, like deleting_clip. Yields None (and changes nothing) when there's no such VOD or a
+    run is processing it."""
+    now = now or utcnow()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        row = conn.execute("SELECT status, claimed_at FROM vods WHERE id = ? AND NOT deleted", (vod_id,)).fetchone()
+        ok = bool(row) and not (row["status"] == "processing" and now - _ts(row["claimed_at"]) < STALE_CLAIM)
+        if ok:
+            conn.execute("UPDATE vods SET deleted = 1, status = 'done', error = NULL WHERE id = ?", (vod_id,))
+        yield [r[0] for r in conn.execute("SELECT file FROM clips WHERE vod_id = ?", (vod_id,))] if ok else None
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")

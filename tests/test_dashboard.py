@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from clipit import dashboard, db, youtube
+from clipit.util import utcnow
 
 Site = tuple[str, sqlite3.Connection, list[int]]  # what the site fixture yields: base url, db, clip ids
 
@@ -249,3 +250,58 @@ def test_delete_skipped(site: Site, tmp_path: Path) -> None:
         with pytest.raises(urllib.error.HTTPError):  # empty, broken or non-JSON requests delete nothing
             urllib.request.urlopen(req, timeout=10)
     assert db.clip_file(conn, other)
+
+
+def test_delete_vod_keeps_its_clips_and_deletes_everything_else(site: Site, tmp_path: Path) -> None:
+    base, conn, (cid, other) = site
+    out = tmp_path / "out"
+    (out / "v1" / "chat.json").write_text("[]")
+    (out / "v1" / "transcripts").mkdir()
+    (out / "v1" / "transcripts" / "1.json").write_text("{}")
+    (out / "v1" / "clips" / "02_dropped.mp4").write_bytes(VIDEO)  # a render the catalog no longer has
+    (out / "v1" / "clips" / "01_a.ass").write_text("")  # subtitles left by a render
+    db.set_upload(conn, cid, "youtube", "https://youtu.be/x")
+    assert call(base + "/api/delete-vod", {"vod": "../v1"})[0] == 400  # not a folder name: refused
+    assert call(base + "/api/delete-vod", {"vod": "v1"})[0] == 200
+    assert [p.relative_to(out).as_posix() for p in sorted((out / "v1").rglob("*"))] == [
+        "v1/clips",
+        "v1/clips/01_a.mp4",
+        "v1/clips/02_dropped.mp4",
+    ]
+    assert (tmp_path / "secret.txt").exists()  # a clip's db path pointing outside out/ is never walked into
+    data = db.overview(conn)
+    assert data["vods"] == [] and {c["id"] for c in data["clips"]} == {cid, other}  # the clips stay, the VOD is hidden
+    assert data["clips"][0]["uploads"]["youtube"]["url"] == "https://youtu.be/x"
+    assert not db.claim(conn, "v1", "https://www.twitch.tv/videos/1", "s", "top")  # polling never clips it again
+    assert call(base + "/api/delete-vod", {"vod": "v1"})[0] == 404
+    db.record_manual(conn, "v1", "https://www.twitch.tv/videos/1")  # the user ran it again by hand: it's back
+    assert [v["id"] for v in db.overview(conn)["vods"]] == ["v1"]
+
+
+def test_delete_vod_stays_when_a_file_is_open(site: Site, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    base, conn, (cid, _) = site
+    (tmp_path / "out" / "v1" / "chat.json").write_text("[]")
+    clock = [0.0]
+
+    def locked(self: Path, missing_ok: bool = False) -> None:
+        raise PermissionError("in use")
+
+    def sleep(s: float) -> None:
+        clock[0] += s
+
+    monkeypatch.setattr(dashboard.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(dashboard.time, "sleep", sleep)
+    monkeypatch.setattr(Path, "unlink", locked)
+    status, _, body = call(base + "/api/delete-vod", {"vod": "v1"})
+    assert status == 409 and b"open in another program" in body
+    assert [v["id"] for v in db.overview(conn)["vods"]] == ["v1"]  # still listed, so it can be retried
+    assert clock[0] >= dashboard.DELETE_WAIT
+
+
+def test_delete_vod_refuses_one_being_processed(tmp_path: Path) -> None:
+    conn = db.connect(tmp_path / "clipit.db")
+    assert db.claim(conn, "v2", "u", "s", "top")
+    with db.deleting_vod(conn, "v2") as clips:
+        assert clips is None
+    with db.deleting_vod(conn, "v2", now=utcnow() + db.STALE_CLAIM * 2) as clips:  # a crashed run's stale claim
+        assert clips == []
