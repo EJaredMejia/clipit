@@ -169,8 +169,9 @@ def test_small_done_since_counts_recent_successes_only(conn):
 
 
 def kept_clips(conn, n: int) -> list[int]:
-    """n clips the user kept, oldest first."""
-    db.record_manual(conn, "v1", "u")
+    """n clips the user kept from a polled VOD, oldest first."""
+    db.claim(conn, "v1", "u", "s", "top", now=T0)
+    db.finish(conn, "v1", now=T0)
     db.save_clips(conn, "v1", [{**CLIP, "idx": i, "start": 100.0 * i, "end": 100.0 * i + 20} for i in range(n)])
     ids = [r[0] for r in conn.execute("SELECT id FROM clips ORDER BY idx")]
     for i, cid in enumerate(ids):
@@ -183,6 +184,7 @@ def test_claim_upload_posts_the_newest_kept_clips_at_the_paced_rate(conn):
     a, b, skipped, unreviewed, c = kept_clips(conn, 5)
     db.set_verdict(conn, skipped, "skip")
     db.set_verdict(conn, unreviewed, None)
+    conn.execute("UPDATE clips SET score = ? WHERE id = ?", (db.AUTO_SCORE - 1, unreviewed))  # below the AI's bar
     h = datetime.timedelta(hours=1)
 
     def claim(at):
@@ -196,6 +198,32 @@ def test_claim_upload_posts_the_newest_kept_clips_at_the_paced_rate(conn):
     assert claim(25 * h) == a
     assert claim(50 * h) is None  # everything kept is posted
     assert db.claim_upload(conn, "tiktok", 2, 4 * h, now=T0) is not None  # each platform has its own queue
+
+
+def test_claim_upload_skips_stale_and_hand_run_clips(conn):
+    kept_clips(conn, 1)  # polling took v1 at T0
+    later = T0 + db.FRESH * 2
+    db.record_manual(conn, "v1", "u")  # rerun by hand once its trend passed, finding a new moment
+    db.save_clips(conn, "v1", [{**CLIP, "idx": 0, "start": 0.0, "end": 20.0}, {**CLIP, "idx": 1, "start": 900.0, "end": 920.0}])
+    db.record_manual(conn, "v2", "u")  # a VOD run by hand only
+    db.save_clips(conn, "v2", [CLIP])
+    (rerun,) = [r[0] for r in conn.execute("SELECT id FROM clips WHERE vod_id = 'v1' AND start_s = 900")]
+    (manual,) = [r[0] for r in conn.execute("SELECT id FROM clips WHERE vod_id = 'v2'")]
+    for cid, made in ((rerun, later), (manual, later + datetime.timedelta(minutes=1))):
+        db.set_verdict(conn, cid, "keep")
+        conn.execute("UPDATE clips SET created_at = ? WHERE id = ?", (made.isoformat(), cid))
+    assert db.claim_upload(conn, "youtube", 9, datetime.timedelta(0), now=later) is None  # the rerun doesn't renew v1
+    row = db.claim_upload(conn, "youtube", 9, datetime.timedelta(0), now=T0)
+    assert row and row["id"] == rerun  # v1 is fresh at T0; the newer hand-run clip never goes up automatically
+
+
+def test_claim_upload_takes_kept_first_then_high_scoring_unreviewed(conn):
+    low, high, kept, skipped = kept_clips(conn, 4)
+    for cid, verdict, score in ((low, None, db.AUTO_SCORE - 1), (high, None, db.AUTO_SCORE), (skipped, "skip", 10)):
+        db.set_verdict(conn, cid, verdict)
+        conn.execute("UPDATE clips SET score = ? WHERE id = ?", (score, cid))
+    claimed = [db.claim_upload(conn, "youtube", 9, datetime.timedelta(0), now=T0) for _ in range(3)]
+    assert [r and r["id"] for r in claimed] == [kept, high, None]  # the skipped clip is newest and scores 10
 
 
 def test_failed_uploads_retry_after_a_wait_then_give_up(conn):
