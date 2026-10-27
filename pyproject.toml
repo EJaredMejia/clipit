@@ -38,6 +38,7 @@ pythonVersion = "3.11"
 [tool.ruff]
 line-length = 130
 target-version = "py311"
+extend-exclude = [".claude"]  # vendored agent skills, kept byte-identical to skills-lock.json
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP", "S"]
