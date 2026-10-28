@@ -30,6 +30,12 @@ def test_candidates_alternate_sites():
     assert got == ["k1", "t1", "k2", "t2", "t3"]
 
 
+def test_blocked_streamers_are_never_candidates():
+    streams = [("Pokimane", 30000, "EN", poll.twitch), ("big1", 20000, "EN", poll.twitch)]
+    got = [s[0] for s in poll.candidates(streams, "EN", trending=[("kick", "POKIMANE"), ("twitch", "pokimane")])]
+    assert got == ["big1"]
+
+
 def test_trending_streamers_come_first_live_or_not_and_only_once():
     streams = [("big1", 30000, "EN", poll.twitch), ("Clavicular", 9000, "EN", poll.kick), ("s1", 1500, "EN", poll.twitch)]
     trending = [("kick", "stableronaldo"), ("kick", "clavicular")]
