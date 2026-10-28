@@ -2,7 +2,7 @@
 // Nothing here waits a fixed time or a fixed number of ticks: how long a save's follow-up work takes differs between
 // machines (CI caught one). Tests await the actions themselves, or vi.waitFor the request they expect.
 import { afterEach, expect, test, vi } from "vitest";
-import { type Clip, VIEWS, deal, decide, description, flushTexts, saveText, set, setDraft, startFling, textStatus, undo, useClipit } from "./store";
+import { type Clip, VIEWS, type Vod, deal, decide, description, flushTexts, saveText, searchVods, set, setDraft, startFling, textStatus, undo, useClipit } from "./store";
 
 const drafts = () => useClipit.getState().drafts;
 
@@ -259,4 +259,19 @@ test("Kept shows only kept clips not posted anywhere yet, Posted the rest", () =
   const up = { ...kept, uploads: { youtube: { url: null, at: "2026-10-24", status: "done" as const } } };
   expect([kept, up, clip(3)].filter(VIEWS.kept[1])).toEqual([kept]);
   expect([kept, up].filter(VIEWS.posted[1])).toEqual([up]);
+});
+
+test("the VOD search matches id, streamer, status and error, ignoring case and outer spaces", () => {
+  const vod = (id: string, streamer: string, status: string, error: string | null): Vod => ({
+    id, url: "", streamer, tier: "top", status, attempts: 1, error, claimed_at: null, running_at: null, finished_at: null,
+  }); // prettier-ignore
+  const a = vod("v111", "Asmongold", "done", null);
+  const b = vod("v222", "jynxzi", "failed", "chat download timed out");
+  const vods = [a, b];
+  expect(searchVods(vods, "V111")).toEqual([a]);
+  expect(searchVods(vods, "  asmon ")).toEqual([a]);
+  expect(searchVods(vods, "failed")).toEqual([b]);
+  expect(searchVods(vods, "Timed Out")).toEqual([b]);
+  expect(searchVods(vods, "null")).toEqual([]); // a missing error isn't the text "null"
+  expect(searchVods(vods, "   ")).toEqual(vods);
 });
