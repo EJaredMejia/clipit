@@ -176,6 +176,7 @@ have the rights to: three copyright strikes delete a channel.
 | `--dashboard` | | Open the dashboard in your browser. |
 | `--port N` | `8765` | With `--dashboard`: the port on 127.0.0.1. |
 | `--youtube-login` | | Sign in to the YouTube channel to post to. Once. |
+| `--prioritize` | | `twitch:name` or `kick:name`: with `--poll`, clip their latest VOD first; with `--upload`, post their fresh clips first. Repeatable. For an event that's big right now, like `twitch:caedrel` during Worlds. |
 | `--upload` | | Post a fresh clip you kept, or the AI scored 8+, to YouTube Shorts, if one is due. |
 
 ## Output

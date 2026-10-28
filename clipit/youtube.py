@@ -66,8 +66,9 @@ def metadata(clip: sqlite3.Row) -> dict:
     }
 
 
-def upload_next(conn: sqlite3.Connection, out: Path) -> str | None:
-    """Post the next due clip (db.claim_upload) that isn't on YouTube yet, if the pacing allows. Returns its link."""
+def upload_next(conn: sqlite3.Connection, out: Path, first: list[str] | None = None) -> str | None:
+    """Post the next due clip (db.claim_upload) that isn't on YouTube yet, if the pacing allows. Returns its link.
+    first: streamers ("twitch:login", "kick:login") whose clips go ahead of the rest."""
     for clip_id in db.stuck_uploads(conn, "youtube", utcnow() - STUCK):
         logger.warning(
             "clip %d was being posted to YouTube when a run stopped, so it may be up: check YouTube Studio, then in the "
@@ -75,7 +76,7 @@ def upload_next(conn: sqlite3.Connection, out: Path) -> str | None:
             clip_id,
         )
     creds = _credentials()  # before claiming: a broken login must not use up a clip's attempts
-    clip = db.claim_upload(conn, "youtube", PER_DAY, GAP)
+    clip = db.claim_upload(conn, "youtube", PER_DAY, GAP, first=first)
     if not clip:
         log("no YouTube post due: no fresh clip is kept or scored high enough, or the last post was too recent")
         return None

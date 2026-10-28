@@ -64,12 +64,25 @@ def test_every_repeats_passes_and_survives_a_failed_one(monkeypatch: pytest.Monk
     monkeypatch.setattr(cli, "refresh_stale_trends", lambda trends_ai: passes.append("trends"))
     monkeypatch.setattr(cli.shutil, "which", lambda name: name)
     monkeypatch.setattr(poll, "poll", fake_poll)
-    monkeypatch.setattr(youtube, "upload_next", lambda conn, out: None)
+    monkeypatch.setattr(youtube, "upload_next", lambda *a: None)
     monkeypatch.setattr(cli.time, "sleep", fake_sleep)
     with pytest.raises(Stop):
         cli.main()
     assert passes == ["trends", "poll"] * 3  # the failed first pass didn't end the loop; stale trends checked each pass
     assert sleeps == [2700] * 3
+
+
+def test_prioritize_reaches_poll_and_upload_as_clean_names(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    got: dict[str, object] = {}
+    argv = ["clipit", "--poll", "--upload", "--prioritize", " Twitch:Caedrel ", "--prioritize", "`kick:xqc`"]
+    monkeypatch.setattr(sys, "argv", [*argv, "--out", str(tmp_path)])
+    monkeypatch.setattr(cli, "setup_logging", lambda out: None)
+    monkeypatch.setattr(cli, "refresh_stale_trends", lambda trends_ai: None)
+    monkeypatch.setattr(cli.shutil, "which", lambda name: name)
+    monkeypatch.setattr(poll, "poll", lambda *a, prioritize, **kw: got.update(poll=prioritize))
+    monkeypatch.setattr(youtube, "upload_next", lambda conn, out, first: got.update(upload=first))
+    cli.main()
+    assert got == {"poll": [("twitch", "caedrel"), ("kick", "xqc")], "upload": ["twitch:caedrel", "kick:xqc"]}
 
 
 @pytest.mark.parametrize(
