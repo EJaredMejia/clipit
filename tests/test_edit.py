@@ -57,7 +57,7 @@ def test_check_finds_dead_air_and_a_slow_open_but_not_speech_or_loud_gameplay():
     words = [[130.0, 135.0, "talking"]]
     found = edit.check(version(), words, loud)
     assert any("slow open" in p for p in found)
-    assert [p for p in found if "dead air" in p] == ["dead air 110.0-116.0: quiet with no speech, cut it"]
+    assert [p for p in found if "dead air" in p] == ["dead air 110.0-116.0: 6 s quiet with no speech, cut it"]
     cut = version(cuts=[{"start": 110.0, "end": 116.0}])
     assert edit.check(cut, words, loud) == []  # cut out: nothing left to fix
     assert edit.check({**PICK}, words, LOUD) == ["it has no edit yet"]
@@ -127,3 +127,26 @@ def test_captions_emphasize_words_and_pop_ups_cannot_inject_lines():
     assert "{\\c&H3C3CFF&}RENT!{\\c&HFFFFFF&}" in ass  # emphasized when it isn't the current word
     events = ass.split("[Events]")[1].strip().splitlines()
     assert len(events) == 1 + 1 + 3 + 1 and "{\\an5}" not in ass  # format, hook, 3 caption steps, 1 pop-up
+
+
+def test_dead_air_counts_across_a_cut_because_both_sides_play_back_to_back():
+    loud = np.full(3600, 60.0)
+    loud[120:123] = 30.0  # quiet 120-123, and the cut 121-122 leaves 1 s of it on each side
+    words = [[110.0, 120.0, "talking"], [123.0, 140.0, "talking"]]
+    found = edit.check(version(cuts=[{"start": 121.0, "end": 122.0}]), words, loud)
+    assert found == ["dead air 120.0-123.0: 2 s quiet with no speech, cut it"]
+
+
+def test_an_edit_never_raises_the_viral_score_that_gates_automatic_posting(monkeypatch, tmp_path):
+    hyped = {**version(zooms=[{"start": 120.0, "end": 121.0, "zoom": 1.3}]), "score": 10}
+    replies = iter([reply(5, ["x"], hyped), reply(9, [], hyped)])
+    monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema: next(replies))
+    done = edit.polish("ai", INFO, PICK, [MOMENT], [], LOUD, tmp_path)
+    assert done["score"] == PICK["score"]
+
+
+def test_non_finite_times_are_rejected_not_clamped_into_another_moment():
+    assert edit.revise({**version(), "start": "nan"}, "Caseoh", INFO, 100, 190, 7.0) is None
+    assert edit.revise({**version(), "end": float("inf")}, "Caseoh", INFO, 100, 190, 7.0) is None
+    e = edit.clean_edit({"cuts": [{"start": "nan", "end": 120}], "sfx": [{"at": "inf", "sound": "boom"}]}, 110.0, 140.0)
+    assert e["cuts"] == [] and e["sfx"] == []

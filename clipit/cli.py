@@ -173,8 +173,7 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
         with db.running(conn, str(info["id"])):
             work, clips = process_vod(a.url, a.clips, a.ai, a.whisper, a.out, info=info, high_effort=a.high_effort)
         db.record_manual(conn, work.name, a.url)
-        # high-effort clips are extra: the VOD's plain clips stay in the catalog
-        db.save_clips(conn, work.name, [{**c, "file": f"{work.name}/{c['file']}"} for c in clips], prune=not a.high_effort)
+        db.save_clips(conn, work.name, [{**c, "file": f"{work.name}/{c['file']}"} for c in clips])
     vods_failed = 0
     if a.poll:
         vods_failed = poll.poll(

@@ -121,6 +121,41 @@ MIGRATIONS = [
     """
     ALTER TABLE runs ADD COLUMN doing TEXT;
     """,
+    # A high-effort edit of a moment (clipit.edit) is a clip of its own next to the plain one: its own id, verdict and
+    # uploads. The key gains the variant, so rebuild again. Dropping clips cascades to uploads: they're put back.
+    """
+    CREATE TABLE uploads_keep AS SELECT * FROM uploads;
+    CREATE TABLE clips_new (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        vod_id     TEXT NOT NULL REFERENCES vods (id) ON DELETE CASCADE,
+        idx        INTEGER NOT NULL,
+        file       TEXT NOT NULL,
+        start_s    REAL NOT NULL,
+        end_s      REAL NOT NULL,
+        title      TEXT NOT NULL,
+        hook       TEXT NOT NULL,
+        caption    TEXT NOT NULL,
+        trend      TEXT NOT NULL,
+        sound      TEXT NOT NULL,
+        score      REAL NOT NULL,
+        why        TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        streamer   TEXT NOT NULL DEFAULT '',
+        youtube    TEXT NOT NULL DEFAULT '',
+        verdict    TEXT CHECK (verdict IN ('keep', 'skip')),
+        edited     INTEGER NOT NULL DEFAULT 0,
+        variant    TEXT NOT NULL DEFAULT 'plain' CHECK (variant IN ('plain', 'edited')),
+        UNIQUE (vod_id, start_s, end_s, variant)
+    );
+    INSERT INTO clips_new (id, vod_id, idx, file, start_s, end_s, title, hook, caption, trend, sound, score, why, created_at, streamer, youtube, verdict, edited)
+        SELECT id, vod_id, idx, file, start_s, end_s, title, hook, caption, trend, sound, score, why, created_at, streamer, youtube, verdict, edited FROM clips ORDER BY id;
+    DELETE FROM sqlite_sequence WHERE name = 'clips_new';  -- a deleted clip's id is still never reused
+    INSERT INTO sqlite_sequence (name, seq) SELECT 'clips_new', seq FROM sqlite_sequence WHERE name = 'clips';
+    DROP TABLE clips;
+    ALTER TABLE clips_new RENAME TO clips;
+    INSERT INTO uploads SELECT * FROM uploads_keep;
+    DROP TABLE uploads_keep;
+    """,
 ]
 TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")
@@ -249,16 +284,19 @@ def status(conn: sqlite3.Connection, vod_id: str) -> str | None:
     return row and row["status"]
 
 
-def save_clips(conn: sqlite3.Connection, vod_id: str, clips: list[dict], prune: bool = True) -> None:
-    """Make the VOD's clips exactly these (prune=False: add these, keep the rest). Keyed by (vod, start, end): the same
-    moment keeps its clip id across re-renders and re-picks, so anything that references it (uploads) stays right."""
+def save_clips(conn: sqlite3.Connection, vod_id: str, clips: list[dict]) -> None:
+    """Make the VOD's clips of these variants exactly these: plain ones, or high-effort edits (clips with an "edit"),
+    so saving one kind never drops the other. Keyed by (vod, start, end, variant): the same moment keeps its clip id
+    across re-renders and re-picks, so anything that references it (uploads) stays right."""
     now = utcnow().isoformat()
-    keep = {(c["start"], c["end"]) for c in clips}
+    clips = [{**c, "variant": "edited" if c.get("edit") else "plain"} for c in clips]
+    keep = {(c["start"], c["end"], c["variant"]) for c in clips}
     conn.execute("BEGIN IMMEDIATE")
     try:
         # picks the AI dropped are deleted, unless the user kept or posted them: those stay in the catalog
-        for row in conn.execute("SELECT id, start_s, end_s FROM clips WHERE vod_id = ?", (vod_id,)).fetchall() if prune else []:
-            if (row["start_s"], row["end_s"]) not in keep:
+        rows = conn.execute("SELECT id, start_s, end_s, variant FROM clips WHERE vod_id = ?", (vod_id,)).fetchall()
+        for row in rows:
+            if row["variant"] in {k[2] for k in keep} and (row["start_s"], row["end_s"], row["variant"]) not in keep:
                 conn.execute(
                     "DELETE FROM clips WHERE id = ? AND verdict IS NOT 'keep' AND id NOT IN (SELECT clip_id FROM uploads)",
                     (row["id"],),
@@ -266,10 +304,10 @@ def save_clips(conn: sqlite3.Connection, vod_id: str, clips: list[dict], prune: 
         for c in clips:  # the verdict is the user's: a re-render never touches it
             conn.execute(
                 """INSERT INTO clips (vod_id, idx, file, start_s, end_s, title, hook, caption, youtube, streamer, trend, sound,
-                                      score, why, created_at)
+                                      score, why, created_at, variant)
                    VALUES (:vod_id, :idx, :file, :start, :end, :title, :hook, :caption, :youtube, :streamer, :trend, :sound,
-                           :score, :why, :now)
-                   ON CONFLICT (vod_id, start_s, end_s) DO UPDATE SET idx = excluded.idx, file = excluded.file,
+                           :score, :why, :now, :variant)
+                   ON CONFLICT (vod_id, start_s, end_s, variant) DO UPDATE SET idx = excluded.idx, file = excluded.file,
                        title = IIF(edited, title, excluded.title), hook = excluded.hook,
                        caption = IIF(edited, caption, excluded.caption), youtube = IIF(edited, youtube, excluded.youtube),
                        streamer = excluded.streamer, trend = excluded.trend, sound = excluded.sound, score = excluded.score,

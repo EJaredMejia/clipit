@@ -12,6 +12,7 @@ earlier output stay inside the <stream_data> fence, and every edit is validated 
 import datetime
 import itertools
 import json
+import math
 import re
 from pathlib import Path
 
@@ -25,6 +26,7 @@ MAX_ROUNDS = 5  # reviews per clip, so up to 5 AI calls each
 LIMITS = {"cuts": 12, "zooms": 6, "sfx": 8, "texts": 4, "emphasis": 12}
 ZOOM = (1.1, 1.6)
 DEAD_AIR = 2  # seconds in a row, quiet and with no speech
+STEP = 0.5  # dead air is checked in half seconds of what plays
 CLIP_KEYS = (*ai.TEXT_FIELDS, "hashtags", "start", "end", "score", "edit")
 
 PROMPT = """You are the lead editor of a top TikTok / YouTube Shorts clip channel. Today is {date}.
@@ -86,13 +88,21 @@ Current version:
 """
 
 
+def num(x: float | str) -> float:
+    """A finite number, or ValueError: a NaN would slip past every clamp (max(lo, nan) is lo)."""
+    v = float(x)
+    if not math.isfinite(v):
+        raise ValueError(f"not a finite number: {x!r}")
+    return v
+
+
 def clean_edit(edit: object, start: float, end: float) -> dict:
     """The AI's edit, checked like its picks: times parsed and clamped to the clip, sounds from render.SFX only, text
     capped, at most LIMITS of each. Cuts that would leave the clip under the minimum length are all dropped."""
     edit = edit if isinstance(edit, dict) else {}
 
     def span(x) -> dict | None:
-        a, b = round(max(start, float(x["start"])), 1), round(min(end, float(x["end"])), 1)
+        a, b = round(max(start, num(x["start"])), 1), round(min(end, num(x["end"])), 1)
         return {"start": a, "end": b} if b - a >= 0.2 else None
 
     def each(key: str, make) -> list:
@@ -117,10 +127,10 @@ def clean_edit(edit: object, start: float, end: float) -> dict:
 
     def zoom(x) -> dict | None:
         s = span(x)
-        return s and {**s, "zoom": round(min(ZOOM[1], max(ZOOM[0], float(x["zoom"]))), 2)}
+        return s and {**s, "zoom": round(min(ZOOM[1], max(ZOOM[0], num(x["zoom"]))), 2)}
 
     def sfx(x) -> dict | None:
-        at = round(float(x["at"]), 1)
+        at = round(num(x["at"]), 1)
         return {"at": at, "sound": x["sound"]} if x["sound"] in render.SFX and start <= at < end else None
 
     def text(x) -> dict | None:
@@ -152,17 +162,17 @@ def check(clip: dict, words: list, loud: np.ndarray) -> list[str]:
 
     def dead(t: float) -> bool:
         s = int(t)
-        return s < len(loud) and loud[s] < quiet and not any(w[0] < t + 1 and w[1] > t for w in words)
+        return s < len(loud) and loud[s] < quiet and not any(w[0] < t + STEP and w[1] > t for w in words)
 
     problems = [] if any((clip.get("edit") or {}).values()) else ["it has no edit yet"]
-    parts = kept(clip)
-    if parts and dead(parts[0][0]):
-        problems.append(f"slow open: the first second ({parts[0][0]:.1f}) is quiet with no speech")
-    for a, b in parts:
-        for is_dead, run in itertools.groupby([a + i for i in range(int(b - a))], dead):  # each whole second
-            run = list(run)
-            if is_dead and len(run) >= DEAD_AIR:
-                problems.append(f"dead air {run[0]:.1f}-{run[-1] + 1:.1f}: quiet with no speech, cut it")
+    # every STEP of what plays, in order: the parts either side of a cut play back to back
+    played = [a + i * STEP for a, b in kept(clip) for i in range(int((b - a) / STEP))]
+    for n, (is_dead, run) in enumerate(itertools.groupby(played, dead)):
+        run = list(run)
+        if is_dead and n == 0 and len(run) * STEP >= 1:
+            problems.append(f"slow open: the first second ({run[0]:.1f}) is quiet with no speech")
+        if is_dead and len(run) * STEP >= DEAD_AIR:
+            problems.append(f"dead air {run[0]:.1f}-{run[-1] + STEP:.1f}: {len(run) * STEP:g} s quiet with no speech, cut it")
     return problems
 
 
@@ -188,18 +198,20 @@ def build_prompt(info: dict, moment: dict, current: dict, found: list[str], tren
     )
 
 
-def revise(raw: object, name: object, info: dict, lo: float, hi: float) -> dict | None:
-    """The improved version from a review, validated: kept inside the moment (lo-hi), or None when it isn't usable."""
+def revise(raw: object, name: object, info: dict, lo: float, hi: float, score: float) -> dict | None:
+    """The improved version from a review, validated: kept inside the moment (lo-hi), its viral score no higher than
+    the plain pick's (an edit must not lift a clip over db.AUTO_SCORE into automatic posting), or None when unusable."""
     if not isinstance(raw, dict):
         return None
     try:  # clamped before ai.clean, which trims an overlong clip to its first 60 s
-        raw = {**raw, "start": max(float(raw["start"]), lo), "end": min(float(raw["end"]), hi)}
+        raw = {**raw, "start": max(num(raw["start"]), lo), "end": min(num(raw["end"]), hi)}
     except (KeyError, TypeError, ValueError):
         return None
     picks = ai.clean([raw], float(info["duration"]), 1)
     if not picks:
         return None
     c = picks[0]
+    c["score"] = min(c["score"], score)
     c["edit"] = clean_edit(raw.get("edit"), c["start"], c["end"])
     return ai.name_streamer([c], name, info.get("uploader"))[0]
 
@@ -222,7 +234,7 @@ def polish(cmd: str | None, info: dict, pick: dict, cands: list[dict], words: li
         write_atomic(path, reply)
         try:
             review = ai.extract_json(reply)
-            score = min(10.0, max(1.0, float(review.get("edit_score") or 0)))
+            score = min(10.0, max(1.0, num(review.get("edit_score") or 0)))
             problems = [str(p).strip()[:300] for p in review.get("problems") or [] if str(p).strip()]
         except (ValueError, AttributeError, TypeError):
             logger.warning("round %d review wasn't valid JSON, see %s", r, path)
@@ -233,7 +245,7 @@ def polish(cmd: str | None, info: dict, pick: dict, cands: list[dict], words: li
                 return {**current, "edit_score": score}
             if score >= best_score:  # a tie goes to the later, more worked-on version
                 best, best_score = current, score
-        current = revise(review.get("clip"), review.get("name"), info, lo, hi) or current
+        current = revise(review.get("clip"), review.get("name"), info, lo, hi, pick["score"]) or current
     if best is None:
         raise ClipitError(f"no edited version of the clip at {mmss(pick['start'])} got a review, see {folder}")
     log(f"  no version reached {GOAL}/10 in {MAX_ROUNDS} reviews: using the best one ({best_score:g}/10)")
