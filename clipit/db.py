@@ -398,7 +398,7 @@ def claim_upload(
                    LEFT JOIN uploads u ON u.clip_id = c.id AND u.platform = ?
                    WHERE (c.verdict = 'keep' OR c.verdict IS NULL AND c.score >= ?) AND v.tier != 'manual' AND v.claimed_at >= ?
                      AND (u.clip_id IS NULL OR (u.status = 'failed' AND u.attempts < ? AND u.uploaded_at < ?))
-                   ORDER BY IIF(v.url LIKE '%kick.com/%', 'kick:', 'twitch:') || v.login NOT IN (SELECT value FROM json_each(?)), c.verdict IS NULL, c.created_at DESC, c.idx LIMIT 1""",
+                   ORDER BY IIF(v.url LIKE '%kick.com/%', 'kick:', 'twitch:') || lower(v.login) NOT IN (SELECT value FROM json_each(?)), c.verdict IS NULL, c.created_at DESC, c.idx LIMIT 1""",
                 (
                     platform,
                     AUTO_SCORE,

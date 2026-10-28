@@ -107,9 +107,10 @@ def main() -> None:
         help="--poll / --upload: keep running, one pass every MINUTES (a failed pass is logged and the next one still runs)",
     )
     a = ap.parse_args()
-    a.prioritize = [p.lower() for p in a.prioritize]
     if bad := [p for p in a.prioritize if not ai.TRENDING.fullmatch(f"- {p}")]:
         ap.error(f"--prioritize needs twitch:name or kick:name, not {bad[0]!r}")
+    found = [ai.TRENDING.fullmatch(f"- {p}") for p in a.prioritize]
+    a.prioritize = [f"{m[1]}:{m[2]}".lower() for m in found if m]  # just the parts, as `- ` and backticks match too
     if a.every is not None:
         if not 0 < a.every < math.inf:  # also false for nan
             ap.error("--every needs a positive number of minutes")
