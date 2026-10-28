@@ -72,13 +72,14 @@ def poll(
     lang: str = "EN",
     dry_run: bool = False,
     out_root: Path = ROOT / "out",
+    prioritize: Iterable[tuple[str, str]] = (),
     **pipeline_opts,
 ) -> None:
-    """One polling pass. Safe to run on a timer, and even twice at once."""
+    """One polling pass. Safe to run on a timer, and even twice at once. prioritize: (site, name) clipped first."""
     now = utcnow()
     small_left = small_per_day - db.small_done_since(conn, now - datetime.timedelta(days=1))
     top_left = top_n
-    trending = ai.trending_streamers()
+    trending = list(dict.fromkeys([*prioritize, *ai.trending_streamers()]))
     log(f"trending streamers: {', '.join(f'{site}:{name}' for site, name in trending) or 'none (run --refresh-trends)'}")
     try:
         live = live_streams()

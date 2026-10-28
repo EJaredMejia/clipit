@@ -47,6 +47,13 @@ def test_trending_streamers_come_first_live_or_not_and_only_once():
     ]
 
 
+def test_prioritized_streamers_are_clipped_first(world, monkeypatch):
+    conn, calls, out = world
+    monkeypatch.setattr(poll.ai, "trending_streamers", lambda: [("twitch", "big1")])
+    poll.poll(conn, top_n=1, small_per_day=0, lang="EN", out_root=out, prioritize=[("twitch", "mid")])
+    assert calls == ["v3"]  # mid's VOD takes the only slot, ahead of trending big1
+
+
 def test_live_streams_keep_both_sites_and_survive_one_being_down(monkeypatch):
     monkeypatch.setattr(poll.kick, "live_streams", lambda: [("xqc", 90000, "EN"), ("kickonly", 1000, "EN")])
     monkeypatch.setattr(poll.twitch, "live_streams", lambda: [("xQc", 50000, "EN"), ("big1", 30000, "EN")])

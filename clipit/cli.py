@@ -83,6 +83,14 @@ def main() -> None:
     )
     ap.add_argument("--lang", default="EN", help='--poll: only streams in this language (default EN, "" for any)')
     ap.add_argument("--dry-run", action="store_true", help="--poll: only print which VODs would be clipped")
+    ap.add_argument(
+        "--prioritize",
+        action="append",
+        default=[],
+        metavar="SITE:NAME",
+        help="--poll / --upload: clip this streamer's latest VOD first and post their fresh clips first, e.g. "
+        "twitch:caedrel while an event they cover is big (repeatable)",
+    )
     ap.add_argument("--dashboard", action="store_true", help="open the local dashboard of every VOD and clip")
     ap.add_argument("--port", type=int, default=8765, help="--dashboard: port on 127.0.0.1 (default 8765)")
     ap.add_argument("--youtube-login", action="store_true", help="sign in to the YouTube channel to post to (once)")
@@ -99,6 +107,9 @@ def main() -> None:
         help="--poll / --upload: keep running, one pass every MINUTES (a failed pass is logged and the next one still runs)",
     )
     a = ap.parse_args()
+    a.prioritize = [p.lower() for p in a.prioritize]
+    if bad := [p for p in a.prioritize if not ai.TRENDING.fullmatch(f"- {p}")]:
+        ap.error(f"--prioritize needs twitch:name or kick:name, not {bad[0]!r}")
     if a.every is not None:
         if not 0 < a.every < math.inf:  # also false for nan
             ap.error("--every needs a positive number of minutes")
@@ -145,7 +156,7 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
         log("dry run: not posting to YouTube")
     elif a.upload:
         try:
-            youtube.upload_next(conn, a.out)
+            youtube.upload_next(conn, a.out, [p.split(":", 1)[1] for p in a.prioritize])
         except Exception:  # logged, and retried on a later run: the rest of this run (polling) still happens
             logger.exception("YouTube upload failed")
     if a.url:
@@ -155,6 +166,17 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
         db.record_manual(conn, work.name, a.url)
         db.save_clips(conn, work.name, [{**c, "file": f"{work.name}/{c['file']}"} for c in clips])
     if a.poll:
-        poll.poll(conn, a.top, a.small, a.lang.upper(), a.dry_run, a.out, n_clips=a.clips, ai_cmd=a.ai, whisper=a.whisper)
+        poll.poll(
+            conn,
+            a.top,
+            a.small,
+            a.lang.upper(),
+            a.dry_run,
+            a.out,
+            prioritize=[(site, name) for site, name in (p.split(":", 1) for p in a.prioritize)],
+            n_clips=a.clips,
+            ai_cmd=a.ai,
+            whisper=a.whisper,
+        )
     if a.dashboard:
         dashboard.serve(a.out, a.port)
