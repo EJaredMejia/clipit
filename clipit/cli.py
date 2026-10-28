@@ -3,6 +3,7 @@
 clipit https://www.twitch.tv/videos/2906456464
 clipit URL --clips 10 --ai "ollama run qwen3:30b"
 clipit --refresh-trends
+clipit URL --high-effort   (the AI edits every clip, then reviews and improves it until it's really good)
 clipit --poll              (clip the latest VODs of trending and big streamers; run it on a timer)
 clipit --poll --dry-run    (only show which VODs it would clip)
 clipit --dashboard         (browse every VOD and clip, mark clips keep/skip and posted)
@@ -23,7 +24,7 @@ import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from clipit import ai, dashboard, db, poll, runs, source, youtube
+from clipit import ai, dashboard, db, edit, poll, runs, source, youtube
 from clipit.pipeline import process_vod
 from clipit.util import ROOT, ClipitError, log, logger
 
@@ -66,6 +67,12 @@ def main() -> None:
         "--trends-ai",
         default=ai.default_trends_ai(),
         help="'codex' or a command for --refresh-trends; needs web search (default: Claude Code, then Codex)",
+    )
+    ap.add_argument(
+        "--high-effort",
+        action="store_true",
+        help="much more AI effort per clip: the AI edits it (jump cuts, zooms, sound effects, pop-up text) and reviews "
+        f"each version until it scores {edit.GOAL}/10, up to {edit.MAX_ROUNDS} AI reviews per clip. Slow",
     )
     ap.add_argument("--whisper", default="turbo", help="faster-whisper model: tiny, base, small, medium, turbo (default)")
     ap.add_argument("--out", type=Path, default=ROOT / "out", help="working files, clips, logs and the database")
@@ -164,9 +171,10 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
     if a.url:
         info = source.fetch_info(a.url)  # its id first, to mark the VOD's files in use (the dashboard can delete them)
         with db.running(conn, str(info["id"])):
-            work, clips = process_vod(a.url, a.clips, a.ai, a.whisper, a.out, info=info)
+            work, clips = process_vod(a.url, a.clips, a.ai, a.whisper, a.out, info=info, high_effort=a.high_effort)
         db.record_manual(conn, work.name, a.url)
-        db.save_clips(conn, work.name, [{**c, "file": f"{work.name}/{c['file']}"} for c in clips])
+        # high-effort clips are extra: the VOD's plain clips stay in the catalog
+        db.save_clips(conn, work.name, [{**c, "file": f"{work.name}/{c['file']}"} for c in clips], prune=not a.high_effort)
     vods_failed = 0
     if a.poll:
         vods_failed = poll.poll(
@@ -179,6 +187,7 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
             n_clips=a.clips,
             ai_cmd=a.ai,
             whisper=a.whisper,
+            high_effort=a.high_effort,
         )
     if a.dashboard:
         dashboard.serve(a.out, a.port)

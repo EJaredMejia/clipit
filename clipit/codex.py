@@ -60,6 +60,29 @@ PICKS_SCHEMA = {
 }
 
 
+def _strict(properties: dict) -> dict:
+    return {"type": "object", "additionalProperties": False, "required": list(properties), "properties": properties}
+
+
+SPAN = {"start": {"type": "number"}, "end": {"type": "number"}}
+EDIT_PROPERTIES = {
+    "cuts": {"type": "array", "items": _strict(SPAN)},
+    "zooms": {"type": "array", "items": _strict({**SPAN, "zoom": {"type": "number"}})},
+    "sfx": {"type": "array", "items": _strict({"at": {"type": "number"}, "sound": {"type": "string"}})},
+    "texts": {"type": "array", "items": _strict({**SPAN, "text": {"type": "string"}})},
+    "emphasis": {"type": "array", "items": {"type": "string"}},
+}
+# A review of one high-effort clip (clipit.edit): the verdict on the current version, then the improved version.
+EDIT_SCHEMA = _strict(
+    {
+        "name": {"type": "string"},
+        "edit_score": {"type": "number"},
+        "problems": {"type": "array", "items": {"type": "string"}},
+        "clip": _strict({**CLIP_PROPERTIES, "edit": _strict(EDIT_PROPERTIES)}),
+    }
+)
+
+
 def find_cli() -> str | None:
     """Find Codex on PATH, or in the Windows desktop app's versioned CLI bundles."""
     found = shutil.which("codex")
@@ -90,8 +113,9 @@ def _restricted_catalog(raw: str) -> str:
         raise ClipitError("Codex returned an unsupported model catalog; update the Codex CLI") from exc
 
 
-def ask(prompt: str, *, web_search: bool = False, timeout: float = 900) -> str:
-    """Run a fresh Codex request with only the supplied prompt and optional trend web search."""
+def ask(prompt: str, *, web_search: bool = False, schema: dict = PICKS_SCHEMA, timeout: float = 900) -> str:
+    """Run a fresh Codex request with only the supplied prompt and optional trend web search.
+    Without web search the reply must match schema: the clip picks, or a high-effort review."""
     executable = find_cli()
     if not executable:
         raise ClipitError("Codex CLI not found. Install Codex, run `codex login`, then retry --ai codex")
@@ -137,7 +161,7 @@ def ask(prompt: str, *, web_search: bool = False, timeout: float = 900) -> str:
                 args += ["--disable", feature]
             if not web_search:
                 schema_path = root / "picks.schema.json"
-                schema_path.write_text(json.dumps(PICKS_SCHEMA), encoding="utf-8")
+                schema_path.write_text(json.dumps(schema), encoding="utf-8")
                 args += ["--output-schema", str(schema_path)]
             args.append("-")
             remaining = deadline - time.monotonic()

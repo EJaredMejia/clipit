@@ -112,3 +112,25 @@ def test_chat_failure_stops_the_audio_download(stages, monkeypatch):
     with pytest.raises(pipeline.ClipitError, match="chat broke"):
         pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
     assert stopped == [True]
+
+
+def test_high_effort_edits_each_pick_into_files_of_its_own(stages, monkeypatch):
+    _, out = stages
+    work, (plain,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
+    polished = []
+
+    def polish(cmd, info, pick, cands, words, loud, folder):
+        polished.append(pick)
+        return {
+            **pick,
+            "edit": {"cuts": [], "zooms": [], "sfx": [{"at": pick["start"], "sound": "boom"}], "texts": [], "emphasis": []},
+        }
+
+    monkeypatch.setattr(pipeline.edit, "polish", polish)
+    pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out, high_effort=True)
+    _, (clip,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out, high_effort=True)
+    assert len(polished) == 1  # the second run used the cached edit
+    assert polished[0]["start"] == plain["start"]  # edits the plain pick
+    assert clip["file"] != plain["file"] and (work / clip["file"]).exists() and (work / plain["file"]).exists()
+    assert "edit" not in json.loads((work / "picks.json").read_text(encoding="utf-8"))[0]  # the plain clips stay as they are
+    assert (work / "posts_edited.md").exists()

@@ -118,9 +118,10 @@ def default_trends_ai() -> str | None:
     return "codex" if codex.find_cli() else None
 
 
-def ask_ai(cmd: str, prompt: str) -> str:
+def ask_ai(cmd: str, prompt: str, schema: dict = codex.PICKS_SCHEMA) -> str:
+    """The AI's answer to prompt. schema: the JSON shape Codex is held to (other CLIs are only told it in the prompt)."""
     if cmd == "codex":
-        return codex.ask(prompt, timeout=AI_TIMEOUT)
+        return codex.ask(prompt, schema=schema, timeout=AI_TIMEOUT)
     # The command string is the user's own config, never untrusted data; the prompt goes in on stdin.
     with tempfile.TemporaryDirectory() as empty:  # nothing local for an AI tool to read
         try:
@@ -169,6 +170,11 @@ def trending_streamers(max_age: datetime.timedelta = datetime.timedelta(days=2))
     return list(dict.fromkeys(found))[:MAX_TRENDING]
 
 
+def fenced(s: object) -> str:
+    """Untrusted text, made unable to close the <stream_data> block early."""
+    return str(s).replace("stream_data", "stream-data")
+
+
 def build_prompt(info: dict, cands: list[dict], n: int, trends: str) -> str:
     blocks = []
     for i, c in enumerate(cands, 1):
@@ -176,9 +182,6 @@ def build_prompt(info: dict, cands: list[dict], n: int, trends: str) -> str:
         msgs = c["chat"][:: max(1, len(c["chat"]) // 30)][:30]
         chat = " | ".join(m[1][:80] for m in msgs) or "(no chat)"
         blocks.append(f"### Candidate {i}: {c['start']}-{c['end']}s ({c['stats']})\n" + "\n".join(lines) + f"\nChat: {chat}")
-
-    def fenced(s) -> str:  # untrusted text must not be able to close the <stream_data> block early
-        return str(s).replace("stream_data", "stream-data")
 
     return PROMPT.format(
         date=datetime.date.today(),

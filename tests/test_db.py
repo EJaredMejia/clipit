@@ -279,3 +279,10 @@ def test_a_description_the_user_cleared_stays_empty(conn):
     db.set_text(conn, cid, "youtube", "")  # the user's choice: post it with no description
     db.set_text(conn, cid, "title", "later edit")
     assert tuple(conn.execute("SELECT title, youtube FROM clips").fetchone()) == ("later edit", "")
+
+
+def test_extra_clips_can_be_added_without_dropping_the_vods_others(conn):
+    db.record_manual(conn, "v1", "u")
+    db.save_clips(conn, "v1", [CLIP])
+    db.save_clips(conn, "v1", [{**CLIP, "start": 60.0, "end": 80.0, "file": "v1/clips/01_a_edited.mp4"}], prune=False)
+    assert [r["start_s"] for r in conn.execute("SELECT start_s FROM clips ORDER BY start_s")] == [1.0, 60.0]
