@@ -130,7 +130,8 @@ def edit_graph(edit: dict, start: float, subs: str, audio: int) -> str:
         last = f"o{len(zooms)}"
     keep = "'not(" + "+".join(f"between(t,{c['start'] - start:.2f},{c['end'] - start:.2f})" for c in cuts) + ")'"
     graph += f"[{last}]{subs}" + (f",select={keep},setpts=N/FRAME_RATE/TB" if cuts else "") + "[v];"
-    graph += f"[{audio}:a]{STEREO}[src];"
+    # after a seek, Twitch's audio can start ~2 s after the video: pad it from 0 so cuts hit the same moments in both
+    graph += f"[{audio}:a]aresample=async=1:first_pts=0,{STEREO}[src];"
     for i, x in enumerate(sfx):
         graph += f"{SFX[x['sound']]},{STEREO},adelay={max(0, round((x['at'] - start) * 1000))}:all=1[s{i}];"
     graph += "[src]" + "".join(f"[s{i}]" for i in range(len(sfx)))

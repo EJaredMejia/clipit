@@ -116,6 +116,8 @@ def test_edit_cuts_video_and_audio_alike_so_they_stay_in_sync():
     keep = "'not(between(t,2.00,3.50))'"
     assert f"select={keep}" in graph and f"aselect={keep}" in graph
     assert "adelay=10000:all=1" in graph and "[1:a]" in graph  # the sound lands 10 s into the clip
+    # Twitch audio can start ~2 s late after a seek; unpadded, the cuts hit the audio early (found on a real VOD)
+    assert graph.index("first_pts=0") < graph.index("aselect")
 
 
 def test_captions_emphasize_words_and_pop_ups_cannot_inject_lines():
