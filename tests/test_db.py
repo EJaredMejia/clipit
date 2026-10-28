@@ -228,10 +228,10 @@ def test_claim_upload_takes_kept_first_then_high_scoring_unreviewed(conn):
 
 def test_claim_upload_takes_prioritized_streamers_first(conn):
     old, new = kept_clips(conn, 2)
-    conn.execute("UPDATE vods SET login = 'caedrel' WHERE id = 'v1'")
-    db.claim(conn, "v2", "u2", "other", "top", now=T0)
-    conn.execute("UPDATE clips SET vod_id = 'v2' WHERE id = ?", (new,))  # a newer clip from someone else
-    row = db.claim_upload(conn, "youtube", 9, datetime.timedelta(0), now=T0, first=["caedrel"])
+    conn.execute("UPDATE vods SET login = 'caedrel', url = 'https://www.twitch.tv/videos/1' WHERE id = 'v1'")
+    db.claim(conn, "v2", "https://kick.com/caedrel/videos/x", "caedrel", "top", now=T0)
+    conn.execute("UPDATE clips SET vod_id = 'v2' WHERE id = ?", (new,))  # newer, from a same-named Kick streamer
+    row = db.claim_upload(conn, "youtube", 9, datetime.timedelta(0), now=T0, first=["twitch:caedrel"])
     assert row and row["id"] == old
     row = db.claim_upload(conn, "youtube", 9, datetime.timedelta(0), now=T0)
     assert row and row["id"] == new  # without priority: newest first

@@ -381,7 +381,7 @@ def claim_upload(
 ) -> sqlite3.Row | None:
     """Atomically take the next clip to post automatically, if the pacing allows: from a VOD polling took in the last FRESH
     (a hand rerun doesn't renew it; clips from old or hand-run VODs are posted only by hand), not on platform yet, kept by the user or unreviewed with
-    an AI score of AUTO_SCORE+ (never skipped): clips of the `first` streamers first, then kept, then newest. At most per_day posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
+    an AI score of AUTO_SCORE+ (never skipped): clips of the `first` streamers ("site:login") first, then kept, then newest. At most per_day posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
     The upload then ends with set_upload (posted) or fail_upload (retried later, up to MAX_ATTEMPTS)."""
     now = now or utcnow()
     conn.execute("BEGIN IMMEDIATE")  # two overlapping runs must not both post, nor both see room in the pacing
@@ -398,7 +398,7 @@ def claim_upload(
                    LEFT JOIN uploads u ON u.clip_id = c.id AND u.platform = ?
                    WHERE (c.verdict = 'keep' OR c.verdict IS NULL AND c.score >= ?) AND v.tier != 'manual' AND v.claimed_at >= ?
                      AND (u.clip_id IS NULL OR (u.status = 'failed' AND u.attempts < ? AND u.uploaded_at < ?))
-                   ORDER BY v.login NOT IN (SELECT value FROM json_each(?)), c.verdict IS NULL, c.created_at DESC, c.idx LIMIT 1""",
+                   ORDER BY IIF(v.url LIKE '%kick.com/%', 'kick:', 'twitch:') || v.login NOT IN (SELECT value FROM json_each(?)), c.verdict IS NULL, c.created_at DESC, c.idx LIMIT 1""",
                 (
                     platform,
                     AUTO_SCORE,

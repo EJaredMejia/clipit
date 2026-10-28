@@ -68,7 +68,7 @@ def metadata(clip: sqlite3.Row) -> dict:
 
 def upload_next(conn: sqlite3.Connection, out: Path, first: list[str] | None = None) -> str | None:
     """Post the next due clip (db.claim_upload) that isn't on YouTube yet, if the pacing allows. Returns its link.
-    first: streamer logins whose clips go ahead of the rest."""
+    first: streamers ("twitch:login", "kick:login") whose clips go ahead of the rest."""
     for clip_id in db.stuck_uploads(conn, "youtube", utcnow() - STUCK):
         logger.warning(
             "clip %d was being posted to YouTube when a run stopped, so it may be up: check YouTube Studio, then in the "
