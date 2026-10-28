@@ -160,14 +160,6 @@ def test_clips_need_their_vod(conn):
         db.save_clips(conn, "missing", [CLIP])
 
 
-def test_small_done_since_counts_recent_successes_only(conn):
-    for vid, err in (("v1", None), ("v2", "boom")):
-        db.claim(conn, vid, "u", "s", "small", now=T0)
-        db.finish(conn, vid, error=err, now=T0)
-    assert db.small_done_since(conn, T0 - datetime.timedelta(hours=1)) == 1
-    assert db.small_done_since(conn, T0 + datetime.timedelta(hours=1)) == 0
-
-
 def kept_clips(conn, n: int) -> list[int]:
     """n clips the user kept from a polled VOD, oldest first."""
     db.claim(conn, "v1", "u", "s", "top", now=T0)

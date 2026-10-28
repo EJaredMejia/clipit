@@ -472,11 +472,5 @@ def stuck_uploads(conn: sqlite3.Connection, platform: str, before: datetime.date
     ]
 
 
-def small_done_since(conn: sqlite3.Connection, since: datetime.datetime) -> int:
-    return conn.execute(
-        "SELECT count(*) FROM vods WHERE tier = 'small' AND status = 'done' AND finished_at >= ?", (since.isoformat(),)
-    ).fetchone()[0]
-
-
 def _ts(value: str) -> datetime.datetime:
     return datetime.datetime.fromisoformat(value)
