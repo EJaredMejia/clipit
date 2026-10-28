@@ -310,6 +310,20 @@ test("an older answer that arrives late never puts a finished run back to runnin
   expect(useClipit.getState().run?.running).toBe(false);
 });
 
+test("answers slower than the polling still show, in order", async () => {
+  const answers: ((r: Response) => void)[] = [];
+  vi.stubGlobal("fetch", (url: string) => (url === "/api/run" ? new Promise<Response>((r) => answers.push(r)) : json({ vods: [], clips: [] })));
+  set({ run: run({ running: true }) });
+  const first = loadRun();
+  const second = loadRun(); // asked before the first answered
+  answers[0](json(run({ running: true, lines: ["clipping"] })));
+  await first;
+  expect(useClipit.getState().run?.lines).toEqual(["clipping"]); // shown, though a newer ask is out
+  answers[1](json(run({ running: true, lines: ["clipping", "posting"] })));
+  await second;
+  expect(useClipit.getState().run?.lines).toEqual(["clipping", "posting"]);
+});
+
 test("the VOD search matches id, streamer, status and error, ignoring case and outer spaces", () => {
   const vod = (id: string, streamer: string, status: string, error: string | null): Vod => ({
     id, url: "", streamer, tier: "top", status, attempts: 1, error, claimed_at: null, running_at: null, finished_at: null,

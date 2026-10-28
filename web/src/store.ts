@@ -190,6 +190,7 @@ const plural = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
 
 // Polled even in a background tab, so a run that ends while you're elsewhere still tells you when you come back.
 let runAsks = 0;
+let runShown = 0; // the newest ask whose answer is shown
 export async function loadRun(): Promise<void> {
   const ask = ++runAsks;
   let run: Run;
@@ -200,7 +201,8 @@ export async function loadRun(): Promise<void> {
   } catch {
     return;
   }
-  if (ask !== runAsks) return; // a newer ask was sent: this older answer could put a finished run back to running
+  if (ask < runShown) return; // a newer answer is shown: this older one could put a finished run back to running
+  runShown = ask;
   const before = get().run;
   if (JSON.stringify(before) === JSON.stringify(run)) return; // polling: don't re-render for nothing
   set({ run });
