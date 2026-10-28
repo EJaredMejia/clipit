@@ -3,7 +3,7 @@
 // machines (CI caught one). Tests await the actions themselves, or vi.waitFor the request they expect.
 import { afterEach, expect, test, vi } from "vitest";
 import { toast } from "sonner";
-import { type Clip, type Run, VIEWS, deal, decide, description, flushTexts, loadRun, runResult, saveText, set, setDraft, startFling, textStatus, undo, useClipit } from "./store";
+import { type Clip, type Run, VIEWS, type Vod, deal, decide, description, flushTexts, loadRun, runResult, saveText, searchVods, set, setDraft, startFling, textStatus, undo, useClipit } from "./store";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
@@ -295,4 +295,19 @@ test("the page tells you when a run it watched ends, and names the step that fai
   await loadRun(); // a run that had ended before the page saw it running: no notice either
   expect(toast.error).toHaveBeenCalledTimes(1);
   expect(toast.success).not.toHaveBeenCalled();
+});
+
+test("the VOD search matches id, streamer, status and error, ignoring case and outer spaces", () => {
+  const vod = (id: string, streamer: string, status: string, error: string | null): Vod => ({
+    id, url: "", streamer, tier: "top", status, attempts: 1, error, claimed_at: null, running_at: null, finished_at: null,
+  }); // prettier-ignore
+  const a = vod("v111", "Asmongold", "done", null);
+  const b = vod("v222", "jynxzi", "failed", "chat download timed out");
+  const vods = [a, b];
+  expect(searchVods(vods, "V111")).toEqual([a]);
+  expect(searchVods(vods, "  asmon ")).toEqual([a]);
+  expect(searchVods(vods, "failed")).toEqual([b]);
+  expect(searchVods(vods, "Timed Out")).toEqual([b]);
+  expect(searchVods(vods, "null")).toEqual([]); // a missing error isn't the text "null"
+  expect(searchVods(vods, "   ")).toEqual(vods);
 });
