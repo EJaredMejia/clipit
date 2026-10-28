@@ -58,11 +58,20 @@ Pick the {n} clips most likely to go viral. Rules:
   the game or place), not a feeling. Lead with the most dramatic true fact; a scare that turns out false is still
   the hook.
   Good: "xQc thinks his PC died mid-tournament". Bad: "he thought it was over" (over how? who?).
+- Score each clip 1-10 by how strangers scrolling past would react, not how this streamer's own chat reacted.
+  Be harsh: a low score is useful, it is how we learn what works, so give the honest number and say in "why" what
+  holds the clip back.
+  9-10: people would share it, stitch it and argue in the comments. Rare: most streams have none.
+  7-8: someone who has never heard of the streamer watches to the end and comments.
+  4-6: fans of the streamer enjoy it, everyone else scrolls past.
+  1-3: needs stream context, an inside joke, or nothing much happens.
+  A small streamer nobody outside their chat knows rarely earns more than 6: the moment itself has to carry it.
+  Riding a trend from the notes above earns points only when the clip is actually about it.
 - No links, @mentions of other accounts, or slurs in any text you write.
 - Hashtags: 3-5, mixing broad ones (gaming, twitch) with specific ones (the game, the meme). A credit line for the
   streamer and their hashtag are added for you.
 Answer with ONLY this JSON (no commentary). No emoji in "hook".
-{{"name": "the name fans call the streamer", "clips": [{{"start": 1234.5, "end": 1262.0, "title": "YouTube Shorts title naming the streamer, under 70 chars", "hook": "on-screen text naming the streamer, max 8 words", "description": "post text for TikTok and YouTube naming the streamer: 1-2 sentences that make people watch, no hashtags", "hashtags": ["3 to 5 hashtags, no # sign"], "trend": "trend or format this fits", "sound": "trending sound to add in-app, or empty", "score": 8, "why": "one line"}}]}}
+{{"name": "the name fans call the streamer", "clips": [{{"start": 1234.5, "end": 1262.0, "title": "YouTube Shorts title naming the streamer, under 70 chars", "hook": "on-screen text naming the streamer, max 8 words", "description": "post text for TikTok and YouTube naming the streamer: 1-2 sentences that make people watch, no hashtags", "hashtags": ["3 to 5 hashtags, no # sign"], "trend": "trend or format this fits", "sound": "trending sound to add in-app, or empty", "score": 3, "why": "one line: what makes it work or holds it back"}}]}}
 
 <stream_data>
 Stream title: {title}
@@ -208,7 +217,7 @@ def clean(clips: object, duration: float, n: int) -> list[dict]:
         try:
             # rounded: a clip is identified by its time range (db.save_clips, file names), 0.1 s is plenty
             s, e = round(max(0.0, float(c["start"])), 1), round(min(duration, float(c["end"])), 1)
-            score = float(c.get("score") or 0)
+            score = min(10.0, max(1.0, float(c.get("score") or 0)))  # the scale db.AUTO_SCORE expects
         except (KeyError, TypeError, ValueError):
             continue
         if e - s > CLIP_LEN[1]:
