@@ -1,5 +1,6 @@
-// The Run tab: start clipit --poll, then --upload, from here, and watch each step and its output as it goes.
-import { Check, Circle, Loader2, Play, Square, X } from "lucide-react";
+// The Run tab: start clipit --poll, then --upload, from here, and watch each step and its output as it goes. The run
+// goes on when the dashboard is closed, and shows here again when it's reopened.
+import { Check, Circle, CircleSlash, Loader2, Play, Square, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
@@ -12,6 +13,7 @@ const STEP_ICON: Record<Step["status"], React.ReactNode> = {
   done: <Check className="size-5 text-keep" />,
   failed: <X className="size-5 text-skip" />,
   stopped: <Square className="size-4 text-muted-foreground" />,
+  interrupted: <CircleSlash className="size-5 text-skip" />,
 };
 
 export function Run() {
@@ -20,6 +22,7 @@ export function Run() {
   const [asking, setAsking] = useState(false);
   const [starting, setStarting] = useState(false);
   const running = !!run?.running;
+  const uploading = !!run?.steps.some((s) => s.name === "Post to YouTube" && s.status === "running");
 
   const start = async () => {
     setStarting(true);
@@ -38,9 +41,15 @@ export function Run() {
           </p>
         </div>
         {running ? (
-          <Button type="button" variant="outline" className="h-12 rounded-xl px-6 font-heading text-base font-bold" onClick={() => setAsking(true)}>
-            <Square />
-            Stop
+          <Button
+            type="button"
+            variant="outline"
+            className="h-12 rounded-xl px-6 font-heading text-base font-bold"
+            disabled={run.stopping}
+            onClick={() => setAsking(true)}
+          >
+            {run.stopping ? <Loader2 className="animate-spin motion-reduce:animate-none" /> : <Square />}
+            {run.stopping ? "Stopping…" : "Stop"}
           </Button>
         ) : (
           <Button type="button" className="h-12 rounded-xl px-6 font-heading text-base font-bold" disabled={starting} onClick={() => void start()}>
@@ -54,7 +63,7 @@ export function Run() {
         <section aria-label="Latest run" className="rounded-2xl border bg-card p-5">
           <Meta
             parts={[
-              <b className="font-semibold text-foreground">{running ? "Running" : "Last run"}</b>,
+              <b className="font-semibold text-foreground">{run.stopping ? "Stopping" : running ? "Running" : "Last run"}</b>,
               `started ${when(run.started)}`,
               ...(run.ended ? [`ended ${when(run.ended)}`] : []),
               ...(made ? [`${made.clips} new clip${made.clips === 1 ? "" : "s"}`, `${made.posted} posted to YouTube`] : []),
@@ -71,6 +80,14 @@ export function Run() {
               </li>
             ))}
           </ol>
+          {run.stopping && uploading && (
+            <p className="mt-3 text-sm text-warn">Stopping once the YouTube post finishes, so it's never cut off half sent.</p>
+          )}
+          {run.steps.some((s) => s.status === "interrupted") && (
+            <p className="mt-3 text-sm text-skip">
+              The run stopped without finishing: clipit was closed or the PC restarted. A VOD it was clipping is retried next run.
+            </p>
+          )}
           <Output lines={run.lines} />
         </section>
       ) : (
@@ -81,7 +98,11 @@ export function Run() {
         open={asking}
         onOpenChange={setAsking}
         title="Stop the run?"
-        body="The step that's running is killed and the rest are skipped. A VOD it was clipping is retried next run. A clip it was posting may already be on YouTube: check YouTube Studio, then add its link in the clip."
+        body={
+          uploading
+            ? "The YouTube post going now finishes first, so it's never cut off half sent. Then the run stops."
+            : "Clipping stops now, with everything it started, and posting to YouTube is skipped. A VOD it was clipping is retried next run."
+        }
         action="Stop the run"
         destructive
         onConfirm={() => void stopRun()}

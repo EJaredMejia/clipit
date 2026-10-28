@@ -63,7 +63,8 @@ VODs to process; `cli.py` is the only place that parses flags, sets up logging, 
 | `facecam.py` | webcam overlay detection |
 | `render.py` | captions, ffmpeg render, `posts.md` |
 | `util.py` | logging, shell helpers with timeouts, atomic writes, `ClipitError` |
-| `dashboard.py` | `--dashboard`: local HTTP server (127.0.0.1) for the built page in `clipit/web/` and its JSON API, reads and writes via `db.py`, and runs `--poll` then `--upload` as child processes when the page asks |
+| `dashboard.py` | `--dashboard`: local HTTP server (127.0.0.1) for the built page in `clipit/web/` and its JSON API, reads and writes via `db.py`, and starts runs (`runs.py`) when the page asks |
+| `runs.py` | runs started from the dashboard: a runner process of their own (`--run-steps`) that does `--poll` then `--upload`, in the `runs` table and `out/logs/run-<id>.log`; Stop kills a clipping step's whole process tree but lets a YouTube post finish |
 | `youtube.py` | `--youtube-login` and `--upload`: posts kept clips to YouTube Shorts, records each post in `uploads` |
 
 `web/src/` is the dashboard page: `store.ts` is its zustand store (state, and every call to the server as plain
@@ -101,7 +102,7 @@ recorded by hand from the dashboard until then.
 |---|---|
 | State shared across runs (which VODs are done, clips, later uploads and accounts) | SQLite, `out/clipit.db`, only through `clipit/db.py` |
 | Per-VOD working files (audio, chat, transcripts, AI reply, renders) | `out/<vod-id>/`, a cache that is safe to delete |
-| Logs | `out/logs/clipit.log` (rotating) |
+| Logs | `out/logs/clipit.log` (rotating), and each dashboard run's output in `out/logs/run-<id>.log` |
 | YouTube OAuth client and login token | `~/.clipit/`, never in the repo or `out/` |
 
 ## Rules

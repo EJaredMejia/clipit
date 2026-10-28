@@ -1,0 +1,126 @@
+import datetime
+import sqlite3
+import sys
+import threading
+import time
+from pathlib import Path
+
+import pytest
+
+from clipit import db, runs
+from clipit.util import utcnow
+
+NAMES = [name for name, _, _ in runs.STEPS]
+
+
+@pytest.fixture
+def conn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(runs, "BEAT", 0.1)
+    c = db.connect(tmp_path / "clipit.db")
+    yield c
+    c.close()
+
+
+def fake(monkeypatch: pytest.MonkeyPatch, scripts: dict[str, str]) -> None:
+    monkeypatch.setattr(runs, "command", lambda flag, out: [sys.executable, "-c", scripts[flag]])
+
+
+def in_background(conn: sqlite3.Connection, out: Path) -> tuple[int, threading.Thread]:
+    run_id = db.start_run(conn, NAMES)
+    assert run_id
+    path = conn.execute("PRAGMA database_list").fetchone()["file"]
+
+    def go() -> None:  # the runner has its own connection, like its own process
+        own = db.connect(Path(path))
+        try:
+            runs.run(own, out, run_id)
+        finally:
+            own.close()
+
+    t = threading.Thread(target=go)
+    t.start()
+    return run_id, t
+
+
+def wait_for(check, what: str) -> None:
+    for _ in range(200):
+        if check():
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"never: {what}")
+
+
+def statuses(conn: sqlite3.Connection) -> list[str]:
+    run = db.latest_run(conn)
+    assert run
+    return [s["status"] for s in run["steps"]]
+
+
+def test_every_step_runs_even_after_one_fails_and_its_output_is_kept(conn, tmp_path, monkeypatch) -> None:
+    fake(monkeypatch, {"--poll": "print('clipping caedrel ✓'); raise SystemExit(1)", "--upload": "print('posted')"})
+    run_id = db.start_run(conn, NAMES)
+    assert run_id
+    runs.run(conn, tmp_path, run_id)
+    run = db.latest_run(conn)
+    assert run and not run["running"] and run["ended"]
+    assert statuses(conn) == ["failed", "done"]
+    lines = runs.tail(tmp_path, run_id)
+    assert "clipping caedrel ✓" in lines and "posted" in lines
+
+
+def test_stop_kills_a_clipping_step_with_everything_it_started_and_skips_the_rest(conn, tmp_path, monkeypatch) -> None:
+    ticks = tmp_path / "ticks"
+    # the step starts a child that keeps writing, like ffmpeg under clipit --poll
+    child = f"import time\nwhile True:\n    open({str(ticks)!r}, 'a').write('x'); time.sleep(0.05)"
+    poll = f"import subprocess, sys, time; subprocess.Popen([sys.executable, '-c', {child!r}]); time.sleep(60)"
+    fake(monkeypatch, {"--poll": poll, "--upload": "print('posted')"})
+    run_id, t = in_background(conn, tmp_path)
+    wait_for(lambda: ticks.exists(), "the child started")
+    assert db.stop_run(conn)
+    t.join(30)
+    assert statuses(conn) == ["stopped", "stopped"]
+    size = ticks.stat().st_size
+    time.sleep(0.5)
+    assert ticks.stat().st_size == size  # the child is gone too
+    assert "posted" not in runs.tail(tmp_path, run_id)
+
+
+def test_stop_lets_a_youtube_post_finish(conn, tmp_path, monkeypatch) -> None:
+    started = tmp_path / "started"
+    upload = f"import time; open({str(started)!r}, 'w').close(); time.sleep(1); print('posted')"
+    fake(monkeypatch, {"--poll": "pass", "--upload": upload})
+    run_id, t = in_background(conn, tmp_path)
+    wait_for(started.exists, "the upload started")
+    assert db.stop_run(conn)
+    assert db.latest_run(conn)["stopping"]  # type: ignore[index]
+    t.join(30)
+    assert statuses(conn) == ["done", "done"]
+    assert "posted" in runs.tail(tmp_path, run_id)
+
+
+def test_a_hung_step_is_killed(conn, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runs, "STEPS", (("Clip", "--poll", 0.5), ("Post", "--upload", 60)))
+    fake(monkeypatch, {"--poll": "import time; time.sleep(60)", "--upload": "print('posted')"})
+    run_id = db.start_run(conn, ["Clip", "Post"])
+    assert run_id
+    runs.run(conn, tmp_path, run_id)
+    assert statuses(conn) == ["failed", "done"]
+
+
+def test_one_run_at_a_time_and_a_dead_runner_shows_as_interrupted(conn) -> None:
+    now = utcnow()
+    assert db.start_run(conn, NAMES, now=now)
+    assert db.start_run(conn, NAMES, now=now) is None
+    later = now + db.RUN_DEAD + datetime.timedelta(seconds=1)  # the runner stopped beating: PC restart, killed
+    run = db.latest_run(conn, later)
+    assert run and not run["running"] and run["ended"] == now.isoformat()
+    assert [s["status"] for s in run["steps"]] == ["interrupted", "interrupted"]
+    assert db.start_run(conn, NAMES, now=later)
+
+
+def test_tail_reads_only_the_end_of_a_long_log(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runs, "LOG_TAIL", 100)
+    (tmp_path / "logs").mkdir()
+    runs.log_file(tmp_path, 1).write_text("".join(f"line {i}\n" for i in range(1000)), encoding="utf-8")
+    assert runs.tail(tmp_path, 1, lines=3) == ["line 997", "line 998", "line 999"]
+    assert runs.tail(tmp_path, 2) == []

@@ -113,7 +113,9 @@ runs in the background.
 
 - **Run:** click *Run now* to clip the latest VODs and then post the next due clip to YouTube (`clipit --poll`,
   then `clipit --upload`), and watch each step and its output as it goes. A notice pops up when it ends, with how many
-  clips it made and posted. *Stop* kills it.
+  clips it made and posted. The run goes on if you close the dashboard, and shows again when you reopen it. *Stop*
+  ends clipping right away, ffmpeg and all, but lets a YouTube post that's going finish first, so it's never cut off
+  half sent.
 - **Clips:** play each one, filter by streamer or search, sort by AI score, and copy the YouTube title, YouTube
   description and TikTok caption with one click.
 - **Review:** mark a clip *Keep* or *Skip*. The tiles at the top count what's left to review and what you kept but

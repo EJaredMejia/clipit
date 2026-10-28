@@ -22,7 +22,7 @@ import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from clipit import ai, dashboard, db, poll, source, youtube
+from clipit import ai, dashboard, db, poll, runs, source, youtube
 from clipit.pipeline import process_vod
 from clipit.util import ROOT, ClipitError, log, logger
 
@@ -100,6 +100,7 @@ def main() -> None:
         metavar="MINUTES",
         help="--poll / --upload: keep running, one pass every MINUTES (a failed pass is logged and the next one still runs)",
     )
+    ap.add_argument("--run-steps", type=int, help=argparse.SUPPRESS)  # the runner of a run started in the dashboard
     a = ap.parse_args()
     if bad := [p for p in a.prioritize if not ai.TRENDING.fullmatch(f"- {p}")]:
         ap.error(f"--prioritize needs twitch:name or kick:name, not {bad[0]!r}")
@@ -112,7 +113,7 @@ def main() -> None:
             ap.error("--every only repeats --poll and --upload")
     if isinstance(sys.stdout, io.TextIOWrapper):  # not when stdout was swapped (tests, some service wrappers)
         sys.stdout.reconfigure(errors="replace")  # emoji in stream titles crash cp1252 consoles
-    if not any((a.url, a.refresh_trends, a.poll, a.dashboard, a.youtube_login, a.upload)):
+    if not any((a.url, a.refresh_trends, a.poll, a.dashboard, a.youtube_login, a.upload, a.run_steps)):
         ap.error("pass a VOD url (or --poll / --upload / --youtube-login / --refresh-trends / --dashboard)")
     if (a.url or a.poll) and not shutil.which("ffmpeg"):
         sys.exit("ffmpeg not found on PATH")
@@ -174,3 +175,5 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
         )
     if a.dashboard:
         dashboard.serve(a.out, a.port)
+    if a.run_steps:
+        runs.run(conn, a.out, a.run_steps)

@@ -45,9 +45,18 @@ export type Vod = {
   finished_at: string | null;
 };
 export type Data = { vods: Vod[]; clips: Clip[] };
-// A run of clipit --poll, then --upload, started from the page (dashboard.Runner). Lines are clipit's output: untrusted.
-export type Step = { name: string; status: "waiting" | "running" | "done" | "failed" | "stopped" };
-export type Run = { id: number; running: boolean; started: string | null; ended: string | null; steps: Step[]; lines: string[] };
+// A run of clipit --poll, then --upload, started from the page (clipit/runs.py). It goes on without the page or the
+// dashboard, so a reopened page picks it up. Lines are clipit's output: untrusted.
+export type Step = { name: string; status: "waiting" | "running" | "done" | "failed" | "stopped" | "interrupted" };
+export type Run = {
+  id: number;
+  running: boolean;
+  stopping: boolean; // Stop was asked: a YouTube post finishes first
+  started: string | null;
+  ended: string | null;
+  steps: Step[];
+  lines: string[];
+};
 
 export const posted = (c: Clip) => Object.keys(c.uploads).length;
 // clips made before descriptions only have the caption; once the user edits, an empty description is their choice
@@ -195,7 +204,7 @@ export async function loadRun(): Promise<void> {
   if (!before?.running || before.id !== run.id || run.running) return; // only the end of a run this page watched
   await fetchData(); // the clips it made, even in a background tab
   const made = runResult(run, get().data.clips);
-  const failed = run.steps.filter((s) => s.status === "failed").map((s) => s.name);
+  const failed = run.steps.filter((s) => s.status === "failed" || s.status === "interrupted").map((s) => s.name);
   const stopped = run.steps.some((s) => s.status === "stopped");
   const text = `${plural(made.clips, "new clip")}, ${made.posted} posted to YouTube`;
   const open = { label: "See the run", onClick: () => showTab("run") };
