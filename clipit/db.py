@@ -117,6 +117,10 @@ MIGRATIONS = [
         stop       INTEGER NOT NULL DEFAULT 0  -- the user asked it to stop
     );
     """,
+    # What a run's step is doing now, as it says (runs.progress): JSON {"what", "vod", "stage", "count"}.
+    """
+    ALTER TABLE runs ADD COLUMN doing TEXT;
+    """,
 ]
 TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")
@@ -518,6 +522,16 @@ def end_run(conn: sqlite3.Connection, run_id: int, steps: list[dict]) -> None:
     conn.execute("UPDATE runs SET beat_at = ?, ended_at = ?, steps = ? WHERE id = ?", (now, now, json.dumps(steps), run_id))
 
 
+def run_doing(conn: sqlite3.Connection, run_id: int, doing: dict, replace: bool = False) -> None:
+    """What the run is doing now, for the page: merged into what it said before (a None value removes that field)."""
+    sql = (
+        "UPDATE runs SET doing = ? WHERE id = ?"
+        if replace
+        else "UPDATE runs SET doing = json_patch(coalesce(doing, '{}'), ?) WHERE id = ?"
+    )
+    conn.execute(sql, (json.dumps(doing), run_id))
+
+
 def stop_run(conn: sqlite3.Connection) -> bool:
     """Ask the live run to stop. False when there is none."""
     last = latest_run(conn)
@@ -539,4 +553,5 @@ def latest_run(conn: sqlite3.Connection, now: datetime.datetime | None = None) -
         ended = row["beat_at"]
         steps = [{**s, "status": "interrupted"} if s["status"] in ("waiting", "running") else s for s in steps]
     return {"id": row["id"], "running": not ended, "stopping": bool(row["stop"]) and not ended,
-            "started": row["started_at"], "ended": ended, "steps": steps}  # fmt: skip
+            "started": row["started_at"], "ended": ended, "steps": steps,
+            "doing": json.loads(row["doing"] or "{}") if not ended else {}}  # fmt: skip

@@ -159,3 +159,24 @@ def test_a_clipping_step_ends_with_everything_it_started_when_its_runner_dies(tm
             proc.kill()
         if step_pid.exists():  # if the watch failed: don't leave it ticking
             runs.kill_tree(int(step_pid.read_text()))
+
+
+def test_a_step_says_what_its_doing_and_the_next_step_starts_clean(conn, tmp_path, monkeypatch) -> None:
+    go = tmp_path / "go"
+    # a step reports as clipit's steps do (cli: runs.reporting), then waits so the test can look
+    poll = (
+        "import os, time\nfrom pathlib import Path\nfrom clipit import db, runs\n"
+        f"runs.reporting(db.connect(Path({str(tmp_path / 'clipit.db')!r})))\n"
+        "runs.progress(what='Clipping caedrel', vod=[2, 6], stage='Transcribing', count=[0, 12])\n"
+        "runs.progress(count=[3, 12])\n"
+        f"while not os.path.exists({str(go)!r}): time.sleep(0.05)"
+    )
+    upload = "import time; time.sleep(0.5)"
+    fake(monkeypatch, {"--poll": poll, "--upload": upload})
+    _, t = in_background(conn, tmp_path)
+    want = {"what": "Clipping caedrel", "vod": [2, 6], "stage": "Transcribing", "count": [3, 12]}
+    wait_for(lambda: db.latest_run(conn)["doing"] == want, "the step's progress shows")  # type: ignore[index]
+    go.touch()
+    wait_for(lambda: db.latest_run(conn)["doing"] == {"what": NAMES[1]}, "the next step starts clean")  # type: ignore[index]
+    t.join(30)
+    assert db.latest_run(conn)["doing"] == {}  # type: ignore[index]

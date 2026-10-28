@@ -11,7 +11,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
 
-from clipit import ai, db, kick, twitch
+from clipit import ai, db, kick, runs, twitch
 from clipit.pipeline import process_vod
 from clipit.util import ROOT, ClipitError, log, logger, utcnow
 
@@ -76,6 +76,7 @@ def poll(
     now = utcnow()
     failed = 0
     top_left = top_n
+    runs.progress(what="Finding streamers to clip")
     trending = list(dict.fromkeys([*prioritize, *ai.trending_streamers()]))
     log(f"trending streamers: {', '.join(f'{site}:{name}' for site, name in trending) or 'none (run --refresh-trends)'}")
     try:
@@ -103,6 +104,7 @@ def poll(
         if not db.claim(conn, vod_id, url, login, "top"):
             continue
         log(f"clipping {login}: {url}")
+        runs.progress(what=f"Clipping {login}", vod=[top_n - top_left, top_n], stage="Getting the VOD's details", count=None)
         try:
             with db.heartbeat(conn, vod_id):
                 _, clips = process_vod(url, out_root=out_root, **pipeline_opts)

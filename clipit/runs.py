@@ -27,6 +27,7 @@ UPLOAD = "--upload"  # the step Stop never cuts
 BEAT = 3.0  # seconds between the runner's checks: alive, stop asked, timed out
 KILL_WAIT = 30  # seconds a killed step gets to be gone
 WATCH = "CLIPIT_RUNNER"  # a clipping step gets its runner's pid, to end itself when the runner is gone (watch_runner)
+RUN = "CLIPIT_RUN"  # a step gets its run's id, to say what it's doing (progress)
 LOG_TAIL = 256 * 1024  # bytes of the run's output the page gets: a poll can print megabytes
 
 
@@ -83,6 +84,7 @@ def run(conn: sqlite3.Connection, out: Path, run_id: int) -> None:
                     step["status"] = "stopped"
                     continue
                 step["status"] = "running"
+                db.run_doing(conn, run_id, {"what": step["name"]}, replace=True)  # nothing left from the step before
                 _say(log, f"{step['name']}: clipit {flag}")
                 step["status"] = _step(conn, run_id, steps, command(flag, out), log, timeout, stoppable=flag != UPLOAD)
         except Exception as e:  # the run must still end, or the page shows it running until it goes stale
@@ -96,7 +98,7 @@ def run(conn: sqlite3.Connection, out: Path, run_id: int) -> None:
 def _step(conn: sqlite3.Connection, run_id: int, steps: list[dict], cmd: list[str], log: IO[str], timeout: float,
           stoppable: bool) -> str:  # fmt: skip
     """Run one step's clipit, its output into the log, and return its status."""
-    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}  # emoji in titles; lines as logged
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1", RUN: str(run_id)}  # emoji; lines as logged
     if stoppable:
         env[WATCH] = str(os.getpid())
     kw: dict = {} if sys.platform == "win32" else {"start_new_session": True}  # its own group, to kill it whole
@@ -121,6 +123,28 @@ def _step(conn: sqlite3.Connection, run_id: int, steps: list[dict], cmd: list[st
         if stop and not told:
             _say(log, "stop asked: letting the YouTube post finish first, so it's never cut off half sent")
             told = True
+
+
+_report: tuple[sqlite3.Connection, int] | None = None  # set in a step of a dashboard run (reporting)
+
+
+def reporting(conn: sqlite3.Connection) -> None:
+    """In a step of a dashboard run (its RUN is set): progress() reports to the run, through conn."""
+    global _report
+    if run_id := os.environ.get(RUN):
+        _report = conn, int(run_id)
+
+
+def progress(**doing: object) -> None:
+    """What this step is doing now, shown in the Run tab: what (headline), vod ([n, of]), stage, count ([done, of]).
+    Merged into what it said before, a None removes a field. Outside a dashboard run it does nothing, and a failed
+    write is only logged: progress never fails the work. Call it from the thread that made the connection."""
+    if _report is None:
+        return
+    try:
+        db.run_doing(*_report, doing)
+    except sqlite3.Error:
+        logger.warning("couldn't report progress to the run", exc_info=True)
 
 
 def _say(log: IO[str], line: str) -> None:

@@ -97,6 +97,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "started": None,
                     "ended": None,
                     "steps": [],
+                    "doing": {},
                 }
             return self.send(200, json.dumps({**run, "lines": runs.tail(self.out, run["id"])}).encode())
         if m := re.fullmatch(r"/media/(\d+)", path):

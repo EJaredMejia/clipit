@@ -4,7 +4,7 @@ import { Check, Circle, CircleSlash, Loader2, Play, Square, X } from "lucide-rea
 import { useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
-import { runResult, type Step, startRun, stopRun, useClipit } from "./store";
+import { type Run as RunState, runResult, type Step, startRun, stopRun, useClipit } from "./store";
 import { Confirm, Meta, when } from "./ui";
 
 const STEP_ICON: Record<Step["status"], React.ReactNode> = {
@@ -80,6 +80,7 @@ export function Run() {
               </li>
             ))}
           </ol>
+          {running && <Doing doing={run.doing} />}
           {run.stopping && uploading && (
             <p className="mt-3 text-sm text-warn">Stopping once the YouTube post finishes, so it's never cut off half sent.</p>
           )}
@@ -91,7 +92,7 @@ export function Run() {
           <Output lines={run.lines} />
         </section>
       ) : (
-        run && <p className="text-muted-foreground">No run since the dashboard started.</p>
+        run && <p className="text-muted-foreground">No runs yet.</p>
       )}
 
       <Confirm
@@ -107,6 +108,35 @@ export function Run() {
         destructive
         onConfirm={() => void stopRun()}
       />
+    </div>
+  );
+}
+
+// What the run is doing right now, as clipit says it, above the raw output.
+function Doing({ doing }: { doing: RunState["doing"] }) {
+  if (!doing?.what) return null; // none before a step says something
+  const [done, of] = doing.count ?? [0, 0];
+  return (
+    <div role="status" className="mt-4 rounded-xl border border-warn/30 bg-warn/5 p-4">
+      <p className="flex flex-wrap items-baseline gap-x-2">
+        <b className="font-heading text-lg font-bold">{doing.what}</b>
+        {doing.vod && <span className="text-sm text-muted-foreground">{`VOD ${doing.vod[0]} of ${doing.vod[1]}`}</span>}
+      </p>
+      {doing.stage && (
+        <p className="mt-1 flex items-center gap-2 text-sm">
+          <Loader2 className="size-4 shrink-0 animate-spin text-warn motion-reduce:animate-none" aria-hidden="true" />
+          <span className="truncate">{doing.stage}</span>
+          {of > 0 && <span className="ml-auto shrink-0 text-muted-foreground tabular-nums">{`${done}/${of}`}</span>}
+        </p>
+      )}
+      {of > 0 && (
+        <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+          <div
+            className="h-full origin-left rounded-full bg-warn transition-transform duration-200 ease-out motion-reduce:transition-none"
+            style={{ transform: `scaleX(${Math.min(1, done / of)})` }}
+          />
+        </div>
+      )}
     </div>
   );
 }

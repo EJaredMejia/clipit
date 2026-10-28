@@ -122,6 +122,7 @@ def main() -> None:
     if runner := os.environ.get(runs.WATCH):  # a clipping step of a dashboard run: never outlive the runner
         runs.watch_runner(int(runner))
     conn = db.connect(a.out / "clipit.db")
+    runs.reporting(conn)  # a step of a dashboard run: say what it's doing
     try:
         if a.every:
             while True:

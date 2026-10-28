@@ -64,7 +64,7 @@ VODs to process; `cli.py` is the only place that parses flags, sets up logging, 
 | `render.py` | captions, ffmpeg render, `posts.md` |
 | `util.py` | logging, shell helpers with timeouts, atomic writes, `ClipitError` |
 | `dashboard.py` | `--dashboard`: local HTTP server (127.0.0.1) for the built page in `clipit/web/` and its JSON API, reads and writes via `db.py`, and starts runs (`runs.py`) when the page asks |
-| `runs.py` | runs started from the dashboard: a runner process of their own (`--run-steps`) that does `--poll` then `--upload`, in the `runs` table and `out/logs/run-<id>.log`; Stop kills a clipping step's whole process tree but lets a YouTube post finish |
+| `runs.py` | runs started from the dashboard: a runner process of their own (`--run-steps`) that does `--poll` then `--upload`, in the `runs` table and `out/logs/run-<id>.log`; steps say what they're doing with `runs.progress`; Stop kills a clipping step's whole process tree but lets a YouTube post finish |
 | `youtube.py` | `--youtube-login` and `--upload`: posts kept clips to YouTube Shorts, records each post in `uploads` |
 
 `web/src/` is the dashboard page: `store.ts` is its zustand store (state, and every call to the server as plain

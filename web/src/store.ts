@@ -55,6 +55,8 @@ export type Run = {
   started: string | null;
   ended: string | null;
   steps: Step[];
+  // what the running step says it's doing (clipit/runs.py progress): a headline, VOD n of m, its stage and how far
+  doing: { what?: string; vod?: [number, number]; stage?: string; count?: [number, number] };
   lines: string[];
 };
 

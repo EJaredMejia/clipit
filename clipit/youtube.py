@@ -20,7 +20,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 
-from clipit import db
+from clipit import db, runs
 from clipit.util import ClipitError, log, logger, utcnow, write_atomic
 
 HOME = Path.home() / ".clipit"
@@ -92,6 +92,7 @@ def upload_clip(conn: sqlite3.Connection, clip_id: int, out: Path) -> str | None
 
 def _post(conn: sqlite3.Connection, creds: Credentials, clip: sqlite3.Row, out: Path) -> str:
     log(f"posting clip {clip['id']} to YouTube: {clip['title']}")
+    runs.progress(what="Posting to YouTube", stage=clip["title"])
     try:
         video_file = (out / clip["file"]).resolve()
         if not video_file.is_relative_to(out.resolve()):  # never send a local file that isn't one of our clips
