@@ -4,15 +4,8 @@ import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { deleteVod, useClipit, type Vod } from "./store";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { deleteVod, searchVods, useClipit, type Vod } from "./store";
 import { Confirm, link, when } from "./ui";
 
 const STATUS_STYLE: Record<string, string> = {
@@ -27,14 +20,7 @@ export function Vods() {
   const count: Record<string, number> = {};
   for (const c of clips) count[c.vod_id] = (count[c.vod_id] || 0) + 1;
   const [q, setQ] = useState("");
-  const needle = q.trim().toLowerCase();
-  const shown = needle
-    ? vods.filter((v) =>
-        `${v.id} ${v.streamer} ${v.status} ${v.error ?? ""}`
-          .toLowerCase()
-          .includes(needle),
-      )
-    : vods;
+  const shown = searchVods(vods, q);
   return (
     <>
       <div className="relative mb-3 sm:w-72">
@@ -52,19 +38,8 @@ export function Vods() {
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              {[
-                "VOD",
-                "Streamer",
-                "Status",
-                "Clips",
-                "Tier",
-                "Finished",
-                "",
-              ].map((h) => (
-                <TableHead
-                  key={h || "delete"}
-                  className={`h-11 font-heading text-muted-foreground first:pl-5 ${h === "Clips" ? "text-right" : ""}`}
-                >
+              {["VOD", "Streamer", "Status", "Clips", "Tier", "Finished", ""].map((h) => (
+                <TableHead key={h || "delete"} className={`h-11 font-heading text-muted-foreground first:pl-5 ${h === "Clips" ? "text-right" : ""}`}>
                   {h}
                 </TableHead>
               ))}
@@ -73,38 +48,18 @@ export function Vods() {
           <TableBody id="vods">
             {shown.map((v) => (
               <TableRow key={v.id} className="align-top">
-                <TableCell className="py-3 pl-5 font-medium">
-                  {link(v.url, v.id)}
-                </TableCell>
-                <TableCell className="py-3 font-semibold">
-                  {v.streamer || "–"}
-                </TableCell>
+                <TableCell className="py-3 pl-5 font-medium">{link(v.url, v.id)}</TableCell>
+                <TableCell className="py-3 font-semibold">{v.streamer || "–"}</TableCell>
                 <TableCell className="max-w-md py-3 whitespace-normal">
                   <span className="flex items-center gap-2">
-                    <Badge
-                      className={`font-heading ${STATUS_STYLE[v.status] ?? "bg-muted text-muted-foreground"}`}
-                    >
-                      {v.status}
-                    </Badge>
-                    {v.attempts > 1 && (
-                      <span className="text-muted-foreground">{`try ${v.attempts}`}</span>
-                    )}
+                    <Badge className={`font-heading ${STATUS_STYLE[v.status] ?? "bg-muted text-muted-foreground"}`}>{v.status}</Badge>
+                    {v.attempts > 1 && <span className="text-muted-foreground">{`try ${v.attempts}`}</span>}
                   </span>
-                  {v.error && (
-                    <p className="mt-1.5 text-sm break-words text-skip">
-                      {v.error}
-                    </p>
-                  )}
+                  {v.error && <p className="mt-1.5 text-sm break-words text-skip">{v.error}</p>}
                 </TableCell>
-                <TableCell className="py-3 text-right font-heading text-base tabular-nums">
-                  {String(count[v.id] || 0)}
-                </TableCell>
-                <TableCell className="py-3 text-muted-foreground">
-                  {v.tier}
-                </TableCell>
-                <TableCell className="py-3 text-muted-foreground tabular-nums">
-                  {when(v.finished_at || v.claimed_at)}
-                </TableCell>
+                <TableCell className="py-3 text-right font-heading text-base tabular-nums">{String(count[v.id] || 0)}</TableCell>
+                <TableCell className="py-3 text-muted-foreground">{v.tier}</TableCell>
+                <TableCell className="py-3 text-muted-foreground tabular-nums">{when(v.finished_at || v.claimed_at)}</TableCell>
                 <TableCell className="py-2 pr-4 text-right">
                   <DeleteVod vod={v} />
                 </TableCell>
@@ -112,13 +67,8 @@ export function Vods() {
             ))}
             {loaded && !shown.length && (
               <TableRow>
-                <TableCell
-                  colSpan={7}
-                  className="py-16 text-center text-muted-foreground"
-                >
-                  {vods.length
-                    ? "No VODs match that search."
-                    : "No VODs yet. Run clipit on a VOD, or clipit --poll."}
+                <TableCell colSpan={7} className="py-16 text-center text-muted-foreground">
+                  {vods.length ? "No VODs match that search." : "No VODs yet. Run clipit on a VOD, or clipit --poll."}
                 </TableCell>
               </TableRow>
             )}
@@ -130,23 +80,15 @@ export function Vods() {
 }
 
 const STALE_MS = 30 * 60000; // db.STALE_CLAIM: a claim (or running_at) older than this was a crashed run
-const live = (iso: string | null) =>
-  !!iso && Date.now() - Date.parse(iso) < STALE_MS;
+const live = (iso: string | null) => !!iso && Date.now() - Date.parse(iso) < STALE_MS;
 
 // Not while a run is using its files: the server refuses that too (db.busy).
 function DeleteVod({ vod: v }: { vod: Vod }) {
   const [asking, setAsking] = useState(false);
-  if ((v.status === "processing" && live(v.claimed_at)) || live(v.running_at))
-    return null;
+  if ((v.status === "processing" && live(v.claimed_at)) || live(v.running_at)) return null;
   return (
     <>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon-sm"
-        aria-label={`Delete VOD ${v.id}`}
-        onClick={() => setAsking(true)}
-      >
+      <Button type="button" variant="ghost" size="icon-sm" aria-label={`Delete VOD ${v.id}`} onClick={() => setAsking(true)}>
         <Trash2 />
       </Button>
       <Confirm

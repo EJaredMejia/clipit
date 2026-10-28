@@ -193,6 +193,12 @@ export function visible(s: State = get()): Clip[] {
     .sort(SORTS[s.sort]);
 }
 
+// The VODs tab's search: id, streamer, status or error, ignoring case and outer spaces.
+export function searchVods(vods: Vod[], q: string): Vod[] {
+  const needle = q.trim().toLowerCase();
+  return needle ? vods.filter((v) => `${v.id} ${v.streamer} ${v.status} ${v.error ?? ""}`.toLowerCase().includes(needle)) : vods;
+}
+
 // Post: kept clips not yet on every platform, newest first. Selectors, like visible().
 export const postQueue = (s: State = get()) => s.data.clips.filter(VIEWS.ready[1]).sort(SORTS.new);
 export const currentPost = (s: State = get()) => {
