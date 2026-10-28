@@ -85,6 +85,24 @@ def test_prioritize_reaches_poll_and_upload_as_clean_names(monkeypatch: pytest.M
     assert got == {"poll": [("twitch", "caedrel"), ("kick", "xqc")], "upload": ["twitch:caedrel", "kick:xqc"]}
 
 
+def test_a_failed_upload_still_polls_then_exits_with_an_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    polled: list[bool] = []
+
+    def no_login(*a: object) -> None:
+        raise ClipitError("Not logged in to YouTube")
+
+    monkeypatch.setattr(sys, "argv", ["clipit", "--poll", "--upload", "--out", str(tmp_path)])
+    monkeypatch.setattr(cli, "setup_logging", lambda out: None)
+    monkeypatch.setattr(cli, "refresh_stale_trends", lambda trends_ai: None)
+    monkeypatch.setattr(cli.shutil, "which", lambda name: name)
+    monkeypatch.setattr(poll, "poll", lambda *a, **kw: polled.append(True))
+    monkeypatch.setattr(youtube, "upload_next", no_login)
+    with pytest.raises(SystemExit) as exit:
+        cli.main()
+    assert exit.value.code == 1  # a dashboard run shows the post as failed, not done
+    assert polled == [True]
+
+
 @pytest.mark.parametrize(
     "every",
     [["--every", "30"], ["--dashboard", "--every", "30"], *(["--poll", "--every", m] for m in ("0", "nan", "inf"))],

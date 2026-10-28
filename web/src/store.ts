@@ -177,9 +177,9 @@ export async function save(path: string, body: unknown): Promise<Record<string, 
   return reply;
 }
 
-// What a run made: clips found since it started, and its posts to YouTube. Server times are all UTC ISO, so they sort as text.
+// What a run made: clips found while it ran, and its posts to YouTube. Server times are all UTC ISO, so they sort as text.
 export function runResult(run: Run, clips: Clip[]): { clips: number; posted: number } {
-  const since = (at: string | undefined) => !!at && !!run.started && at >= run.started;
+  const since = (at: string | undefined) => !!at && !!run.started && at >= run.started && (!run.ended || at <= run.ended);
   return {
     clips: clips.filter((c) => since(c.created_at)).length,
     posted: clips.filter((c) => c.uploads.youtube?.status === "done" && since(c.uploads.youtube.at)).length,

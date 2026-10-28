@@ -115,9 +115,10 @@ export function Run() {
 function Output({ lines }: { lines: string[] }) {
   const box = useRef<HTMLPreElement>(null);
   const follow = useRef(true);
+  const shown = useClipit((s) => s.tab === "run"); // a hidden tab has no height to scroll: catch up when it's shown
   useEffect(() => {
-    if (follow.current && box.current) box.current.scrollTop = box.current.scrollHeight;
-  }, [lines]);
+    if (shown && follow.current && box.current) box.current.scrollTop = box.current.scrollHeight;
+  }, [lines, shown]);
   return (
     <pre
       ref={box}

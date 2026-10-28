@@ -275,8 +275,9 @@ test("a run's result counts only the clips and YouTube posts since it started", 
     { ...clip(1), created_at: "2026-10-27T09:59:00+00:00", uploads: up("2026-10-27T10:30:00+00:00", "done") }, // old clip, posted now
     { ...clip(2), created_at: "2026-10-27T10:20:00+00:00", uploads: up("2026-10-27T10:31:00+00:00", "uploading") },
     { ...clip(3), created_at: "2026-10-27T10:21:00+00:00", uploads: up("2026-10-26T10:00:00+00:00", "done") },
+    { ...clip(4), created_at: "2026-10-27T12:00:00+00:00", uploads: up("2026-10-27T12:01:00+00:00", "done") }, // after it ended
   ];
-  expect(runResult(run({}), clips)).toEqual({ clips: 2, posted: 1 });
+  expect(runResult(run({ ended: "2026-10-27T11:00:00+00:00" }), clips)).toEqual({ clips: 2, posted: 1 });
 });
 
 test("the page tells you when a run it watched ends, and names the step that failed", async () => {

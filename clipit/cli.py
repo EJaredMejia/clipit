@@ -148,6 +148,7 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
         log(f"wrote {ai.TRENDS}")
     if a.youtube_login:
         youtube.login()
+    upload_failed = False
     if a.upload and a.dry_run:
         log("dry run: not posting to YouTube")
     elif a.upload:
@@ -155,6 +156,7 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
             youtube.upload_next(conn, a.out, a.prioritize)
         except Exception:  # logged, and retried on a later run: the rest of this run (polling) still happens
             logger.exception("YouTube upload failed")
+            upload_failed = True
     if a.url:
         info = source.fetch_info(a.url)  # its id first, to mark the VOD's files in use (the dashboard can delete them)
         with db.running(conn, str(info["id"])):
@@ -177,3 +179,5 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
         dashboard.serve(a.out, a.port)
     if a.run_steps:
         runs.run(conn, a.out, a.run_steps)
+    if upload_failed:  # once the rest has run: the exit code tells a dashboard run (and any scheduler) it failed
+        raise ClipitError("posting to YouTube failed (see above)")
