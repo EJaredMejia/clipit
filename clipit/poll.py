@@ -70,9 +70,11 @@ def poll(
     out_root: Path = ROOT / "out",
     prioritize: Iterable[tuple[str, str]] = (),
     **pipeline_opts,
-) -> None:
-    """One polling pass. Safe to run on a timer, and even twice at once. prioritize: (site, name) clipped first."""
+) -> int:
+    """One polling pass. Safe to run on a timer, and even twice at once. prioritize: (site, name) clipped first.
+    Returns how many VODs failed: the rest are still tried, but the caller can tell the pass didn't go well."""
     now = utcnow()
+    failed = 0
     top_left = top_n
     trending = list(dict.fromkeys([*prioritize, *ai.trending_streamers()]))
     log(f"trending streamers: {', '.join(f'{site}:{name}' for site, name in trending) or 'none (run --refresh-trends)'}")
@@ -109,6 +111,8 @@ def poll(
         except Exception as e:  # one bad VOD (sub-only, deleted...) must not stop the rest
             logger.exception("VOD %s failed", vod_id)
             db.finish(conn, vod_id, error=f"{type(e).__name__}: {e}"[:1000])
+            failed += 1
         finally:  # the ~300 MB audio is only needed while processing; a later rerun re-downloads it
             for p in (Path(out_root) / vod_id).glob("audio.*"):
                 p.unlink()
+    return failed

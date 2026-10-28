@@ -189,7 +189,9 @@ export function runResult(run: Run, clips: Clip[]): { clips: number; posted: num
 const plural = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
 
 // Polled even in a background tab, so a run that ends while you're elsewhere still tells you when you come back.
+let runAsks = 0;
 export async function loadRun(): Promise<void> {
+  const ask = ++runAsks;
   let run: Run;
   try {
     const r = await fetch("/api/run", { signal: AbortSignal.timeout(FETCH_MS) });
@@ -198,6 +200,7 @@ export async function loadRun(): Promise<void> {
   } catch {
     return;
   }
+  if (ask !== runAsks) return; // a newer ask was sent: this older answer could put a finished run back to running
   const before = get().run;
   if (JSON.stringify(before) === JSON.stringify(run)) return; // polling: don't re-render for nothing
   set({ run });

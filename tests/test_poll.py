@@ -124,13 +124,13 @@ def world(tmp_path, monkeypatch):
 
 def test_poll_pass(world):
     conn, calls, out = world
-    poll.poll(conn, top_n=3, lang="EN", out_root=out)
+    assert poll.poll(conn, top_n=3, lang="EN", out_root=out) == 1  # v3 failed: the caller hears of it
     assert calls == ["v1", "v3"]  # big2 has no VOD so mid takes its slot; s1 and s2 are too small
     assert db.status(conn, "v1") == "done" and db.status(conn, "v3") == "failed"
     assert conn.execute("SELECT file FROM clips WHERE vod_id = 'v1'").fetchone()["file"] == "v1/clips/01_a.mp4"
     assert not list(out.glob("v*/audio.*"))  # audio deleted for done AND failed VODs
 
-    poll.poll(conn, top_n=3, lang="EN", out_root=out)
+    assert poll.poll(conn, top_n=3, lang="EN", out_root=out) == 0
     assert len(calls) == 2  # nothing new: v1 done, v3 waits RETRY_AFTER
 
 

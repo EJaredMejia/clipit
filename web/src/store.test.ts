@@ -297,6 +297,19 @@ test("the page tells you when a run it watched ends, and names the step that fai
   expect(toast.success).not.toHaveBeenCalled();
 });
 
+test("an older answer that arrives late never puts a finished run back to running", async () => {
+  const answers: ((r: Response) => void)[] = [];
+  vi.stubGlobal("fetch", (url: string) => (url === "/api/run" ? new Promise<Response>((r) => answers.push(r)) : json({ vods: [], clips: [] })));
+  set({ run: run({ running: true }) });
+  const older = loadRun();
+  const newer = loadRun();
+  answers[1](json(run({ ended: "2026-10-27T11:00:00+00:00" }))); // the newer ask answers first: the run ended
+  await newer;
+  answers[0](json(run({ running: true }))); // then the older one, from before it ended
+  await older;
+  expect(useClipit.getState().run?.running).toBe(false);
+});
+
 test("the VOD search matches id, streamer, status and error, ignoring case and outer spaces", () => {
   const vod = (id: string, streamer: string, status: string, error: string | null): Vod => ({
     id, url: "", streamer, tier: "top", status, attempts: 1, error, claimed_at: null, running_at: null, finished_at: null,

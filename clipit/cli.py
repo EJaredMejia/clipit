@@ -166,8 +166,9 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
             work, clips = process_vod(a.url, a.clips, a.ai, a.whisper, a.out, info=info)
         db.record_manual(conn, work.name, a.url)
         db.save_clips(conn, work.name, [{**c, "file": f"{work.name}/{c['file']}"} for c in clips])
+    vods_failed = 0
     if a.poll:
-        poll.poll(
+        vods_failed = poll.poll(
             conn,
             a.top,
             a.lang.upper(),
@@ -182,5 +183,8 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
         dashboard.serve(a.out, a.port)
     if a.run_steps:
         runs.run(conn, a.out, a.run_steps)
-    if upload_failed:  # once the rest has run: the exit code tells a dashboard run (and any scheduler) it failed
+    # once the rest has run: the exit code tells a dashboard run (and any scheduler) the work failed
+    if upload_failed:
         raise ClipitError("posting to YouTube failed (see above)")
+    if vods_failed:
+        raise ClipitError(f"{vods_failed} VOD{'s' if vods_failed > 1 else ''} failed to clip (see above)")
