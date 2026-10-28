@@ -12,6 +12,7 @@ import signal
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import IO
@@ -25,6 +26,7 @@ STEPS = (("Clip the latest VODs", "--poll", 8 * 3600), ("Post to YouTube", "--up
 UPLOAD = "--upload"  # the step Stop never cuts
 BEAT = 3.0  # seconds between the runner's checks: alive, stop asked, timed out
 KILL_WAIT = 30  # seconds a killed step gets to be gone
+WATCH = "CLIPIT_RUNNER"  # a clipping step gets its runner's pid, to end itself when the runner is gone (watch_runner)
 LOG_TAIL = 256 * 1024  # bytes of the run's output the page gets: a poll can print megabytes
 
 
@@ -95,6 +97,8 @@ def _step(conn: sqlite3.Connection, run_id: int, steps: list[dict], cmd: list[st
           stoppable: bool) -> str:  # fmt: skip
     """Run one step's clipit, its output into the log, and return its status."""
     env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}  # emoji in titles; lines as logged
+    if stoppable:
+        env[WATCH] = str(os.getpid())
     kw: dict = {} if sys.platform == "win32" else {"start_new_session": True}  # its own group, to kill it whole
     proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=env, **kw)
     deadline = time.monotonic() + timeout
@@ -126,12 +130,45 @@ def _say(log: IO[str], line: str) -> None:
 
 def _kill(proc: subprocess.Popen) -> None:
     """Kill the step and everything it started: ffmpeg, yt-dlp, the AI CLI."""
-    try:
-        if sys.platform == "win32":
-            subprocess.run(["taskkill", "/T", "/F", "/PID", str(proc.pid)], capture_output=True, timeout=KILL_WAIT)
-        else:
-            os.killpg(proc.pid, signal.SIGKILL)
-    except (OSError, subprocess.SubprocessError):
-        logger.warning("couldn't kill the processes of step %d", proc.pid, exc_info=True)
+    kill_tree(proc.pid)
     proc.kill()  # at least the step itself, if the tree kill failed
     proc.wait(KILL_WAIT)
+
+
+def kill_tree(pid: int) -> None:
+    """Kill the process and every process it started (on POSIX: its process group, as steps lead their own)."""
+    try:
+        if sys.platform == "win32":
+            subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, timeout=KILL_WAIT)
+        else:
+            os.killpg(pid, signal.SIGKILL)
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("couldn't kill the processes of %d", pid, exc_info=True)
+
+
+def watch_runner(runner: int) -> None:
+    """In a clipping step: when the runner that supervises it dies (killed, crashed), end this step and everything
+    it started, so clipping never goes on unseen, without its watchdog and out of Stop's reach."""
+    if sys.platform == "win32":
+        import ctypes
+
+        kernel = ctypes.windll.kernel32
+        # a handle keeps the runner's process object, so its pid can't be reused while we wait on it
+        handle = kernel.OpenProcess(0x00100000, False, runner) if os.getppid() == runner else 0  # SYNCHRONIZE
+
+        def gone() -> None:
+            if handle:
+                kernel.WaitForSingleObject(handle, 0xFFFFFFFF)  # until it exits
+    else:
+
+        def gone() -> None:
+            while os.getppid() == runner:  # a dead parent's children are handed to init (or a subreaper)
+                time.sleep(BEAT)
+
+    def wait() -> None:
+        gone()
+        logger.error("the run's runner is gone: stopping this clipping step")
+        kill_tree(os.getpid())
+        os._exit(1)  # if the tree kill failed
+
+    threading.Thread(target=wait, daemon=True).start()

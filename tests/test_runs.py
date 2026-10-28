@@ -1,5 +1,6 @@
 import datetime
 import sqlite3
+import subprocess
 import sys
 import threading
 import time
@@ -124,3 +125,33 @@ def test_tail_reads_only_the_end_of_a_long_log(tmp_path, monkeypatch) -> None:
     runs.log_file(tmp_path, 1).write_text("".join(f"line {i}\n" for i in range(1000)), encoding="utf-8")
     assert runs.tail(tmp_path, 1, lines=3) == ["line 997", "line 998", "line 999"]
     assert runs.tail(tmp_path, 2) == []
+
+
+def test_a_clipping_step_ends_with_everything_it_started_when_its_runner_dies(tmp_path) -> None:
+    ticks, step_pid = tmp_path / "ticks", tmp_path / "step.pid"
+    child = f"import time\nwhile True:\n    open({str(ticks)!r}, 'a').write('x'); time.sleep(0.05)"  # like ffmpeg
+    step = (
+        "import os, subprocess, sys, time\nfrom clipit import runs\nruns.watch_runner(int(os.environ[runs.WATCH]))\n"
+        f"subprocess.Popen([sys.executable, '-c', {child!r}])\ntime.sleep(60)"
+    )
+    # a runner that starts the step as runs._step does, then is killed alone: its step is left without it
+    runner = (
+        "import os, subprocess, sys, time\nfrom clipit import runs\n"
+        "kw = {} if sys.platform == 'win32' else {'start_new_session': True}\n"
+        f"p = subprocess.Popen([sys.executable, '-c', {step!r}], env={{**os.environ, runs.WATCH: str(os.getpid())}}, **kw)\n"
+        f"open({str(step_pid)!r}, 'w').write(str(p.pid))\ntime.sleep(60)"
+    )
+    proc = subprocess.Popen([sys.executable, "-c", runner])
+    try:
+        wait_for(ticks.exists, "the step's child started")
+        proc.kill()  # only the runner
+        proc.wait(10)
+        time.sleep(runs.BEAT + 2)  # the step notices (POSIX checks every BEAT) and kills its tree
+        size = ticks.stat().st_size
+        time.sleep(0.5)
+        assert ticks.stat().st_size == size  # the step's child is gone too
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        if step_pid.exists():  # if the watch failed: don't leave it ticking
+            runs.kill_tree(int(step_pid.read_text()))

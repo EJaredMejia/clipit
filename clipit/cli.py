@@ -15,6 +15,7 @@ import argparse
 import io
 import logging
 import math
+import os
 import shutil
 import sqlite3
 import sys
@@ -118,6 +119,8 @@ def main() -> None:
     if (a.url or a.poll) and not shutil.which("ffmpeg"):
         sys.exit("ffmpeg not found on PATH")
     setup_logging(a.out)
+    if runner := os.environ.get(runs.WATCH):  # a clipping step of a dashboard run: never outlive the runner
+        runs.watch_runner(int(runner))
     conn = db.connect(a.out / "clipit.db")
     try:
         if a.every:
