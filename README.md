@@ -71,6 +71,22 @@ clipit https://www.twitch.tv/videos/2906456464
 clipit https://www.twitch.tv/videos/2906456464 -n 10 --whisper turbo
 ```
 
+### High-effort clips
+
+```bash
+clipit https://www.twitch.tv/videos/2906456464 -n 2 --high-effort
+```
+
+Takes the normal picks and puts much more work into each one. The AI edits it: jump cuts over dead air and filler,
+punch-in zooms on reactions, sound effects (boom, whoosh, ding, pop, made by ffmpeg, no sound files), pop-up text and
+highlighted words in the captions. Then a fresh AI call reviews that version against one goal, a really good edit that
+trends, scores it, lists what's still wrong and returns an improved version. Clipit also checks every version itself
+for dead air and a slow open. The loop goes on until a review scores the edit 9/10 with nothing left to fix, or after
+5 reviews, when the best-reviewed version wins. Up to 5 AI calls per clip, so keep `-n` small.
+
+The edited clips go next to the plain ones (`clips/..._edited.mp4`, `posts_edited.md`) and are added to the
+dashboard; the plain clips stay as they were. Every review is kept in `edit/` to see what the AI changed and why.
+
 ### Clip live streamers automatically
 
 ```bash
@@ -167,6 +183,7 @@ have the rights to: three copyright strikes delete a channel.
 |---|---|---|
 | `URL` | | Twitch or Kick VOD link (`https://kick.com/<channel>/videos/<id>`). Other sites yt-dlp supports work too, without chat. |
 | `-n`, `--clips N` | `6` | Clips per VOD. |
+| `--high-effort` | | Edit every clip (cuts, zooms, sound effects, pop-up text) and have the AI review and improve it until it's done. See [High-effort clips](#high-effort-clips). |
 | `--ai CMD` | Claude Code, then Codex | The AI that picks clips: `codex` uses the isolated built-in provider; other values are commands that read a prompt on stdin and print the answer. **Don't give custom commands tools**: prompts contain Twitch chat written by strangers. |
 | `--trends-ai CMD` | Claude Code, then Codex | The AI for `--refresh-trends`, which needs web search. Use `codex` for Codex with web search only. |
 | `--whisper MODEL` | `turbo` | Transcription model: `tiny`, `base`, `small`, `medium` or `turbo`. Bigger is more accurate but slower. |

@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-from clipit import ai, facecam, kick, moments, render, runs, source, transcribe, twitch
+from clipit import ai, edit, facecam, kick, moments, render, runs, source, transcribe, twitch
 from clipit.util import ROOT, ClipitError, log, logger, mmss, slug, write_atomic
 
 MAX_DURATION = 48 * 3600  # bounds disk use (~2.5 GB of audio); longer VODs are skipped
@@ -34,7 +34,8 @@ def cached_json(path: Path, make: Callable[[], Any]) -> Any:
 
 def clip_file(rank: int, clip: dict) -> str:
     """Path under the work folder. The time range is in it so a re-picked moment never reuses an old render."""
-    return f"clips/{rank:02d}_{slug(clip['title'])}_{clip['start']:.1f}-{clip['end']:.1f}.mp4"
+    edited = "_edited" if clip.get("edit") else ""  # a high-effort version of a moment never reuses the plain render
+    return f"clips/{rank:02d}_{slug(clip['title'])}_{clip['start']:.1f}-{clip['end']:.1f}{edited}.mp4"
 
 
 def streamer(info: dict) -> tuple[str, str]:
@@ -74,9 +75,11 @@ def process_vod(
     whisper: str = "turbo",
     out_root: Path = ROOT / "out",
     info: dict | None = None,
+    high_effort: bool = False,
 ) -> tuple[Path, list[dict]]:
     """Make up to n_clips clips from a VOD. Returns (work folder, rendered clips). Raises ClipitError when it can't.
-    `info` is source.fetch_info(url), when the caller already has it."""
+    `info` is source.fetch_info(url), when the caller already has it. high_effort: the AI edits each pick and reviews
+    it until it's done (clipit.edit), into picks_edited.json and posts_edited.md so the plain clips stay as they are."""
     info = info or source.fetch_info(url)
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(info["id"])):  # it becomes a folder name
         raise ClipitError(f"unexpected video id {info['id']!r}")
@@ -122,20 +125,32 @@ def process_vod(
             log(f"  {i}/{len(todo)} @ {mmss(w[0])}")
             progress("Transcribing the best moments", i, len(todo))
 
+    cands = []
+    for s, e in windows:
+        stats = f"audio peak +{loud[s:e].max() - np.median(loud):.0f} dB"
+        if rate.any():
+            stats = f"chat {rate[s:e].mean() / rate.mean():.1f}x normal, " + stats
+        cands.append(
+            {"start": s, "end": e, "segments": tr[f"{s}-{e}"], "stats": stats, "chat": [m for m in msgs if s <= m[0] < e]}
+        )
+
     def ask():
-        cands = []
-        for s, e in windows:
-            stats = f"audio peak +{loud[s:e].max() - np.median(loud):.0f} dB"
-            if rate.any():
-                stats = f"chat {rate[s:e].mean() / rate.mean():.1f}x normal, " + stats
-            cands.append(
-                {"start": s, "end": e, "segments": tr[f"{s}-{e}"], "stats": stats, "chat": [m for m in msgs if s <= m[0] < e]}
-            )
         log(f"asking the AI to pick {n_clips} clips from {len(cands)} candidates")
         progress(f"The AI is picking {n_clips} clips from {len(cands)} moments")
         return ai.pick_clips(ai_cmd, info, cands, n_clips, work)
 
     picks = cached_json(work / "picks.json", ask)  # delete picks.json to re-ask the AI
+    words = [w for segs in tr.values() for s in segs for w in s["words"]]
+    picks_file, posts_file = ("picks_edited.json", "posts_edited.md") if high_effort else ("picks.json", "posts.md")
+    if high_effort:
+        (work / "edit").mkdir(exist_ok=True)
+        edited = []
+        for i, p in enumerate(picks, 1):  # each one cached on its own: a crash keeps the clips already done
+            log(f"editing clip {i}/{len(picks)} until it's done (up to {edit.MAX_ROUNDS} AI reviews)")
+            progress("The AI is editing and reviewing the clips", i - 1, len(picks))
+            polish = functools.partial(edit.polish, ai_cmd, info, p, cands, words, loud, work / "edit")
+            edited.append(cached_json(work / "edit" / f"{p['start']:.1f}-{p['end']:.1f}.json", polish))
+        picks = edited
 
     urls = source.stream_urls(url)
 
@@ -147,7 +162,6 @@ def process_vod(
     layouts = cached_json(work / "facecam_layouts.json", detect)  # delete it to re-detect
     log(f"{len(layouts)} webcam layout(s) found" if layouts else "no webcam found: blurred-fill layout")
     (work / "clips").mkdir(exist_ok=True)
-    words = [w for segs in tr.values() for s in segs for w in s["words"]]
     rendered, (login, site) = [], streamer(info)
     for i, c in enumerate(picks, 1):
         # picks.json cached before descriptions existed; capped like a new one, so credit + hashtags still fit TikTok's limit
@@ -171,7 +185,7 @@ def process_vod(
     if not rendered:
         raise ClipitError("every clip failed to render, see the log")
 
-    write_atomic(work / "picks.json", json.dumps(picks, indent=2))
-    render.write_posts(work / "posts.md", info, url, rendered)
-    log(f"done: {len(rendered)} clips in {work / 'clips'} (captions + titles in {work / 'posts.md'})")
+    write_atomic(work / picks_file, json.dumps(picks, indent=2))
+    render.write_posts(work / posts_file, info, url, rendered)
+    log(f"done: {len(rendered)} clips in {work / 'clips'} (captions + titles in {work / posts_file})")
     return work, rendered

@@ -279,3 +279,39 @@ def test_a_description_the_user_cleared_stays_empty(conn):
     db.set_text(conn, cid, "youtube", "")  # the user's choice: post it with no description
     db.set_text(conn, cid, "title", "later edit")
     assert tuple(conn.execute("SELECT title, youtube FROM clips").fetchone()) == ("later edit", "")
+
+
+def test_an_edit_of_a_moment_is_a_clip_of_its_own(conn):
+    db.record_manual(conn, "v1", "u")
+    other = {**CLIP, "start": 60.0, "end": 80.0}
+    db.save_clips(conn, "v1", [CLIP, other])
+    plain = conn.execute("SELECT id FROM clips WHERE start_s = 1").fetchone()[0]
+    assert db.set_verdict(conn, plain, "skip") and db.set_upload(conn, plain, "tiktok", "")
+    db.save_clips(conn, "v1", [{**CLIP, "file": "v1/clips/01_a_edited.mp4", "edit": {"cuts": []}}])  # same moment
+    rows = [tuple(r) for r in conn.execute("SELECT start_s, file, variant, verdict FROM clips ORDER BY id")]
+    assert rows == [(1.0, CLIP["file"], "plain", "skip"), (60.0, CLIP["file"], "plain", None),
+                    (1.0, "v1/clips/01_a_edited.mp4", "edited", None)]  # fmt: skip
+    assert conn.execute("SELECT clip_id FROM uploads").fetchone()[0] == plain  # the edit doesn't take the plain one's posts
+    db.save_clips(conn, "v1", [other])  # a plain re-pick drops plain clips only
+    assert [r[0] for r in conn.execute("SELECT variant FROM clips ORDER BY id")] == ["plain", "plain", "edited"]
+
+
+def test_variant_migration_keeps_clips_uploads_and_id_sequence(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:-1])
+    old = db.connect(tmp_path / "x.db")
+    db.record_manual(old, "v1", "u")
+    for start in (1, 60):  # written by the old code
+        old.execute(
+            """INSERT INTO clips (vod_id, idx, file, start_s, end_s, title, hook, caption, trend, sound, score, why,
+               created_at) VALUES ('v1', 1, 'f', ?, ?, 't', 'h', 'c', '', '', 8, '', 'now')""",
+            (start, start + 19),
+        )
+    old.execute("DELETE FROM clips WHERE id = 2")  # its id must stay retired
+    db.set_upload(old, 1, "youtube", "https://youtu.be/x")
+    old.close()
+    monkeypatch.undo()
+    c = db.connect(tmp_path / "x.db")
+    assert [tuple(r) for r in c.execute("SELECT id, variant FROM clips")] == [(1, "plain")]
+    assert [tuple(r) for r in c.execute("SELECT clip_id, url FROM uploads")] == [(1, "https://youtu.be/x")]
+    db.save_clips(c, "v1", [CLIP, {**CLIP, "start": 90.0, "end": 110.0}])
+    assert 2 not in [r[0] for r in c.execute("SELECT id FROM clips")]

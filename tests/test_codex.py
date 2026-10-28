@@ -151,7 +151,7 @@ def test_defaults_fall_back_to_codex_and_explicit_alias_avoids_the_shell(monkeyp
 
     monkeypatch.setattr(codex, "ask", ask)
     assert ai.ask_ai("codex", "clip prompt") == "codex answer"
-    assert received == [("clip prompt", {"timeout": ai.AI_TIMEOUT})]
+    assert received == [("clip prompt", {"schema": codex.PICKS_SCHEMA, "timeout": ai.AI_TIMEOUT})]
     monkeypatch.setattr(ai, "_claude", lambda: "claude -p")
     assert ai.default_ai() == 'claude -p --tools ""'
 
@@ -179,7 +179,7 @@ def test_cli_passes_explicit_codex_to_the_pipeline(monkeypatch, tmp_path):
     monkeypatch.setattr(cli.sys, "argv", ["clipit", "https://www.twitch.tv/videos/123", "--ai", "codex", "--out", str(tmp_path)])
     received = []
 
-    def process(url, count, provider, whisper, out, info):
+    def process(url, count, provider, whisper, out, info, high_effort):
         received.append((url, count, provider, whisper, out))
         return out / "v123", []
 

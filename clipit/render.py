@@ -2,6 +2,7 @@
 
 import os
 import re
+from collections.abc import Collection
 from pathlib import Path
 
 from clipit.facecam import TOP
@@ -43,14 +44,26 @@ WrapStyle: 0
 Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
 Style: Cap,Arial Black,84,&H00FFFFFF,&H00FFFFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,7,3,5,60,60,0,1
 Style: Hook,Arial Black,62,&H00000000,&H00000000,&H00FFFFFF,&H00FFFFFF,-1,0,0,0,100,100,0,0,3,14,0,5,90,90,0,1
+Style: Pop,Arial Black,96,&H0000FFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,8,4,5,60,60,0,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
 
-def make_ass(hook: str, words: list, start: float, dur: float, hook_y: int, cap_y: int) -> str:
-    """Hook box + trending word-by-word captions (3-word chunks, current word yellow), centered on the given y."""
+def make_ass(
+    hook: str,
+    words: list,
+    start: float,
+    dur: float,
+    hook_y: int,
+    cap_y: int,
+    pops: Collection[dict] = (),
+    emphasis: Collection[str] = (),
+) -> str:
+    """Hook box + trending word-by-word captions (3-word chunks, current word yellow), centered on the given y.
+    High-effort edits add pops ({start, end, text} in VOD seconds: pop-up text above the captions) and emphasis
+    (lowercase words shown red in the captions)."""
 
     def t(x):
         h, r = divmod(max(0.0, x), 3600)
@@ -73,12 +86,57 @@ def make_ass(hook: str, words: list, start: float, dur: float, hook_y: int, cap_
             cur = []
         cur.append((a, b, w))
     chunks += [cur] if cur else []
+
+    def color(w: str, current: bool) -> str:
+        if current:
+            return f"{{\\c&H00FFFF&}}{w}{{\\c&HFFFFFF&}}"
+        return f"{{\\c&H3C3CFF&}}{w}{{\\c&HFFFFFF&}}" if re.sub(r"[^\w'-]", "", w).lower() in emphasis else w
+
     for ch in chunks:
         for j, (a, b, _) in enumerate(ch):
             end = ch[j + 1][0] if j + 1 < len(ch) else b
-            text = " ".join(f"{{\\c&H00FFFF&}}{w}{{\\c&HFFFFFF&}}" if k == j else w for k, (_, _, w) in enumerate(ch))
+            text = " ".join(color(w, k == j) for k, (_, _, w) in enumerate(ch))
             ev.append(f"Dialogue: 1,{t(a)},{t(end)},Cap,,0,0,0,,{{\\pos(540,{cap_y})}}{text}")
+    for p in pops:  # pops in from 60% size
+        if esc(p["text"]):
+            pos = f"{{\\pos(540,{cap_y - 260})\\fscx60\\fscy60\\t(0,120,\\fscx100\\fscy100)}}"
+            ev.append(f"Dialogue: 2,{t(p['start'] - start)},{t(p['end'] - start)},Pop,,0,0,0,,{pos}{esc(p['text'])}")
     return ASS_HEADER + "\n".join(ev) + "\n"
+
+
+# Sound effects synthesized by ffmpeg: no sound files to license, download or trust.
+SFX = {
+    "boom": "aevalsrc='0.9*sin(2*PI*(110-70*t)*t)*exp(-4*t)':d=0.9",
+    "whoosh": "anoisesrc=d=0.5:c=pink:a=0.4,highpass=f=500,afade=t=in:d=0.25,afade=t=out:st=0.25:d=0.25",
+    "ding": "aevalsrc='0.35*sin(2*PI*1320*t)*exp(-5*t)':d=0.9",
+    "pop": "aevalsrc='0.6*sin(2*PI*(900-1500*t)*t)*exp(-30*t)':d=0.2",
+}
+LOUDNORM = "loudnorm=I=-14:TP=-1.5"
+STEREO = "aformat=sample_rates=48000:channel_layouts=stereo"
+
+
+def edit_graph(edit: dict, start: float, subs: str, audio: int) -> str:
+    """Filters for a high-effort edit (clipit.edit) of the frame labeled [base], times in VOD seconds; makes [v] and [a].
+    Punch-in zooms come before the captions (subs) so those stay put. Cuts come last, on video and audio both, so
+    captions, pop-ups and sound effects are cut along with what they belong to and stay in sync."""
+    zooms, sfx, cuts = edit.get("zooms", []), edit.get("sfx", []), edit.get("cuts", [])
+    graph, last = "", "base"
+    if zooms:
+        graph = f"[base]split={len(zooms) + 1}[o0]" + "".join(f"[z{i}]" for i in range(1, len(zooms) + 1)) + ";"
+        for i, z in enumerate(zooms, 1):
+            f, a, b = z["zoom"], z["start"] - start, z["end"] - start
+            graph += f"[z{i}]crop=iw/{f:.2f}:ih/{f:.2f},scale=1080:1920,setsar=1[zz{i}];"
+            graph += f"[o{i - 1}][zz{i}]overlay=enable='between(t,{a:.2f},{b:.2f})'[o{i}];"
+        last = f"o{len(zooms)}"
+    keep = "'not(" + "+".join(f"between(t,{c['start'] - start:.2f},{c['end'] - start:.2f})" for c in cuts) + ")'"
+    graph += f"[{last}]{subs}" + (f",select={keep},setpts=N/FRAME_RATE/TB" if cuts else "") + "[v];"
+    # after a seek, Twitch's audio can start ~2 s after the video: pad it from 0 so cuts hit the same moments in both
+    graph += f"[{audio}:a]aresample=async=1:first_pts=0,{STEREO}[src];"
+    for i, x in enumerate(sfx):
+        graph += f"{SFX[x['sound']]},{STEREO},adelay={max(0, round((x['at'] - start) * 1000))}:all=1[s{i}];"
+    graph += "[src]" + "".join(f"[s{i}]" for i in range(len(sfx)))
+    graph += f"amix=inputs={len(sfx) + 1}:duration=first:normalize=0," if sfx else "anull,"
+    return graph + (f"aselect={keep},asetpts=N/SR/TB," if cuts else "") + LOUDNORM + "[a]"
 
 
 def render(urls: list[str], clip: dict, words: list, out: Path, cam: list[float] | None = None) -> None:
@@ -98,9 +156,16 @@ def render(urls: list[str], clip: dict, words: list, out: Path, cam: list[float]
             "scale=1080:1920,eq=brightness=-0.12[bg];[b]scale=1080:-2[fg];[bg][fg]overlay=0:(H-h)/2"
         )
         hook_y, cap_y = 540, 1400
-    ass = out.with_suffix(".ass")
-    ass.write_text(make_ass(clip.get("hook", ""), words, s, d, hook_y, cap_y), encoding="utf-8")
-    graph += f",subtitles={ass.name}[v]"  # relative name: avoids Windows path escaping
+    ass, edit = out.with_suffix(".ass"), clip.get("edit")
+    pops, emphasis = (edit["texts"], edit["emphasis"]) if edit else ([], [])
+    ass.write_text(make_ass(clip.get("hook", ""), words, s, d, hook_y, cap_y, pops, emphasis), encoding="utf-8")
+    subs = f"subtitles={ass.name}"  # relative name: avoids Windows path escaping
+    if edit:  # a high-effort clip: its edit mixes the sound in the graph too
+        graph += "[base];" + edit_graph(edit, s, subs, len(urls) - 1)
+        audio = ["-map", "[a]"]
+    else:
+        graph += f",{subs}[v]"
+        audio = ["-map", f"{len(urls) - 1}:a", "-af", LOUDNORM]
     inputs = [arg for u in urls for arg in (*REMOTE, "-ss", f"{s:.2f}", "-t", f"{d:.2f}", "-i", u)]
     tmp = out.with_name(out.stem + ".tmp.mp4")
     try:
@@ -115,10 +180,7 @@ def render(urls: list[str], clip: dict, words: list, out: Path, cam: list[float]
                 graph,
                 "-map",
                 "[v]",
-                "-map",
-                f"{len(urls) - 1}:a",
-                "-af",
-                "loudnorm=I=-14:TP=-1.5",
+                *audio,
                 "-c:v",
                 "libx264",
                 "-preset",
