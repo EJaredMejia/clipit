@@ -47,7 +47,6 @@ ignore = [
     "S603",  # subprocess with list args (ffmpeg / yt-dlp) is the normal, safe form
     "S607",  # ffmpeg is resolved from PATH on purpose
     "S310",  # urllib only ever opens fixed https://gql.twitch.tv and Kick API URLs
-    "S311",  # random only picks which small streamer to clip, not security
     "E731",  # log = logger.info
     "E501",  # long lines are prompt/subtitle data inside strings; keep code lines near 130 by hand
 ]

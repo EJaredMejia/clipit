@@ -3,7 +3,7 @@
 clipit https://www.twitch.tv/videos/2906456464
 clipit URL --clips 10 --ai "ollama run qwen3:30b"
 clipit --refresh-trends
-clipit --poll              (clip the latest VODs of trending, big and smaller streamers; run it on a timer)
+clipit --poll              (clip the latest VODs of trending and big streamers; run it on a timer)
 clipit --poll --dry-run    (only show which VODs it would clip)
 clipit --dashboard         (browse every VOD and clip, mark clips keep/skip and posted)
 clipit --youtube-login     (once: sign in to the YouTube channel to post to)
@@ -74,12 +74,6 @@ def main() -> None:
     ap.add_argument("--poll", action="store_true", help="pick live streamers automatically and clip their latest finished VOD")
     ap.add_argument(
         "--top", type=int, default=6, help="--poll: how many trending, then biggest live, streamers to clip (default 6)"
-    )
-    ap.add_argument(
-        "--small",
-        type=int,
-        default=4,
-        help=f"--poll: max VODs per day from smaller streamers, {poll.SMALL[0]}-{poll.SMALL[1]} viewers (default 4)",
     )
     ap.add_argument("--lang", default="EN", help='--poll: only streams in this language (default EN, "" for any)')
     ap.add_argument("--dry-run", action="store_true", help="--poll: only print which VODs would be clipped")
@@ -170,7 +164,6 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
         poll.poll(
             conn,
             a.top,
-            a.small,
             a.lang.upper(),
             a.dry_run,
             a.out,

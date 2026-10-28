@@ -9,7 +9,7 @@ Codex CLI, a local model through Ollama, or any other AI CLI.
 ## Features
 
 - **Clip one stream.** Give it a Twitch or Kick VOD link and get 1080x1920 clips with a hook, word-by-word captions, a title, and ready-to-paste TikTok and YouTube text that credits the streamer and adds hashtags.
-- **Clip live streamers automatically.** Checks who's live on Twitch and Kick, picks the biggest streamers plus some smaller ones, and clips each one's latest finished stream. Built to run unattended on a timer.
+- **Clip live streamers automatically.** Checks who's live on Twitch and Kick, picks the biggest streamers, and clips each one's latest finished stream. Built to run unattended on a timer.
 - **Follow trends.** The AI researches what's working on TikTok and Shorts this week, and the clip picks and captions follow it.
 - **Facecam layout.** Finds the streamer's webcam overlay and stacks it above the gameplay.
 - **Light on bandwidth.** Downloads only the audio to find moments (about 360 MB for 4 hours instead of 12 GB of video), then only the seconds of video it renders.
@@ -84,10 +84,9 @@ Each pass:
    streams) and Kick's top 500. A name live on both sites is clipped on both, since the same name can belong to two
    different people: skip a simulcast's repeats in the dashboard. If one site's API is down, the pass goes on with the
    other.
-2. **Big streamers:** the 6 biggest (`--top`). For each, it clips their latest *finished* VOD, ignoring a stream that's still live. A channel with no usable VOD gives its slot to the next one.
-3. **Smaller streamers** (300-2,000 viewers): picked at random, at most 4 VODs a day (`--small`), so they're included without crowding out the big ones.
-4. Skips VODs that ended more than 2 days ago and anything already done. Only English streams by default (`--lang ""` for any).
-5. Each VOD is claimed in the database before processing, so two overlapping passes never do the same one. Finished VODs are never redone. Failed ones retry up to 3 times, at least an hour apart, and a pass that crashed mid-VOD is taken over 30 minutes after it stopped refreshing its claim. Downloaded audio is deleted after each VOD to save disk.
+2. **Big streamers:** the 6 biggest with at least 2,000 viewers (`--top`), after any trending ones. For each, it clips their latest *finished* VOD, ignoring a stream that's still live. A channel with no usable VOD gives its slot to the next one.
+3. Skips VODs that ended more than 2 days ago and anything already done. Only English streams by default (`--lang ""` for any).
+4. Each VOD is claimed in the database before processing, so two overlapping passes never do the same one. Finished VODs are never redone. Failed ones retry up to 3 times, at least an hour apart, and a pass that crashed mid-VOD is taken over 30 minutes after it stopped refreshing its claim. Downloaded audio is deleted after each VOD to save disk.
 
 Run it every 30-60 minutes: either leave `clipit --poll --every 45` running (one pass, then waits 45 minutes, forever;
 a failed pass is logged and the next still runs), or put `clipit --poll` on a timer (launchd on macOS, Task Scheduler
@@ -170,7 +169,6 @@ have the rights to: three copyright strikes delete a channel.
 | `--refresh-trends` | | Research current trends into `trends.md`. |
 | `--poll` | | Pick live streamers and clip their latest finished VOD. |
 | `--top N` | `6` | With `--poll`: how many of the biggest live streamers to clip. |
-| `--small N` | `4` | With `--poll`: max VODs a day from smaller streamers. |
 | `--lang CODE` | `EN` | With `--poll`: only streams in this language, `""` for any. |
 | `--dry-run` | | With `--poll`: only print which VODs would be clipped. |
 | `--dashboard` | | Open the dashboard in your browser. |

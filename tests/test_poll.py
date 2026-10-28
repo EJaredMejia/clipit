@@ -1,5 +1,4 @@
 import datetime
-import random
 
 import pytest
 
@@ -18,45 +17,40 @@ STREAMS = [
 ]
 
 
-def test_candidates_big_first_then_small_in_range_and_language():
+def test_candidates_are_big_streamers_in_language_only():
     streams = [(*s, poll.twitch) for s in STREAMS]
-    got = [(tier, s[0]) for tier, s in poll.candidates(streams, "EN", random.Random(1))]
-    assert got[:3] == [("top", "big1"), ("top", "big2"), ("top", "mid")]
-    assert sorted(got[3:]) == [("small", "s1"), ("small", "s2")]
-    assert "es" in [s[0] for _, s in poll.candidates(streams, "")]
+    assert [s[0] for s in poll.candidates(streams, "EN")] == ["big1", "big2", "mid"]
+    assert "es" in [s[0] for s in poll.candidates(streams, "")]
 
 
-def test_candidates_alternate_sites_in_each_tier():
+def test_candidates_alternate_sites():
     tw = [("t1", 90000, "EN", poll.twitch), ("t2", 80000, "EN", poll.twitch), ("t3", 70000, "EN", poll.twitch)]
-    tw += [("ts1", 1000, "EN", poll.twitch), ("ts2", 900, "EN", poll.twitch)]
-    ki = [("k1", 20000, "EN", poll.kick), ("ks1", 500, "EN", poll.kick)]
-    got = [(tier, s[0]) for tier, s in poll.candidates(tw + ki, "EN", random.Random(1))]
-    assert got[:4] == [("top", "k1"), ("top", "t1"), ("top", "t2"), ("top", "t3")]
-    assert got[4][1] == "ks1" and sorted(got[5:]) == [("small", "ts1"), ("small", "ts2")]
+    ki = [("k1", 20000, "EN", poll.kick), ("k2", 3000, "EN", poll.kick), ("ks1", 500, "EN", poll.kick)]
+    got = [s[0] for s in poll.candidates(tw + ki, "EN")]
+    assert got == ["k1", "t1", "k2", "t2", "t3"]
 
 
 def test_blocked_streamers_are_never_candidates():
     streams = [("Pokimane", 30000, "EN", poll.twitch), ("big1", 20000, "EN", poll.twitch)]
-    got = [s[0] for _, s in poll.candidates(streams, "EN", trending=[("kick", "POKIMANE"), ("twitch", "pokimane")])]
+    got = [s[0] for s in poll.candidates(streams, "EN", trending=[("kick", "POKIMANE"), ("twitch", "pokimane")])]
     assert got == ["big1"]
 
 
 def test_trending_streamers_come_first_live_or_not_and_only_once():
     streams = [("big1", 30000, "EN", poll.twitch), ("Clavicular", 9000, "EN", poll.kick), ("s1", 1500, "EN", poll.twitch)]
     trending = [("kick", "stableronaldo"), ("kick", "clavicular")]
-    got = [(tier, s[0], s[3]) for tier, s in poll.candidates(streams, "EN", trending=trending)]
+    got = [(s[0], s[3]) for s in poll.candidates(streams, "EN", trending=trending)]
     assert got == [
-        ("top", "stableronaldo", poll.kick),  # offline is fine: we clip the latest finished VOD
-        ("top", "clavicular", poll.kick),
-        ("top", "big1", poll.twitch),
-        ("small", "s1", poll.twitch),
+        ("stableronaldo", poll.kick),  # offline is fine: we clip the latest finished VOD
+        ("clavicular", poll.kick),
+        ("big1", poll.twitch),
     ]
 
 
 def test_prioritized_streamers_are_clipped_first(world, monkeypatch):
     conn, calls, out = world
     monkeypatch.setattr(poll.ai, "trending_streamers", lambda: [("twitch", "big1")])
-    poll.poll(conn, top_n=1, small_per_day=0, lang="EN", out_root=out, prioritize=[("twitch", "mid")])
+    poll.poll(conn, top_n=1, lang="EN", out_root=out, prioritize=[("twitch", "mid")])
     assert calls == ["v3"]  # mid's VOD takes the only slot, ahead of trending big1
 
 
@@ -130,14 +124,14 @@ def world(tmp_path, monkeypatch):
 
 def test_poll_pass(world):
     conn, calls, out = world
-    poll.poll(conn, top_n=2, small_per_day=1, lang="EN", out_root=out)
-    assert calls[:2] == ["v1", "v3"] and len(calls) == 3  # big2 has no VOD so mid takes its slot, then 1 small
+    poll.poll(conn, top_n=3, lang="EN", out_root=out)
+    assert calls == ["v1", "v3"]  # big2 has no VOD so mid takes its slot; s1 and s2 are too small
     assert db.status(conn, "v1") == "done" and db.status(conn, "v3") == "failed"
     assert conn.execute("SELECT file FROM clips WHERE vod_id = 'v1'").fetchone()["file"] == "v1/clips/01_a.mp4"
     assert not list(out.glob("v*/audio.*"))  # audio deleted for done AND failed VODs
 
-    poll.poll(conn, top_n=2, small_per_day=1, lang="EN", out_root=out)
-    assert len(calls) == 3  # nothing new: v1 done, v3 waits RETRY_AFTER, today's small budget used
+    poll.poll(conn, top_n=3, lang="EN", out_root=out)
+    assert len(calls) == 2  # nothing new: v1 done, v3 waits RETRY_AFTER
 
 
 def test_one_streamers_vod_lookup_failing_does_not_end_the_pass(world, monkeypatch):
@@ -150,7 +144,7 @@ def test_one_streamers_vod_lookup_failing_does_not_end_the_pass(world, monkeypat
         return real(login)
 
     monkeypatch.setattr(poll.twitch, "latest_vod", flaky)
-    poll.poll(conn, top_n=2, small_per_day=0, lang="EN", out_root=out)
+    poll.poll(conn, top_n=2, lang="EN", out_root=out)
     assert calls == ["v3"]  # big1 skipped, big2 has no VOD, mid still processed
 
 
@@ -171,5 +165,5 @@ def test_trending_streamers_still_clipped_when_both_live_lists_are_down(world, m
 
 def test_dry_run_touches_nothing(world):
     conn, calls, out = world
-    poll.poll(conn, top_n=2, small_per_day=1, lang="EN", dry_run=True, out_root=out)
+    poll.poll(conn, top_n=2, lang="EN", dry_run=True, out_root=out)
     assert calls == [] and conn.execute("SELECT count(*) FROM vods").fetchone()[0] == 0
