@@ -153,8 +153,10 @@ def watch_runner(runner: int) -> None:
         import ctypes
 
         kernel = ctypes.windll.kernel32
-        # a handle keeps the runner's process object, so its pid can't be reused while we wait on it
-        handle = kernel.OpenProcess(0x00100000, False, runner) if os.getppid() == runner else 0  # SYNCHRONIZE
+        # Not the parent pid: a venv's python.exe is a launcher that starts the real interpreter as its child. The
+        # runner is alive when it starts us, and a handle keeps its process object, so its pid can't be reused
+        # while we wait on it. 0 (it's gone already) counts as gone.
+        handle = kernel.OpenProcess(0x00100000, False, runner)  # SYNCHRONIZE
 
         def gone() -> None:
             if handle:

@@ -144,6 +144,10 @@ def test_a_clipping_step_ends_with_everything_it_started_when_its_runner_dies(tm
     proc = subprocess.Popen([sys.executable, "-c", runner])
     try:
         wait_for(ticks.exists, "the step's child started")
+        time.sleep(runs.BEAT + 1)
+        size = ticks.stat().st_size
+        time.sleep(0.5)
+        assert ticks.stat().st_size > size  # still clipping while its runner lives
         proc.kill()  # only the runner
         proc.wait(10)
         time.sleep(runs.BEAT + 2)  # the step notices (POSIX checks every BEAT) and kills its tree
