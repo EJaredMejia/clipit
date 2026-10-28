@@ -53,7 +53,7 @@ export const VIEWS = {
   ready: ["Ready to post", (c: Clip) => c.verdict === "keep" && posted(c) < Object.keys(PLATFORMS).length],
   all: ["All", () => true],
   review: ["To review", (c: Clip) => !c.verdict],
-  kept: ["Kept", (c: Clip) => c.verdict === "keep"],
+  kept: ["Kept", (c: Clip) => c.verdict === "keep" && !posted(c)], // what's left to post; posted ones are under Posted
   posted: ["Posted", (c: Clip) => posted(c) > 0],
   skip: ["Skipped", (c: Clip) => c.verdict === "skip"],
 } as const satisfies Record<string, readonly [string, (c: Clip) => boolean]>;

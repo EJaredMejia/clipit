@@ -2,7 +2,7 @@
 // Nothing here waits a fixed time or a fixed number of ticks: how long a save's follow-up work takes differs between
 // machines (CI caught one). Tests await the actions themselves, or vi.waitFor the request they expect.
 import { afterEach, expect, test, vi } from "vitest";
-import { type Clip, deal, decide, description, flushTexts, saveText, set, setDraft, startFling, textStatus, undo, useClipit } from "./store";
+import { type Clip, VIEWS, deal, decide, description, flushTexts, saveText, set, setDraft, startFling, textStatus, undo, useClipit } from "./store";
 
 const drafts = () => useClipit.getState().drafts;
 
@@ -252,4 +252,11 @@ test("before posting, every field's latest draft is saved, even one typed while 
   const failing = flushTexts(1, ["title", "youtube"]);
   (await sent("Failed title")).reply(false);
   expect(await failing).toBe(false); // the page says so and never asks to post
+});
+
+test("Kept shows only kept clips not posted anywhere yet, Posted the rest", () => {
+  const kept = { ...clip(1), verdict: "keep" as const };
+  const up = { ...kept, uploads: { youtube: { url: null, at: "2026-10-24", status: "done" as const } } };
+  expect([kept, up, clip(3)].filter(VIEWS.kept[1])).toEqual([kept]);
+  expect([kept, up].filter(VIEWS.posted[1])).toEqual([up]);
 });
