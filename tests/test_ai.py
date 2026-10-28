@@ -194,3 +194,9 @@ def test_ask_ai_failures_raise_clipit_error(monkeypatch):
     monkeypatch.setattr(ai.subprocess, "run", hang)
     with pytest.raises(ClipitError, match="timed out"):
         ai.ask_ai("anything", "prompt")
+
+
+def test_clean_clamps_scores_to_the_1_to_10_scale():
+    # an inflated 15 must not outrank the scale db.AUTO_SCORE is set on, nor a negative sink below it
+    got = ai.clean([{"start": 0, "end": 20, "score": 15}, {"start": 30, "end": 50, "score": -4}], 100.0, 5)
+    assert [c["score"] for c in got] == [10.0, 1.0]
