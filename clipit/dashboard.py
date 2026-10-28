@@ -5,6 +5,7 @@ A standard-library HTTP server on 127.0.0.1. The page polls /api/data and saves 
 /api/delete-vod a VOD and every file of it but its clip videos (chat, transcripts, audio...);
 every database read and write goes through clipit.db. /api/reveal opens a clip's folder in the file manager, and
 /api/youtube posts a clip to YouTube Shorts right away (clipit.youtube, the same code --upload runs).
+/api/run starts or stops a run of `clipit --poll`, then `clipit --upload` (clipit.runs), and GET /api/run shows how it goes.
 
 Security: other websites open in the same browser can send requests to localhost. So every request must carry our own
 Host (stops DNS rebinding), and writes must be JSON from our own Origin (a cross-site JSON POST needs a CORS
@@ -24,7 +25,7 @@ import time
 import webbrowser
 from pathlib import Path
 
-from clipit import db, youtube
+from clipit import db, runs, youtube
 from clipit.util import ClipitError, log, logger
 
 # the page, built from web/ by `npm run build` (committed, so running clipit needs no Node)
@@ -87,6 +88,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if self.headers.get("If-None-Match") == etag:  # the page polls: only send what changed
                 return self.send(304, headers={"ETag": etag})
             return self.send(200, body, headers={"ETag": etag})
+        if path == "/api/run":
+            with self.conn() as conn:
+                run = db.latest_run(conn) or {
+                    "id": 0,
+                    "running": False,
+                    "stopping": False,
+                    "started": None,
+                    "ended": None,
+                    "steps": [],
+                    "doing": {},
+                }
+            return self.send(200, json.dumps({**run, "lines": runs.tail(self.out, run["id"])}).encode())
         if m := re.fullmatch(r"/media/(\d+)", path):
             return self.video(int(m[1]))
         self.send(404, b'{"error": "not found"}')
@@ -95,6 +108,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self.ours():
             return
         req = self.read_json()
+        if self.path == "/api/run" and req.get("action") in ("start", "stop"):
+            try:
+                with self.conn() as conn:
+                    ok = runs.start(conn, self.out) if req["action"] == "start" else db.stop_run(conn)
+            except OSError as e:
+                logger.exception("couldn't start a run")
+                return self.send(500, json.dumps({"error": f"couldn't start clipit: {e}"[:500]}).encode())
+            if not ok:
+                return self.send(
+                    409, b'{"error": "a run is already going"}' if req["action"] == "start" else b'{"error": "no run is going"}'
+                )
+            return self.send(200, b'{"ok": true}')
         # asked for in so many words: an empty or broken body (read_json gives {}) must never delete anything
         if self.path == "/api/delete-skipped" and req.get("skipped") is True:
             deleted = failed = 0

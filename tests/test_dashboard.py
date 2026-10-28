@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from clipit import dashboard, db, youtube
+from clipit import dashboard, db, runs, youtube
 from clipit.util import utcnow
 
 Site = tuple[str, sqlite3.Connection, list[int]]  # what the site fixture yields: base url, db, clip ids
@@ -319,3 +319,20 @@ def test_delete_vod_refuses_one_a_manual_run_is_using(tmp_path: Path) -> None:
             conn.execute("UPDATE vods SET deleted = 0")  # undo, to check the lease is let go below
     with db.deleting_vod(conn, "v3") as clips:
         assert clips == []
+
+
+def test_run_status_and_stop_from_the_page(site: Site, monkeypatch: pytest.MonkeyPatch) -> None:
+    url, conn, _ = site
+    out = Path(conn.execute("PRAGMA database_list").fetchone()["file"]).parent
+    assert json.loads(call(url + "/api/run")[2])["id"] == 0  # no run yet
+    assert call(url + "/api/run", {"action": "stop"})[0] == 409
+    run_id = db.start_run(conn, ["Clip the latest VODs", "Post to YouTube"])
+    assert run_id
+    runs.log_file(out, run_id).parent.mkdir(exist_ok=True)
+    runs.log_file(out, run_id).write_text("clipping caedrel ✓\n", encoding="utf-8")
+    run = json.loads(call(url + "/api/run")[2])  # what a reopened dashboard shows of a run going on without it
+    assert (run["id"], run["running"], run["lines"]) == (run_id, True, ["clipping caedrel ✓"])
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: pytest.fail("a second runner started"))
+    assert call(url + "/api/run", {"action": "start"})[0] == 409
+    assert call(url + "/api/run", {"action": "stop"})[0] == 200
+    assert json.loads(call(url + "/api/run")[2])["stopping"]

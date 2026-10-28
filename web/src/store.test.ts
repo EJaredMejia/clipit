@@ -2,7 +2,10 @@
 // Nothing here waits a fixed time or a fixed number of ticks: how long a save's follow-up work takes differs between
 // machines (CI caught one). Tests await the actions themselves, or vi.waitFor the request they expect.
 import { afterEach, expect, test, vi } from "vitest";
-import { type Clip, VIEWS, type Vod, deal, decide, description, flushTexts, saveText, searchVods, set, setDraft, startFling, textStatus, undo, useClipit } from "./store";
+import { toast } from "sonner";
+import { type Clip, type Run, VIEWS, type Vod, deal, decide, description, flushTexts, loadRun, runResult, saveText, searchVods, set, setDraft, startFling, textStatus, undo, useClipit } from "./store";
+
+vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
 const drafts = () => useClipit.getState().drafts;
 
@@ -259,6 +262,66 @@ test("Kept shows only kept clips not posted anywhere yet, Posted the rest", () =
   const up = { ...kept, uploads: { youtube: { url: null, at: "2026-10-24", status: "done" as const } } };
   expect([kept, up, clip(3)].filter(VIEWS.kept[1])).toEqual([kept]);
   expect([kept, up].filter(VIEWS.posted[1])).toEqual([up]);
+});
+
+const run = (over: Partial<Run>): Run => ({
+  id: 1, running: false, stopping: false, started: "2026-10-27T10:00:00+00:00", ended: null, lines: [], doing: {},
+  steps: [{ name: "Clip the latest VODs", status: "done" }, { name: "Post to YouTube", status: "done" }], ...over,
+}); // prettier-ignore
+
+test("a run's result counts only the clips and YouTube posts since it started", () => {
+  const up = (at: string, status: "uploading" | "done") => ({ youtube: { url: null, at, status } });
+  const clips = [
+    { ...clip(1), created_at: "2026-10-27T09:59:00+00:00", uploads: up("2026-10-27T10:30:00+00:00", "done") }, // old clip, posted now
+    { ...clip(2), created_at: "2026-10-27T10:20:00+00:00", uploads: up("2026-10-27T10:31:00+00:00", "uploading") },
+    { ...clip(3), created_at: "2026-10-27T10:21:00+00:00", uploads: up("2026-10-26T10:00:00+00:00", "done") },
+    { ...clip(4), created_at: "2026-10-27T12:00:00+00:00", uploads: up("2026-10-27T12:01:00+00:00", "done") }, // after it ended
+  ];
+  expect(runResult(run({ ended: "2026-10-27T11:00:00+00:00" }), clips)).toEqual({ clips: 2, posted: 1 });
+});
+
+test("the page tells you when a run it watched ends, and names the step that failed", async () => {
+  const ended = run({ ended: "2026-10-27T11:00:00+00:00", steps: [{ name: "Clip the latest VODs", status: "failed" }, { name: "Post to YouTube", status: "done" }] });
+  let served = run({ running: true });
+  vi.stubGlobal("fetch", async (url: string) => json(url === "/api/run" ? served : { vods: [], clips: [] }));
+  set({ run: null });
+  await loadRun(); // first sight of a running run: nothing to say yet
+  served = ended;
+  await loadRun();
+  expect(toast.error).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(toast.error).mock.calls[0][0]).toContain("Clip the latest VODs");
+  await loadRun(); // the same ended run again: no second notice
+  set({ run: null });
+  await loadRun(); // a run that had ended before the page saw it running: no notice either
+  expect(toast.error).toHaveBeenCalledTimes(1);
+  expect(toast.success).not.toHaveBeenCalled();
+});
+
+test("an older answer that arrives late never puts a finished run back to running", async () => {
+  const answers: ((r: Response) => void)[] = [];
+  vi.stubGlobal("fetch", (url: string) => (url === "/api/run" ? new Promise<Response>((r) => answers.push(r)) : json({ vods: [], clips: [] })));
+  set({ run: run({ running: true }) });
+  const older = loadRun();
+  const newer = loadRun();
+  answers[1](json(run({ ended: "2026-10-27T11:00:00+00:00" }))); // the newer ask answers first: the run ended
+  await newer;
+  answers[0](json(run({ running: true }))); // then the older one, from before it ended
+  await older;
+  expect(useClipit.getState().run?.running).toBe(false);
+});
+
+test("answers slower than the polling still show, in order", async () => {
+  const answers: ((r: Response) => void)[] = [];
+  vi.stubGlobal("fetch", (url: string) => (url === "/api/run" ? new Promise<Response>((r) => answers.push(r)) : json({ vods: [], clips: [] })));
+  set({ run: run({ running: true }) });
+  const first = loadRun();
+  const second = loadRun(); // asked before the first answered
+  answers[0](json(run({ running: true, lines: ["clipping"] })));
+  await first;
+  expect(useClipit.getState().run?.lines).toEqual(["clipping"]); // shown, though a newer ask is out
+  answers[1](json(run({ running: true, lines: ["clipping", "posting"] })));
+  await second;
+  expect(useClipit.getState().run?.lines).toEqual(["clipping", "posting"]);
 });
 
 test("the VOD search matches id, streamer, status and error, ignoring case and outer spaces", () => {

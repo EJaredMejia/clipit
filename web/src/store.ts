@@ -3,6 +3,7 @@
 // actions replace what they change with set().
 // Everything the API returns (stream titles, AI text, hashtags) was written by strangers: components render it as
 // React text only, never as HTML (src/safety.test.ts checks), and only make links from http(s) URLs.
+import { toast } from "sonner";
 import { create } from "zustand";
 
 export const PLATFORMS = { tiktok: "TikTok", youtube: "YouTube" } as const;
@@ -44,6 +45,20 @@ export type Vod = {
   finished_at: string | null;
 };
 export type Data = { vods: Vod[]; clips: Clip[] };
+// A run of clipit --poll, then --upload, started from the page (clipit/runs.py). It goes on without the page or the
+// dashboard, so a reopened page picks it up. Lines are clipit's output: untrusted.
+export type Step = { name: string; status: "waiting" | "running" | "done" | "failed" | "stopped" | "interrupted" };
+export type Run = {
+  id: number;
+  running: boolean;
+  stopping: boolean; // Stop was asked: a YouTube post finishes first
+  started: string | null;
+  ended: string | null;
+  steps: Step[];
+  // what the running step says it's doing (clipit/runs.py progress): a headline, VOD n of m, its stage and how far
+  doing: { what?: string; vod?: [number, number]; stage?: string; count?: [number, number] };
+  lines: string[];
+};
 
 export const posted = (c: Clip) => Object.keys(c.uploads).length;
 // clips made before descriptions only have the caption; once the user edits, an empty description is their choice
@@ -66,10 +81,11 @@ export const SORTS = {
 };
 export type Sort = keyof typeof SORTS;
 // in the order the work goes: decide, post, look back
-export const TABS = { review: "Review", post: "Post", library: "Library", vods: "VODs" } as const;
+export const TABS = { run: "Run", review: "Review", post: "Post", library: "Library", vods: "VODs" } as const;
 export type Tab = keyof typeof TABS;
 
 export const POLL_MS = 5000;
+export const RUN_MS = 2000; // a run's output, close to live
 const FETCH_MS = 15000; // every request has a deadline, so a stalled server shows an error instead of hanging
 const POST_MS = 15 * 60000; // posting to YouTube sends the whole video from this PC
 export const DELETE_NOTE = "The video is deleted and clipit forgets it. Anything already posted stays up. This can't be undone."; // every clip, any status
@@ -96,6 +112,7 @@ const initial = {
   deckShown: null as number | null, // clip id of the top card now on screen
   flinging: false,
   muted: false,
+  run: null as Run | null, // the dashboard's latest run, null until the first answer
 };
 export type State = typeof initial;
 
@@ -118,8 +135,10 @@ export function setStatus(text: string, bad = false): void {
 
 export const clipOf = (clips: Clip[], id: number | null | undefined) => clips.find((c) => c.id === id);
 
-export async function load(): Promise<void> {
-  if (globalThis.document?.hidden) return; // a background tab doesn't need fresh data
+// a background tab doesn't need fresh data
+export const load = (): Promise<void> => (globalThis.document?.hidden ? Promise.resolve() : fetchData());
+
+async function fetchData(): Promise<void> {
   try {
     const { etag } = get();
     const r = await fetch("/api/data", { headers: etag ? { "If-None-Match": etag } : {}, signal: AbortSignal.timeout(FETCH_MS) });
@@ -158,6 +177,66 @@ export async function save(path: string, body: unknown): Promise<Record<string, 
   }
   await load();
   return reply;
+}
+
+// What a run made: clips found while it ran, and its posts to YouTube. Server times are all UTC ISO, so they sort as text.
+export function runResult(run: Run, clips: Clip[]): { clips: number; posted: number } {
+  const since = (at: string | undefined) => !!at && !!run.started && at >= run.started && (!run.ended || at <= run.ended);
+  return {
+    clips: clips.filter((c) => since(c.created_at)).length,
+    posted: clips.filter((c) => c.uploads.youtube?.status === "done" && since(c.uploads.youtube.at)).length,
+  };
+}
+
+const plural = (n: number, what: string) => `${n} ${what}${n === 1 ? "" : "s"}`;
+
+// Polled even in a background tab, so a run that ends while you're elsewhere still tells you when you come back.
+let runAsks = 0;
+let runShown = 0; // the newest ask whose answer is shown
+export async function loadRun(): Promise<void> {
+  const ask = ++runAsks;
+  let run: Run;
+  try {
+    const r = await fetch("/api/run", { signal: AbortSignal.timeout(FETCH_MS) });
+    if (!r.ok) return; // load() says when the server is gone
+    run = (await r.json()) as Run;
+  } catch {
+    return;
+  }
+  if (ask < runShown) return; // a newer answer is shown: this older one could put a finished run back to running
+  runShown = ask;
+  const before = get().run;
+  if (JSON.stringify(before) === JSON.stringify(run)) return; // polling: don't re-render for nothing
+  set({ run });
+  if (!before?.running || before.id !== run.id || run.running) return; // only the end of a run this page watched
+  await fetchData(); // the clips it made, even in a background tab
+  const made = runResult(run, get().data.clips);
+  const failed = run.steps.filter((s) => s.status === "failed" || s.status === "interrupted").map((s) => s.name);
+  const stopped = run.steps.some((s) => s.status === "stopped");
+  const text = `${plural(made.clips, "new clip")}, ${made.posted} posted to YouTube`;
+  const open = { label: "See the run", onClick: () => showTab("run") };
+  const opts = { description: text, duration: Infinity, closeButton: true, action: open };
+  if (failed.length) toast.error(`Run finished, but this failed: ${failed.join(", ")}`, opts);
+  else if (stopped) toast(`Run stopped`, opts);
+  else toast.success("Run finished", { ...opts, action: made.clips ? { label: "Review", onClick: () => showTab("review") } : open });
+}
+
+export async function startRun(): Promise<void> {
+  try {
+    await post("/api/run", { action: "start" });
+  } catch (e) {
+    toast.error(`Couldn't start a run: ${(e as Error).message}`);
+  }
+  await loadRun();
+}
+
+export async function stopRun(): Promise<void> {
+  try {
+    await post("/api/run", { action: "stop" });
+  } catch (e) {
+    toast.error(`Couldn't stop the run: ${(e as Error).message}`);
+  }
+  await loadRun();
 }
 
 export const reveal = (clip: number) => post("/api/reveal", { clip });

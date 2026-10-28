@@ -16,7 +16,7 @@ from typing import Any
 
 import numpy as np
 
-from clipit import ai, facecam, kick, moments, render, source, transcribe, twitch
+from clipit import ai, facecam, kick, moments, render, runs, source, transcribe, twitch
 from clipit.util import ROOT, ClipitError, log, logger, mmss, slug, write_atomic
 
 MAX_DURATION = 48 * 3600  # bounds disk use (~2.5 GB of audio); longer VODs are skipped
@@ -62,6 +62,11 @@ def get_chat(info: dict) -> list:
         raise ClipitError(f"couldn't fetch chat replay ({type(e).__name__}: {e}), will retry later") from e
 
 
+def progress(stage: str, done: int | None = None, of: int | None = None) -> None:
+    """The stage this VOD is at, for a dashboard run's Run tab, with how far along it is when it's counted."""
+    runs.progress(stage=stage, count=[done, of] if of else None)
+
+
 def process_vod(
     url: str,
     n_clips: int = 6,
@@ -85,6 +90,7 @@ def process_vod(
     # Audio is only needed to measure loudness and transcribe: a rerun with those cached skips the big download.
     loud_file = work / "loudness.npy"
     stop = threading.Event()
+    progress("Downloading the audio and chat")
     with ThreadPoolExecutor(1) as pool:  # chat and audio both wait on the network: fetch them at the same time
         dl = None if loud_file.exists() else pool.submit(source.download_audio, url, work, stop)
         try:
@@ -97,6 +103,7 @@ def process_vod(
 
     if not loud_file.exists():
         log("measuring loudness")
+        progress("Measuring loudness")
         tmp = work / "loudness.tmp.npy"
         np.save(tmp, moments.loudness(audio()))
         tmp.replace(loud_file)
@@ -108,10 +115,12 @@ def process_vod(
     todo = [w for w in windows if f"{w[0]}-{w[1]}" not in tr]
     if todo:
         log(f"transcribing {len(todo)} candidate moments (whisper {whisper})")
+        progress("Transcribing the best moments", 0, len(todo))
         for i, (w, segs) in enumerate(zip(todo, transcribe.transcribe(audio(), todo, whisper), strict=True), 1):
             tr[f"{w[0]}-{w[1]}"] = segs
             write_atomic(tr_file, json.dumps(tr))
             log(f"  {i}/{len(todo)} @ {mmss(w[0])}")
+            progress("Transcribing the best moments", i, len(todo))
 
     def ask():
         cands = []
@@ -123,6 +132,7 @@ def process_vod(
                 {"start": s, "end": e, "segments": tr[f"{s}-{e}"], "stats": stats, "chat": [m for m in msgs if s <= m[0] < e]}
             )
         log(f"asking the AI to pick {n_clips} clips from {len(cands)} candidates")
+        progress(f"The AI is picking {n_clips} clips from {len(cands)} moments")
         return ai.pick_clips(ai_cmd, info, cands, n_clips, work)
 
     picks = cached_json(work / "picks.json", ask)  # delete picks.json to re-ask the AI
@@ -131,6 +141,7 @@ def process_vod(
 
     def detect():
         log("looking for webcam layouts")
+        progress("Looking for the webcam")
         return facecam.find_layouts(urls[0], dur)
 
     layouts = cached_json(work / "facecam_layouts.json", detect)  # delete it to re-detect
@@ -145,6 +156,7 @@ def process_vod(
         c["caption"], c["youtube"] = render.post_texts(c)
         out = work / c["file"]
         if not out.exists():
+            progress("Rendering the clips", i - 1, len(picks))
             cam = facecam.clip_cam(urls[0], layouts, c["start"], c["end"])  # streamers switch scene layouts mid-stream
             log(f"rendering {out.name} ({c['end'] - c['start']:.0f}s, {'facecam on top' if cam else 'blurred fill'})")
             try:

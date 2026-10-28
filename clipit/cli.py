@@ -15,6 +15,7 @@ import argparse
 import io
 import logging
 import math
+import os
 import shutil
 import sqlite3
 import sys
@@ -22,7 +23,7 @@ import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from clipit import ai, dashboard, db, poll, source, youtube
+from clipit import ai, dashboard, db, poll, runs, source, youtube
 from clipit.pipeline import process_vod
 from clipit.util import ROOT, ClipitError, log, logger
 
@@ -100,6 +101,7 @@ def main() -> None:
         metavar="MINUTES",
         help="--poll / --upload: keep running, one pass every MINUTES (a failed pass is logged and the next one still runs)",
     )
+    ap.add_argument("--run-steps", type=int, help=argparse.SUPPRESS)  # the runner of a run started in the dashboard
     a = ap.parse_args()
     if bad := [p for p in a.prioritize if not ai.TRENDING.fullmatch(f"- {p}")]:
         ap.error(f"--prioritize needs twitch:name or kick:name, not {bad[0]!r}")
@@ -112,12 +114,15 @@ def main() -> None:
             ap.error("--every only repeats --poll and --upload")
     if isinstance(sys.stdout, io.TextIOWrapper):  # not when stdout was swapped (tests, some service wrappers)
         sys.stdout.reconfigure(errors="replace")  # emoji in stream titles crash cp1252 consoles
-    if not any((a.url, a.refresh_trends, a.poll, a.dashboard, a.youtube_login, a.upload)):
+    if not any((a.url, a.refresh_trends, a.poll, a.dashboard, a.youtube_login, a.upload, a.run_steps)):
         ap.error("pass a VOD url (or --poll / --upload / --youtube-login / --refresh-trends / --dashboard)")
     if (a.url or a.poll) and not shutil.which("ffmpeg"):
         sys.exit("ffmpeg not found on PATH")
     setup_logging(a.out)
+    if runner := os.environ.get(runs.WATCH):  # a clipping step of a dashboard run: never outlive the runner
+        runs.watch_runner(int(runner))
     conn = db.connect(a.out / "clipit.db")
+    runs.reporting(conn)  # a step of a dashboard run: say what it's doing
     try:
         if a.every:
             while True:
@@ -147,6 +152,7 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
         log(f"wrote {ai.TRENDS}")
     if a.youtube_login:
         youtube.login()
+    upload_failed = False
     if a.upload and a.dry_run:
         log("dry run: not posting to YouTube")
     elif a.upload:
@@ -154,14 +160,16 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
             youtube.upload_next(conn, a.out, a.prioritize)
         except Exception:  # logged, and retried on a later run: the rest of this run (polling) still happens
             logger.exception("YouTube upload failed")
+            upload_failed = True
     if a.url:
         info = source.fetch_info(a.url)  # its id first, to mark the VOD's files in use (the dashboard can delete them)
         with db.running(conn, str(info["id"])):
             work, clips = process_vod(a.url, a.clips, a.ai, a.whisper, a.out, info=info)
         db.record_manual(conn, work.name, a.url)
         db.save_clips(conn, work.name, [{**c, "file": f"{work.name}/{c['file']}"} for c in clips])
+    vods_failed = 0
     if a.poll:
-        poll.poll(
+        vods_failed = poll.poll(
             conn,
             a.top,
             a.lang.upper(),
@@ -174,3 +182,10 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
         )
     if a.dashboard:
         dashboard.serve(a.out, a.port)
+    if a.run_steps:
+        runs.run(conn, a.out, a.run_steps)
+    # once the rest has run: the exit code tells a dashboard run (and any scheduler) the work failed
+    if upload_failed:
+        raise ClipitError("posting to YouTube failed (see above)")
+    if vods_failed:
+        raise ClipitError(f"{vods_failed} VOD{'s' if vods_failed > 1 else ''} failed to clip (see above)")

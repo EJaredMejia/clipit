@@ -106,6 +106,21 @@ MIGRATIONS = [
     """
     ALTER TABLE vods ADD COLUMN running_at TEXT;
     """,
+    # Runs started from the dashboard (clipit/runs.py), done by their own process so they outlive the dashboard.
+    """
+    CREATE TABLE runs (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        started_at TEXT NOT NULL,
+        ended_at   TEXT,                       -- NULL while it runs
+        beat_at    TEXT NOT NULL,              -- the runner refreshes it while alive: a stale one died
+        steps      TEXT NOT NULL,              -- JSON [{"name", "status"}]
+        stop       INTEGER NOT NULL DEFAULT 0  -- the user asked it to stop
+    );
+    """,
+    # What a run's step is doing now, as it says (runs.progress): JSON {"what", "vod", "stage", "count"}.
+    """
+    ALTER TABLE runs ADD COLUMN doing TEXT;
+    """,
 ]
 TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")
@@ -116,6 +131,7 @@ STALE_CLAIM = datetime.timedelta(minutes=30)  # a 'processing' row not refreshed
 HEARTBEAT = datetime.timedelta(minutes=5)  # how often a live run refreshes its claim, well under STALE_CLAIM
 MAX_ATTEMPTS = 3
 RETRY_AFTER = datetime.timedelta(hours=1)
+RUN_DEAD = datetime.timedelta(minutes=1)  # a run whose runner hasn't beaten for this long died (runs.BEAT is seconds)
 
 
 def connect(path: Path) -> sqlite3.Connection:
@@ -474,3 +490,68 @@ def stuck_uploads(conn: sqlite3.Connection, platform: str, before: datetime.date
 
 def _ts(value: str) -> datetime.datetime:
     return datetime.datetime.fromisoformat(value)
+
+
+def start_run(conn: sqlite3.Connection, steps: list[str], now: datetime.datetime | None = None) -> int | None:
+    """Record a new run, all its steps waiting. None when a live run is going: one at a time."""
+    now = now or utcnow()
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        if (last := latest_run(conn, now)) and last["running"]:
+            conn.execute("ROLLBACK")
+            return None
+        cur = conn.execute(
+            "INSERT INTO runs (started_at, beat_at, steps) VALUES (?, ?, ?)",
+            (now.isoformat(), now.isoformat(), json.dumps([{"name": n, "status": "waiting"} for n in steps])),
+        )
+        conn.execute("COMMIT")
+        return cur.lastrowid
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def beat_run(conn: sqlite3.Connection, run_id: int, steps: list[dict]) -> bool:
+    """The runner is alive and its steps are these. True when the user asked it to stop."""
+    conn.execute("UPDATE runs SET beat_at = ?, steps = ? WHERE id = ?", (utcnow().isoformat(), json.dumps(steps), run_id))
+    return bool(conn.execute("SELECT stop FROM runs WHERE id = ?", (run_id,)).fetchone()["stop"])
+
+
+def end_run(conn: sqlite3.Connection, run_id: int, steps: list[dict]) -> None:
+    now = utcnow().isoformat()
+    conn.execute("UPDATE runs SET beat_at = ?, ended_at = ?, steps = ? WHERE id = ?", (now, now, json.dumps(steps), run_id))
+
+
+def run_doing(conn: sqlite3.Connection, run_id: int, doing: dict, replace: bool = False) -> None:
+    """What the run is doing now, for the page: merged into what it said before (a None value removes that field)."""
+    sql = (
+        "UPDATE runs SET doing = ? WHERE id = ?"
+        if replace
+        else "UPDATE runs SET doing = json_patch(coalesce(doing, '{}'), ?) WHERE id = ?"
+    )
+    conn.execute(sql, (json.dumps(doing), run_id))
+
+
+def stop_run(conn: sqlite3.Connection) -> bool:
+    """Ask the live run to stop. False when there is none."""
+    last = latest_run(conn)
+    if not last or not last["running"]:
+        return False
+    conn.execute("UPDATE runs SET stop = 1 WHERE id = ?", (last["id"],))
+    return True
+
+
+def latest_run(conn: sqlite3.Connection, now: datetime.datetime | None = None) -> dict | None:
+    """The newest run as the page shows it. A runner that stopped beating died (PC restart, killed): its run shows as
+    ended where it last beat, its unfinished steps interrupted."""
+    row = conn.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 1").fetchone()
+    if not row:
+        return None
+    steps = json.loads(row["steps"])
+    ended = row["ended_at"]
+    if not ended and (now or utcnow()) - _ts(row["beat_at"]) > RUN_DEAD:
+        ended = row["beat_at"]
+        steps = [{**s, "status": "interrupted"} if s["status"] in ("waiting", "running") else s for s in steps]
+    return {"id": row["id"], "running": not ended, "stopping": bool(row["stop"]) and not ended,
+            "started": row["started_at"], "ended": ended, "steps": steps,
+            "doing": json.loads(row["doing"] or "{}") if not ended else {}}  # fmt: skip
