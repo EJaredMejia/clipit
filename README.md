@@ -111,6 +111,9 @@ clipit --dashboard
 Opens `http://127.0.0.1:8765` with every VOD and clip from `out/clipit.db`. It updates on its own while `--poll`
 runs in the background.
 
+- **Run:** click *Run now* to clip the latest VODs and then post the next due clip to YouTube (`clipit --poll`,
+  then `clipit --upload`), and watch each step and its output as it goes. A notice pops up when it ends, with how many
+  clips it made and posted. *Stop* kills it.
 - **Clips:** play each one, filter by streamer or search, sort by AI score, and copy the YouTube title, YouTube
   description and TikTok caption with one click.
 - **Review:** mark a clip *Keep* or *Skip*. The tiles at the top count what's left to review and what you kept but

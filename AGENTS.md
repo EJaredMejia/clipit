@@ -63,7 +63,7 @@ VODs to process; `cli.py` is the only place that parses flags, sets up logging, 
 | `facecam.py` | webcam overlay detection |
 | `render.py` | captions, ffmpeg render, `posts.md` |
 | `util.py` | logging, shell helpers with timeouts, atomic writes, `ClipitError` |
-| `dashboard.py` | `--dashboard`: local HTTP server (127.0.0.1) for the built page in `clipit/web/` and its JSON API, reads and writes via `db.py` |
+| `dashboard.py` | `--dashboard`: local HTTP server (127.0.0.1) for the built page in `clipit/web/` and its JSON API, reads and writes via `db.py`, and runs `--poll` then `--upload` as child processes when the page asks |
 | `youtube.py` | `--youtube-login` and `--upload`: posts kept clips to YouTube Shorts, records each post in `uploads` |
 
 `web/src/` is the dashboard page: `store.ts` is its zustand store (state, and every call to the server as plain
@@ -74,6 +74,7 @@ stays the only server: the page never talks to SQLite or anything else directly,
 | Page file | Job |
 |---|---|
 | `App.tsx` | header, navigation (pill bar on wide screens, tab bar on phones), the clip side sheet, the connection light |
+| `Run.tsx` | run `--poll` then `--upload` from the page: steps, live output, a notice when it ends |
 | `Review.tsx` | the deck: drag, throw, keys, undo |
 | `Post.tsx` | kept clips waiting to go up, one at a time |
 | `Library.tsx` | every clip as a frame: filters, search, opens the sheet |

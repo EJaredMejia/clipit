@@ -5,6 +5,7 @@ A standard-library HTTP server on 127.0.0.1. The page polls /api/data and saves 
 /api/delete-vod a VOD and every file of it but its clip videos (chat, transcripts, audio...);
 every database read and write goes through clipit.db. /api/reveal opens a clip's folder in the file manager, and
 /api/youtube posts a clip to YouTube Shorts right away (clipit.youtube, the same code --upload runs).
+/api/run starts or stops a run of `clipit --poll`, then `clipit --upload` (Runner), and GET /api/run shows how it goes.
 
 Security: other websites open in the same browser can send requests to localhost. So every request must carry our own
 Host (stops DNS rebinding), and writes must be JSON from our own Origin (a cross-site JSON POST needs a CORS
@@ -16,16 +17,18 @@ import functools
 import hashlib
 import http.server
 import json
+import os
 import re
 import sqlite3
 import subprocess
 import sys
+import threading
 import time
 import webbrowser
 from pathlib import Path
 
 from clipit import db, youtube
-from clipit.util import ClipitError, log, logger
+from clipit.util import ClipitError, log, logger, utcnow
 
 # the page, built from web/ by `npm run build` (committed, so running clipit needs no Node)
 STATIC = {
@@ -39,12 +42,17 @@ MAX_BODY = 32768  # a 5,000-character description, in UTF-8 and JSON escaped
 MAX_URL = 500
 REVEAL_TIMEOUT = 15
 DELETE_WAIT = 2.0  # seconds a locked video gets to be let go
+# A run from the page: clip the latest VODs, then post the next due clip, so this run's fresh clips can go up in it.
+STEPS = (("Clip the latest VODs", "--poll"), ("Post to YouTube", "--upload"))
+STEP_TIMEOUT = 8 * 3600  # seconds: a poll of a few hours-long VODs takes hours, a hung one is killed
+RUN_LINES = 1000  # output lines the page gets; the whole log is in out/logs/clipit.log
 
 
 def make_server(out: Path, port: int) -> http.server.ThreadingHTTPServer:
     db.connect(out / "clipit.db").close()  # create or upgrade it once, before requests race to
     try:
-        return http.server.ThreadingHTTPServer(("127.0.0.1", port), functools.partial(Handler, out.resolve()))
+        handler = functools.partial(Handler, out.resolve(), Runner(out.resolve()))
+        return http.server.ThreadingHTTPServer(("127.0.0.1", port), handler)
     except OSError as e:
         raise ClipitError(f"can't start the dashboard on port {port}: {e}") from e
 
@@ -65,8 +73,9 @@ def serve(out: Path, port: int) -> None:
 class Handler(http.server.BaseHTTPRequestHandler):
     timeout = 30  # a stalled browser connection frees its thread instead of holding it forever
 
-    def __init__(self, out: Path, *args) -> None:
+    def __init__(self, out: Path, runner: "Runner", *args) -> None:
         self.out = out  # set before super().__init__, which handles the request
+        self.runner = runner
         super().__init__(*args)
 
     def log_message(self, format, *args) -> None:
@@ -87,6 +96,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if self.headers.get("If-None-Match") == etag:  # the page polls: only send what changed
                 return self.send(304, headers={"ETag": etag})
             return self.send(200, body, headers={"ETag": etag})
+        if path == "/api/run":
+            return self.send(200, json.dumps(self.runner.snapshot()).encode())
         if m := re.fullmatch(r"/media/(\d+)", path):
             return self.video(int(m[1]))
         self.send(404, b'{"error": "not found"}')
@@ -95,6 +106,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if not self.ours():
             return
         req = self.read_json()
+        if self.path == "/api/run" and req.get("action") == "start":
+            if not self.runner.start():
+                return self.send(409, b'{"error": "a run is already going"}')
+            return self.send(200, b'{"ok": true}')
+        if self.path == "/api/run" and req.get("action") == "stop":
+            self.runner.stop()
+            return self.send(200, b'{"ok": true}')
         # asked for in so many words: an empty or broken body (read_json gives {}) must never delete anything
         if self.path == "/api/delete-skipped" and req.get("skipped") is True:
             deleted = failed = 0
@@ -256,6 +274,102 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+
+def command(flag: str, out: Path) -> list[str]:
+    return [sys.executable, "-m", "clipit", flag, "--out", str(out)]
+
+
+class Runner:
+    """Runs STEPS from the page, one run at a time, each step in its own clipit process with a watchdog, keeping the
+    output for the page. Kept in memory: the database and out/logs/ hold what a run did. A run outlives a closed
+    dashboard: its clipit keeps going and still logs to out/logs/."""
+
+    def __init__(self, out: Path) -> None:
+        self.out = out
+        self.lock = threading.Lock()
+        self.proc: subprocess.Popen | None = None
+        self.stopped = False
+        self.run: dict = {"id": 0, "running": False, "started": None, "ended": None, "steps": [], "lines": []}
+
+    def snapshot(self) -> dict:
+        with self.lock:
+            return {**self.run, "steps": [dict(s) for s in self.run["steps"]], "lines": list(self.run["lines"])}
+
+    def start(self) -> bool:
+        """Start a run in the background. False when one is already going."""
+        with self.lock:
+            if self.run["running"]:
+                return False
+            self.stopped = False
+            self.run = {
+                "id": self.run["id"] + 1,
+                "running": True,
+                "started": utcnow().isoformat(),
+                "ended": None,
+                "steps": [{"name": name, "status": "waiting"} for name, _ in STEPS],
+                "lines": [],
+            }
+        threading.Thread(target=self.go, daemon=True).start()
+        return True
+
+    def stop(self) -> None:
+        """Kill the step that's running and skip the rest. An upload killed mid-way is never retried on its own."""
+        with self.lock:
+            self.stopped = True
+            proc = self.proc
+        if proc and proc.poll() is None:
+            self.say("stopped from the dashboard")
+            proc.kill()
+
+    def say(self, line: str) -> None:
+        with self.lock:
+            self.run["lines"] = [*self.run["lines"][-(RUN_LINES - 1) :], line]
+
+    def go(self) -> None:
+        for step, (_, flag) in zip(self.run["steps"], STEPS, strict=True):
+            with self.lock:
+                step["status"] = "stopped" if self.stopped else "running"
+            if step["status"] == "stopped":
+                continue
+            try:
+                code = self.step(command(flag, self.out))
+            except Exception as e:  # can't start python, or the pipe broke: the next step still runs
+                logger.exception("dashboard run step %s failed", flag)
+                self.say(f"couldn't run clipit {flag}: {e}")
+                code = -1
+            with self.lock:
+                step["status"] = "stopped" if self.stopped else "done" if code == 0 else "failed"
+        with self.lock:
+            self.proc = None
+            self.run["running"] = False
+            self.run["ended"] = utcnow().isoformat()
+
+    def step(self, cmd: list[str]) -> int:
+        # utf-8: emoji in stream titles; unbuffered: the page sees each line as it's logged
+        env = {**os.environ, "PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
+        proc = subprocess.Popen(
+            cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            encoding="utf-8", errors="replace", env=env,
+        )  # fmt: skip
+        with self.lock:
+            self.proc = proc
+            if self.stopped:  # Stop came while it was starting
+                proc.kill()
+
+        def hung() -> None:
+            self.say(f"killed: still running after {STEP_TIMEOUT // 3600} h")
+            proc.kill()
+
+        watchdog = threading.Timer(STEP_TIMEOUT, hung)  # the read loop below blocks, so the timeout lives in a timer
+        watchdog.daemon = True
+        watchdog.start()
+        try:
+            for line in proc.stdout or ():
+                self.say(line.rstrip())
+            return proc.wait()
+        finally:
+            watchdog.cancel()
 
 
 def remove(path: Path, deadline: float) -> None:

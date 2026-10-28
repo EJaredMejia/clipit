@@ -1,7 +1,9 @@
 import json
 import sqlite3
 import subprocess
+import sys
 import threading
+import time
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -319,3 +321,65 @@ def test_delete_vod_refuses_one_a_manual_run_is_using(tmp_path: Path) -> None:
             conn.execute("UPDATE vods SET deleted = 0")  # undo, to check the lease is let go below
     with db.deleting_vod(conn, "v3") as clips:
         assert clips == []
+
+
+def wait_run(runner: dashboard.Runner) -> dict:
+    for _ in range(200):
+        if not (run := runner.snapshot())["running"]:
+            return run
+        time.sleep(0.05)
+    raise AssertionError("the run never ended")
+
+
+def fake_steps(monkeypatch: pytest.MonkeyPatch, scripts: dict[str, str]) -> None:
+    monkeypatch.setattr(dashboard, "command", lambda flag, out: [sys.executable, "-c", scripts[flag]])
+
+
+def test_run_from_the_page_runs_every_step_even_after_one_fails(site: Site, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_steps(monkeypatch, {"--poll": "print('clipping caedrel ✓'); raise SystemExit(1)", "--upload": "print('posted')"})
+    url = site[0]
+    assert call(url + "/api/run", {"action": "start"})[0] == 200
+    run = json.loads(call(url + "/api/run")[2])
+    for _ in range(200):
+        if not run["running"]:
+            break
+        time.sleep(0.05)
+        run = json.loads(call(url + "/api/run")[2])
+    assert [s["status"] for s in run["steps"]] == ["failed", "done"]
+    assert run["lines"] == ["clipping caedrel ✓", "posted"]
+    assert run["id"] == 1 and run["ended"]
+
+
+def test_one_run_at_a_time_and_stop_skips_the_rest(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_steps(
+        monkeypatch, {"--poll": "import time; print('working', flush=True); time.sleep(30)", "--upload": "print('posted')"}
+    )
+    runner = dashboard.Runner(tmp_path)
+    assert runner.start()
+    assert not runner.start()
+    while not runner.snapshot()["lines"]:  # the step is running
+        time.sleep(0.05)
+    runner.stop()
+    run = wait_run(runner)
+    assert [s["status"] for s in run["steps"]] == ["stopped", "stopped"]
+    assert "posted" not in run["lines"]
+    assert runner.start()  # a new run after the stop
+    assert runner.snapshot()["id"] == 2
+
+
+def test_a_hung_step_is_killed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_steps(monkeypatch, {"--poll": "import time; time.sleep(30)", "--upload": "print('posted')"})
+    monkeypatch.setattr(dashboard, "STEP_TIMEOUT", 0.5)
+    runner = dashboard.Runner(tmp_path)
+    runner.start()
+    run = wait_run(runner)
+    assert [s["status"] for s in run["steps"]] == ["failed", "done"]
+    assert run["lines"][-1] == "posted"
+
+
+def test_run_keeps_only_the_last_lines(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_steps(monkeypatch, {"--poll": "for i in range(30): print(i)", "--upload": "pass"})
+    monkeypatch.setattr(dashboard, "RUN_LINES", 10)
+    runner = dashboard.Runner(tmp_path)
+    runner.start()
+    assert wait_run(runner)["lines"] == [str(i) for i in range(20, 30)]

@@ -1,4 +1,4 @@
-import { GalleryVerticalEnd, LayoutGrid, type LucideIcon, MonitorPlay, Send } from "lucide-react";
+import { GalleryVerticalEnd, LayoutGrid, type LucideIcon, MonitorPlay, Play, Send } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
 import { Toaster } from "@/components/ui/sonner";
@@ -7,10 +7,11 @@ import { ClipEditor } from "./Editor";
 import { Library } from "./Library";
 import { Post } from "./Post";
 import { Review } from "./Review";
-import { clipOf, load, openClip, POLL_MS, postQueue, showTab, type Tab, TABS, useClipit } from "./store";
+import { Run } from "./Run";
+import { clipOf, load, loadRun, openClip, POLL_MS, postQueue, RUN_MS, showTab, type Tab, TABS, useClipit } from "./store";
 import { Vods } from "./Vods";
 
-const ICONS: Record<Tab, LucideIcon> = { review: GalleryVerticalEnd, post: Send, library: LayoutGrid, vods: MonitorPlay };
+const ICONS: Record<Tab, LucideIcon> = { run: Play, review: GalleryVerticalEnd, post: Send, library: LayoutGrid, vods: MonitorPlay };
 
 export function App() {
   const tab = useClipit((s) => s.tab);
@@ -18,17 +19,21 @@ export function App() {
   useEffect(() => {
     document.addEventListener("visibilitychange", load);
     const poll = setInterval(load, POLL_MS);
+    const runs = setInterval(loadRun, RUN_MS);
     void load();
+    void loadRun();
     return () => {
       document.removeEventListener("visibilitychange", load);
       clearInterval(poll);
+      clearInterval(runs);
     };
   }, []);
   // the browser tab says when clips are waiting, so a background tab still tells you
   const waiting = useClipit((s) => s.queue.length + postQueue(s).length);
+  const running = useClipit((s) => !!s.run?.running);
   useEffect(() => {
-    document.title = waiting ? `(${waiting}) clip-it` : "clip-it";
-  }, [waiting]);
+    document.title = `${waiting ? `(${waiting}) ` : ""}clip-it${running ? " · running" : ""}`;
+  }, [waiting, running]);
   useEffect(() => {
     for (const v of document.querySelectorAll<HTMLVideoElement>("[data-panel][hidden] video")) v.pause();
     scrollTo({ top: 0 });
@@ -47,7 +52,7 @@ export function App() {
         {(Object.keys(TABS) as Tab[]).map((t) => (
           // every tab stays mounted, so the deck's video and the Library's filters survive switching
           <div key={t} data-panel={t} hidden={tab !== t} aria-label={TABS[t]}>
-            {t === "review" ? <Review /> : t === "post" ? <Post /> : t === "library" ? <Library /> : <Vods />}
+            {t === "run" ? <Run /> : t === "review" ? <Review /> : t === "post" ? <Post /> : t === "library" ? <Library /> : <Vods />}
           </div>
         ))}
       </main>
@@ -61,6 +66,7 @@ export function App() {
 // What waits on you in each section, next to its name: clips to review, clips to post, VODs that failed.
 function useCounts(): Record<Tab, number> {
   return {
+    run: 0, // a dot while running, below
     review: useClipit((s) => s.queue.length),
     post: useClipit((s) => postQueue(s).length),
     library: 0,
@@ -73,8 +79,11 @@ function Nav({ place }: { place: "top" | "bottom" }) {
   const tab = useClipit((s) => s.tab);
   const loaded = useClipit((s) => s.loaded);
   const counts = useCounts();
+  const running = useClipit((s) => !!s.run?.running);
   const badge = (t: Tab) =>
-    loaded && counts[t] > 0 ? (
+    t === "run" && running ? (
+      <span className="size-2 rounded-full bg-warn" role="img" aria-label="running" />
+    ) : loaded && counts[t] > 0 ? (
       <span
         className={`min-w-5 rounded-full px-1.5 text-center font-heading text-xs leading-5 font-bold tabular-nums ${t === "vods" ? "bg-skip-bg text-skip" : "bg-primary/15 text-primary"}`}
         aria-label={t === "vods" ? `${counts[t]} failed` : `${counts[t]} waiting`}
@@ -104,7 +113,7 @@ function Nav({ place }: { place: "top" | "bottom" }) {
   return (
     <nav
       aria-label="Sections"
-      className="chrome fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 border-t border-border/60 pb-[env(safe-area-inset-bottom)] md:hidden"
+      className="chrome fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-border/60 pb-[env(safe-area-inset-bottom)] md:hidden"
     >
       {(Object.keys(TABS) as Tab[]).map((t) => {
         const Icon = ICONS[t];
