@@ -35,6 +35,12 @@ def test_candidates_alternate_sites_in_each_tier():
     assert got[4][1] == "ks1" and sorted(got[5:]) == [("small", "ts1"), ("small", "ts2")]
 
 
+def test_blocked_streamers_are_never_candidates():
+    streams = [("Pokimane", 30000, "EN", poll.twitch), ("big1", 20000, "EN", poll.twitch)]
+    got = [s[0] for _, s in poll.candidates(streams, "EN", trending=[("kick", "POKIMANE"), ("twitch", "pokimane")])]
+    assert got == ["big1"]
+
+
 def test_trending_streamers_come_first_live_or_not_and_only_once():
     streams = [("big1", 30000, "EN", poll.twitch), ("Clavicular", 9000, "EN", poll.kick), ("s1", 1500, "EN", poll.twitch)]
     trending = [("kick", "stableronaldo"), ("kick", "clavicular")]

@@ -19,6 +19,8 @@ from clipit.util import ROOT, ClipitError, log, logger, utcnow
 
 SMALL = (300, 2000)  # viewer range for "smaller streamers": below ~300 there's too little chat to find moments
 MAX_AGE = datetime.timedelta(days=2)  # older VODs aren't worth clipping anymore
+# Never clipped, on any site, even when trending or prioritized: known to copyright-strike clip channels until banned.
+BLOCKED = frozenset({"pokimane"})
 
 
 Stream = tuple[str, int, str, ModuleType]  # (login, viewers, language, site module: twitch or kick)
@@ -52,9 +54,11 @@ def candidates(
     """(tier, stream) in priority order: streamers everyone is talking about (live or not), then big live streamers
     biggest first, then smaller streamers in random order, each viewer tier alternating between Twitch and Kick."""
     sites = {site.__name__.rsplit(".", 1)[1]: site for site in SITES}
-    hot: list[Stream] = [(name, 0, "", sites[site]) for site, name in trending]
+    hot: list[Stream] = [(name, 0, "", sites[site]) for site, name in trending if name.lower() not in BLOCKED]
     picked = {(s[0].lower(), s[3]) for s in hot}  # a trending streamer who's also live would take two slots
-    streams = [s for s in streams if (not lang or s[2] == lang) and (s[0].lower(), s[3]) not in picked]
+    streams = [
+        s for s in streams if (not lang or s[2] == lang) and (s[0].lower(), s[3]) not in picked and s[0].lower() not in BLOCKED
+    ]
     small = [s for s in streams if SMALL[0] <= s[1] <= SMALL[1]]
     (rng or random.Random()).shuffle(small)
     top = hot + mix([s for s in streams if s[1] > SMALL[1]])
