@@ -41,9 +41,10 @@ def start(conn: sqlite3.Connection, out: Path) -> int | None:
     run_id = db.start_run(conn, [name for name, _, _ in STEPS])
     if run_id is None:
         return None
+    kw: dict  # declared outside the branches: pyright skips the branch that isn't for its platform
     if sys.platform == "win32":
         # no console window, and Ctrl+C in the dashboard's terminal doesn't reach it
-        kw: dict = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
+        kw = {"creationflags": subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP}
     else:
         kw = {"start_new_session": True}
     try:
