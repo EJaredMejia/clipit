@@ -4,6 +4,7 @@ Security: prompts contain text from strangers (stream titles, chat, speech), so 
 and in an empty folder. Only trend research gets web tools, and its prompt contains no untrusted input.
 """
 
+import base64
 import datetime
 import glob
 import json
@@ -12,6 +13,7 @@ import re
 import shutil
 import subprocess
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from clipit import codex, db
@@ -28,6 +30,7 @@ CLIP_LEN = (15, 60)  # seconds, as the prompt asks; longer picks are trimmed to 
 # a leading "Streamer" is the unnamed subject; later ones may be someone else, "streamers" always are
 STREAMER = re.compile(r"^(?:the |this )?streamer\b", re.I)
 ANSI = re.compile(r"\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07]*\x07|[@-Z\\-_])")  # terminal escape sequences
+CLAUDE_CLI = re.compile(r"claude(\.exe|\.cmd)?\"?\s+-p\b", re.I)  # Claude Code in print mode, as _claude() writes it
 
 PROMPT = """You are the editor behind a top TikTok / YouTube Shorts clip channel. Today is {date}.
 
@@ -120,17 +123,49 @@ def default_trends_ai() -> str | None:
     return "codex" if codex.find_cli() else None
 
 
-def ask_ai(cmd: str, prompt: str, schema: dict = codex.PICKS_SCHEMA) -> str:
-    """The AI's answer to prompt. schema: the JSON shape Codex is held to (other CLIs are only told it in the prompt)."""
+def sees_images(cmd: str | None) -> bool:
+    """Whether ask_ai can show this AI pictures: Codex and Claude Code's CLI can, other CLIs only get text."""
+    return cmd == "codex" or bool(cmd and CLAUDE_CLI.search(cmd))
+
+
+def claude_result(out: str) -> str:
+    """The answer in Claude Code's stream-json output: its final "result" event."""
+    for line in reversed(out.splitlines()):
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "result":
+            if event.get("is_error") or not isinstance(event.get("result"), str):
+                raise ClipitError(f"Claude Code failed: {str(event.get('result'))[:500]}")
+            return event["result"]
+    raise ClipitError(f"no answer in Claude Code's output: {out[-500:]}")
+
+
+def ask_ai(cmd: str, prompt: str, schema: dict = codex.PICKS_SCHEMA, images: Sequence[Path] = ()) -> str:
+    """The AI's answer to prompt. schema: the JSON shape Codex is held to (other CLIs are only told it in the prompt).
+    images: JPEG pictures shown with the prompt, only for an AI that sees_images."""
     if cmd == "codex":
-        return codex.ask(prompt, schema=schema, timeout=AI_TIMEOUT)
+        return codex.ask(prompt, schema=schema, timeout=AI_TIMEOUT, images=images)
+    stdin = prompt
+    if images:  # Claude Code takes pictures in a stream-json message, still with no tools
+        cmd += " --input-format stream-json --output-format stream-json --verbose"
+        pictures = [
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/jpeg", "data": base64.b64encode(p.read_bytes()).decode()},
+            }
+            for p in images
+        ]
+        message = {"role": "user", "content": [*pictures, {"type": "text", "text": prompt}]}
+        stdin = json.dumps({"type": "user", "message": message}) + "\n"
     # The command string is the user's own config, never untrusted data; the prompt goes in on stdin.
     with tempfile.TemporaryDirectory() as empty:  # nothing local for an AI tool to read
         try:
             r = subprocess.run(
                 cmd,
                 shell=True,
-                input=prompt,
+                input=stdin,
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -145,7 +180,8 @@ def ask_ai(cmd: str, prompt: str, schema: dict = codex.PICKS_SCHEMA) -> str:
             f"AI command failed: {cmd}\n{(r.stdout + r.stderr)[-2000:]}\n"
             "(Claude says 'Not logged in'? run `claude` once and type /login)"
         )
-    return ANSI.sub("", r.stdout)  # some CLIs (ollama run) emit cursor codes even into a pipe
+    out = ANSI.sub("", r.stdout)  # some CLIs (ollama run) emit cursor codes even into a pipe
+    return claude_result(out) if images else out
 
 
 def refresh_trends(cmd: str) -> None:

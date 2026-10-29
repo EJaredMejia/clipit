@@ -200,3 +200,20 @@ def test_clean_clamps_scores_to_the_1_to_10_scale():
     # an inflated 15 must not outrank the scale db.AUTO_SCORE is set on, nor a negative sink below it
     got = ai.clean([{"start": 0, "end": 20, "score": 15}, {"start": 30, "end": 50, "score": -4}], 100.0, 5)
     assert [c["score"] for c in got] == [10.0, 1.0]
+
+
+def test_ask_ai_shows_pictures_to_claude_code_and_reads_its_stream_json_answer(tmp_path):
+    pic = tmp_path / "frame.jpg"
+    pic.write_bytes(b"jpeg bytes")
+    # a stand-in for `claude -p`: answers with the kinds of content it was sent, as Claude Code's final result event
+    script = (
+        "import sys, json; m = json.loads(sys.stdin.readline()); "
+        "print(json.dumps({'type': 'system'})); "
+        "print(json.dumps({'type': 'result', 'result': ' '.join(c['type'] for c in m['message']['content'])}))"
+    )
+    assert ai.ask_ai(f'"{sys.executable}" -c "{script}"', "prompt", images=[pic, pic]) == "image image text"
+    failed = "import json; print(json.dumps({'type': 'result', 'is_error': True, 'result': 'Not logged in'}))"
+    with pytest.raises(ClipitError, match="Not logged in"):
+        ai.ask_ai(f'"{sys.executable}" -c "{failed}"', "prompt", images=[pic])
+    assert ai.sees_images('"C:/x/claude.CMD" -p --tools ""') and ai.sees_images("codex")
+    assert not ai.sees_images("ollama run qwen3:30b")

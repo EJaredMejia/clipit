@@ -137,18 +137,20 @@ def process_vod(
     picks = cached_json(work / "picks.json", ask)  # delete picks.json to re-ask the AI
     words = [w for segs in tr.values() for s in segs for w in s["words"]]
     picks_file, posts_file = ("picks_edited.json", "posts_edited.md") if high_effort else ("picks.json", "posts.md")
+    urls = source.stream_urls(url)
+    layouts = webcam_layouts(work, urls, dur)
     if high_effort:
         (work / "edit").mkdir(exist_ok=True)
         edited = []
         for i, p in enumerate(picks, 1):  # each one cached on its own: a crash keeps the clips already done
             log(f"editing clip {i}/{len(picks)} until it's done (up to {edit.MAX_ROUNDS} AI reviews)")
             progress("The AI is editing and reviewing the clips", i - 1, len(picks))
-            polish = functools.partial(edit.polish, ai_cmd, info, p, cands, words, loud, work / "edit")
+            polish = functools.partial(
+                edit.polish, ai_cmd, info, p, cands, words, loud, work / "edit", look=preview(urls, layouts, words)
+            )
             edited.append(cached_json(work / "edit" / f"{p['start']:.1f}-{p['end']:.1f}.json", polish))
         picks = edited
 
-    urls = source.stream_urls(url)
-    layouts = webcam_layouts(work, urls, dur)
     (work / "clips").mkdir(exist_ok=True)
     rendered, (login, site) = [], streamer(info)
     for i, c in enumerate(picks, 1):
@@ -208,6 +210,25 @@ def render_clip(urls: list[str], layouts: list, c: dict, words: list, out: Path)
     render.render(urls, c, [w for w in words if c["start"] - 0.05 <= w[0] and w[1] <= c["end"] + 0.3], out, cam)
 
 
+def preview(urls: list[str], layouts: list, words: list) -> Callable[[dict, Path], list[tuple[float, Path]]]:
+    """edit.polish's look: a version rendered into folder, as the frames its review sees. A failed render logs a
+    warning and the review goes on without frames (the clip's real render reports the error too)."""
+
+    def look(clip: dict, folder: Path) -> list[tuple[float, Path]]:
+        folder.mkdir(exist_ok=True)
+        video = folder / "preview.mp4"
+        try:
+            render_clip(urls, layouts, clip, words, video)
+            return render.frames(video, edit.shown(clip), folder)
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+            logger.warning("couldn't render frames for the review: %s", str(getattr(e, "stderr", "") or e)[-500:])
+            return []
+        finally:
+            video.unlink(missing_ok=True)
+
+    return look
+
+
 def reedit(url: str, clip: dict, request: str, at: float | None, ai_cmd: str | None, out_root: Path) -> dict:
     """The clip (db.reedit_source) edited again by the AI until it does what the user asked, and rendered: the edited
     clip of its moment, its file relative to out_root. `at` is the second of the clip's video they marked. Needs the
@@ -229,13 +250,15 @@ def reedit(url: str, clip: dict, request: str, at: float | None, ai_cmd: str | N
     log(f"re-editing clip {clip['id']}: {request}")
     progress("The AI is re-editing the clip and reviewing it")
     at_vod = None if at is None else edit.source_time(pick, at)
-    new = edit.polish(ai_cmd, info, pick, candidates(windows, tr, msgs, loud, rate), words, loud, work / "edit", request, at_vod)
+    urls = source.stream_urls(url)
+    layouts = webcam_layouts(work, urls, float(info["duration"]))
+    cands = candidates(windows, tr, msgs, loud, rate)
+    look = preview(urls, layouts, words)
+    new = edit.polish(ai_cmd, info, pick, cands, words, loud, work / "edit", request, at_vod, look)
     login, site = streamer(info)
     c = {**pick, **new, "idx": clip["idx"], "streamer": login, "site": site}
     c["file"] = clip_file(clip["idx"], c, time.strftime("_%Y%m%d%H%M%S"))
     c["caption"], c["youtube"] = render.post_texts(c)
-    urls = source.stream_urls(url)
-    layouts = webcam_layouts(work, urls, float(info["duration"]))
     (work / "clips").mkdir(exist_ok=True)
     progress("Rendering the clip")
     try:

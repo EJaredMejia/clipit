@@ -119,7 +119,7 @@ def test_high_effort_edits_each_pick_into_files_of_its_own(stages, monkeypatch):
     work, (plain,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
     polished = []
 
-    def polish(cmd, info, pick, cands, words, loud, folder):
+    def polish(cmd, info, pick, cands, words, loud, folder, look):
         polished.append(pick)
         return {
             **pick,
@@ -141,7 +141,7 @@ def test_reedit_starts_from_how_the_ai_made_the_clip_and_renders_a_new_video(sta
     work, (plain,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
     asked = []
 
-    def polish(cmd, info, pick, cands, words, loud, folder, request, at):
+    def polish(cmd, info, pick, cands, words, loud, folder, request, at, look):
         asked.append((pick["title"], request, at))
         return {**pick, "edit": {"cuts": [], "zooms": [], "sfx": [{"at": at, "sound": "boom"}], "texts": [], "emphasis": []}}
 
