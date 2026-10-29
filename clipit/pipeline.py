@@ -17,7 +17,7 @@ from typing import Any
 
 import numpy as np
 
-from clipit import ai, edit, facecam, kick, moments, render, runs, source, transcribe, twitch
+from clipit import ai, db, edit, facecam, kick, moments, render, runs, source, transcribe, twitch
 from clipit.util import ROOT, ClipitError, log, logger, mmss, slug, write_atomic
 
 MAX_DURATION = 48 * 3600  # bounds disk use (~2.5 GB of audio); longer VODs are skipped
@@ -80,8 +80,8 @@ def process_vod(
     high_effort: bool = False,
 ) -> tuple[Path, list[dict]]:
     """Make up to n_clips clips from a VOD. Returns (work folder, rendered clips). Raises ClipitError when it can't.
-    `info` is source.fetch_info(url), when the caller already has it. high_effort: the AI edits each pick and reviews
-    it until it's done (clipit.edit), into picks_edited.json and posts_edited.md so the plain clips stay as they are."""
+    `info` is source.fetch_info(url), when the caller already has it. high_effort: the AI edits each pick scored db.AUTO_SCORE+
+    and reviews it until it's done (clipit.edit), into picks_edited.json and posts_edited.md so the plain clips stay as they are."""
     info = info or source.fetch_info(url)
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(info["id"])):  # it becomes a folder name
         raise ClipitError(f"unexpected video id {info['id']!r}")
@@ -141,6 +141,10 @@ def process_vod(
         (work / "edit").mkdir(exist_ok=True)
         edited = []
         for i, p in enumerate(picks, 1):  # each one cached on its own: a crash keeps the clips already done
+            if p["score"] < db.AUTO_SCORE:  # too weak to ever post on its own: not worth the AI's editing rounds
+                log(f"clip {i}/{len(picks)} scored {p['score']:g}, under {db.AUTO_SCORE}: kept plain, not edited")
+                edited.append(p)
+                continue
             log(f"editing clip {i}/{len(picks)} until it's done (up to {edit.MAX_ROUNDS} AI reviews)")
             progress("The AI is editing and reviewing the clips", i - 1, len(picks))
             polish = functools.partial(edit.polish, ai_cmd, info, p, cands, words, loud, work / "edit")

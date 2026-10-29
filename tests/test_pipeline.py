@@ -136,6 +136,19 @@ def test_high_effort_edits_each_pick_into_files_of_its_own(stages, monkeypatch):
     assert (work / "posts_edited.md").exists()
 
 
+def test_high_effort_leaves_low_scored_picks_plain(stages, monkeypatch):
+    _, out = stages
+    picked = pipeline.ai.pick_clips
+
+    def weak(*a):
+        return [{**c, "score": pipeline.db.AUTO_SCORE - 1} for c in picked(*a)]
+
+    monkeypatch.setattr(pipeline.ai, "pick_clips", weak)
+    monkeypatch.setattr(pipeline.edit, "polish", lambda *a: pytest.fail("a weak pick was sent to the AI editor"))
+    _, (clip,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out, high_effort=True)
+    assert "edit" not in clip and not clip["file"].endswith("_edited.mp4")
+
+
 def test_reedit_starts_from_how_the_ai_made_the_clip_and_renders_a_new_video(stages, monkeypatch):
     _, out = stages
     work, (plain,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
