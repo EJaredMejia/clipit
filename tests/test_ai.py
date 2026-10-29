@@ -91,9 +91,10 @@ def test_pick_clips_takes_no_picks_as_an_answer_but_not_picks_that_all_fail_the_
     info = {"duration": 100, "uploader": "kaicenat"}
     monkeypatch.setattr(ai, "ask_ai", lambda cmd, prompt: '{"name": "Kai Cenat", "clips": []}')
     assert ai.pick_clips("fake", info, [], 3, tmp_path) == []  # a dull VOD: done, with no clips
-    monkeypatch.setattr(ai, "ask_ai", lambda cmd, prompt: '{"clips": [{"start": 0, "end": 2, "hook": "too short"}]}')
-    with pytest.raises(ClipitError):
-        ai.pick_clips("fake", info, [], 3, tmp_path)
+    for bad in ('{"clips": [{"start": 0, "end": 2, "hook": "too short"}]}', "{}", '{"clips": null}'):
+        monkeypatch.setattr(ai, "ask_ai", lambda cmd, prompt, bad=bad: bad)
+        with pytest.raises(ClipitError):
+            ai.pick_clips("fake", info, [], 3, tmp_path)
 
 
 def test_trending_streamers_read_from_the_brief_checked_and_only_while_fresh(monkeypatch, tmp_path):

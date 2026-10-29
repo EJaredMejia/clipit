@@ -270,6 +270,6 @@ def pick_clips(cmd: str | None, info: dict, cands: list[dict], n: int, work: Pat
         )
     except (ValueError, AttributeError):
         raise ClipitError(f"AI reply wasn't valid JSON, see {work / 'ai_reply.txt'}") from None
-    if not picks and reply_json.get("clips"):  # it picked some but none passed the checks: a bad reply, retry the VOD
+    if not picks and reply_json.get("clips") != []:  # only an explicit empty list means "nothing good": else retry the VOD
         raise ClipitError(f"AI picked no usable clips, see {work / 'ai_reply.txt'}")
     return picks
