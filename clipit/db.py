@@ -311,12 +311,14 @@ def status(conn: sqlite3.Connection, vod_id: str) -> str | None:
 
 
 def save_clips(conn: sqlite3.Connection, vod_id: str, clips: list[dict]) -> None:
-    """Make the VOD's clips of these variants exactly these: plain ones, or high-effort edits (clips with an "edit"),
-    so saving one kind never drops the other. Keyed by (vod, start, end, variant): the same moment keeps its clip id
+    """Make the VOD's clips of this variant exactly these: high-effort edits (clips with an "edit") when there are any,
+    else plain ones, so saving one kind never drops the other. A high-effort run's weak picks, left plain, are added
+    without replacing the plain clips of a plain run. Keyed by (vod, start, end, variant): the same moment keeps its clip id
     across re-renders and re-picks, so anything that references it (uploads) stays right."""
     now = utcnow().isoformat()  # one time for the batch: clips made together sort by rank
     clips = [{**c, "variant": variant(c)} for c in clips]
     keep = {(c["start"], c["end"], c["variant"]) for c in clips}
+    kinds = {"edited"} if any(c["variant"] == "edited" for c in clips) else {c["variant"] for c in clips}
     reedited = "SELECT result_id FROM reedits WHERE result_id IS NOT NULL"  # the user's own re-edit outlives re-picks
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -326,7 +328,7 @@ def save_clips(conn: sqlite3.Connection, vod_id: str, clips: list[dict]) -> None
             (vod_id,),
         ).fetchall()
         for row in rows:
-            if row["variant"] in {k[2] for k in keep} and (row["start_s"], row["end_s"], row["variant"]) not in keep:
+            if row["variant"] in kinds and (row["start_s"], row["end_s"], row["variant"]) not in keep:
                 conn.execute(
                     f"""DELETE FROM clips WHERE id = ? AND verdict IS NOT 'keep' AND id NOT IN (SELECT clip_id FROM uploads)
                         AND id NOT IN ({reedited})""",  # noqa: S608 (a constant)
