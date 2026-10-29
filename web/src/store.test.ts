@@ -14,7 +14,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 const clip = (id: number): Clip => ({
   id, vod_id: "v1", idx: id, file: `v1/clips/${id}.mp4`, start_s: 0, end_s: 20, title: `clip ${id}`, hook: "", caption: "",
   youtube: "", trend: "", sound: "", score: 7, why: "", verdict: null, edited: 0, created_at: "2026-10-24", vod_url: null,
-  streamer: "s", uploads: {},
+  streamer: "s", uploads: {}, variant: "plain", reedits: [],
 }); // prettier-ignore
 
 afterEach(() => {
@@ -265,7 +265,8 @@ test("Kept shows only kept clips not posted anywhere yet, Posted the rest", () =
 });
 
 const run = (over: Partial<Run>): Run => ({
-  id: 1, running: false, stopping: false, started: "2026-10-27T10:00:00+00:00", ended: null, lines: [], doing: {},
+  id: 1, running: false, stopping: false, started: "2026-10-27T10:00:00+00:00", ended: null, lines: [], doing: {}, job: null,
+  settings: { top: 6, lang: "EN", clips: 6, high_effort: false, prioritize: [], upload: true },
   steps: [{ name: "Clip the latest VODs", status: "done" }, { name: "Post to YouTube", status: "done" }], ...over,
 }); // prettier-ignore
 
@@ -295,6 +296,19 @@ test("the page tells you when a run it watched ends, and names the step that fai
   await loadRun(); // a run that had ended before the page saw it running: no notice either
   expect(toast.error).toHaveBeenCalledTimes(1);
   expect(toast.success).not.toHaveBeenCalled();
+});
+
+test("a re-edit's end says how the re-edit went, not how many clips a poll made", async () => {
+  const job = { reedit: 1, request: "a boom when he falls", at: 2 };
+  const steps = [{ name: "Re-edit the clip", status: "running" as const }];
+  let served = run({ running: true, job, steps });
+  vi.stubGlobal("fetch", async (url: string) => json(url === "/api/run" ? served : { vods: [], clips: [] }));
+  vi.mocked(toast.success).mockClear();
+  set({ run: null });
+  await loadRun();
+  served = run({ ended: "2026-10-27T11:00:00+00:00", job, steps: [{ name: "Re-edit the clip", status: "done" }] });
+  await loadRun();
+  expect(vi.mocked(toast.success).mock.calls.map((c) => c[0])).toEqual(["Re-edit done: the clip has its new video"]);
 });
 
 test("an older answer that arrives late never puts a finished run back to running", async () => {

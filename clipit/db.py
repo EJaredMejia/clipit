@@ -156,6 +156,25 @@ MIGRATIONS = [
     INSERT INTO uploads SELECT * FROM uploads_keep;
     DROP TABLE uploads_keep;
     """,
+    # The dashboard's run settings (runs.SETTINGS), each key's value JSON; what each run was asked to do (JSON: the
+    # settings it started with, or a clip to re-edit); each clip as the AI made it (JSON, what a re-edit starts from);
+    # and the re-edits the user asked for (clipit --reedit): result_id is the edited clip it made, NULL when it failed.
+    """
+    CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+    ALTER TABLE runs ADD COLUMN job TEXT;
+    ALTER TABLE clips ADD COLUMN pick TEXT;
+    CREATE TABLE reedits (
+        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+        clip_id    INTEGER REFERENCES clips (id) ON DELETE SET NULL,
+        result_id  INTEGER REFERENCES clips (id) ON DELETE CASCADE,
+        request    TEXT NOT NULL,
+        at_s       REAL,                 -- the moment the user marked, in seconds of the clip's video
+        run_id     INTEGER,              -- the dashboard run doing it, NULL from the command line
+        created_at TEXT NOT NULL,
+        edit_score REAL,
+        error      TEXT
+    );
+    """,
 ]
 TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")
@@ -288,36 +307,118 @@ def save_clips(conn: sqlite3.Connection, vod_id: str, clips: list[dict]) -> None
     """Make the VOD's clips of these variants exactly these: plain ones, or high-effort edits (clips with an "edit"),
     so saving one kind never drops the other. Keyed by (vod, start, end, variant): the same moment keeps its clip id
     across re-renders and re-picks, so anything that references it (uploads) stays right."""
-    now = utcnow().isoformat()
-    clips = [{**c, "variant": "edited" if c.get("edit") else "plain"} for c in clips]
+    now = utcnow().isoformat()  # one time for the batch: clips made together sort by rank
+    clips = [{**c, "variant": variant(c)} for c in clips]
     keep = {(c["start"], c["end"], c["variant"]) for c in clips}
+    reedited = "SELECT result_id FROM reedits WHERE result_id IS NOT NULL"  # the user's own re-edit outlives re-picks
     conn.execute("BEGIN IMMEDIATE")
     try:
-        # picks the AI dropped are deleted, unless the user kept or posted them: those stay in the catalog
-        rows = conn.execute("SELECT id, start_s, end_s, variant FROM clips WHERE vod_id = ?", (vod_id,)).fetchall()
+        # picks the AI dropped are deleted, unless the user kept, posted or re-edited them: those stay in the catalog
+        rows = conn.execute(
+            f"SELECT id, start_s, end_s, variant, id IN ({reedited}) AS mine FROM clips WHERE vod_id = ?",  # noqa: S608 (a constant)
+            (vod_id,),
+        ).fetchall()
         for row in rows:
             if row["variant"] in {k[2] for k in keep} and (row["start_s"], row["end_s"], row["variant"]) not in keep:
                 conn.execute(
-                    "DELETE FROM clips WHERE id = ? AND verdict IS NOT 'keep' AND id NOT IN (SELECT clip_id FROM uploads)",
+                    f"""DELETE FROM clips WHERE id = ? AND verdict IS NOT 'keep' AND id NOT IN (SELECT clip_id FROM uploads)
+                        AND id NOT IN ({reedited})""",  # noqa: S608 (a constant)
                     (row["id"],),
                 )
+        mine = {(r["start_s"], r["end_s"], r["variant"]) for r in rows if r["mine"]}
         for c in clips:  # the verdict is the user's: a re-render never touches it
-            conn.execute(
-                """INSERT INTO clips (vod_id, idx, file, start_s, end_s, title, hook, caption, youtube, streamer, trend, sound,
-                                      score, why, created_at, variant)
-                   VALUES (:vod_id, :idx, :file, :start, :end, :title, :hook, :caption, :youtube, :streamer, :trend, :sound,
-                           :score, :why, :now, :variant)
-                   ON CONFLICT (vod_id, start_s, end_s, variant) DO UPDATE SET idx = excluded.idx, file = excluded.file,
-                       title = IIF(edited, title, excluded.title), hook = excluded.hook,
-                       caption = IIF(edited, caption, excluded.caption), youtube = IIF(edited, youtube, excluded.youtube),
-                       streamer = excluded.streamer, trend = excluded.trend, sound = excluded.sound, score = excluded.score,
-                       why = excluded.why""",
-                {**c, "vod_id": vod_id, "now": now},
-            )
+            if (c["start"], c["end"], c["variant"]) not in mine:
+                _upsert(conn, vod_id, c, now)
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
         raise
+
+
+def variant(clip: dict) -> str:
+    return "edited" if clip.get("edit") else "plain"
+
+
+def _upsert(conn: sqlite3.Connection, vod_id: str, c: dict, now: str) -> int:
+    """Insert or update the clip of this moment and variant, its id. Text the user edited stays theirs."""
+    return conn.execute(
+        """INSERT INTO clips (vod_id, idx, file, start_s, end_s, title, hook, caption, youtube, streamer, trend, sound,
+                              score, why, created_at, variant, pick)
+           VALUES (:vod_id, :idx, :file, :start, :end, :title, :hook, :caption, :youtube, :streamer, :trend, :sound,
+                   :score, :why, :now, :variant, :pick)
+           ON CONFLICT (vod_id, start_s, end_s, variant) DO UPDATE SET idx = excluded.idx, file = excluded.file,
+               title = IIF(edited, title, excluded.title), hook = excluded.hook,
+               caption = IIF(edited, caption, excluded.caption), youtube = IIF(edited, youtube, excluded.youtube),
+               streamer = excluded.streamer, trend = excluded.trend, sound = excluded.sound, score = excluded.score,
+               why = excluded.why, pick = excluded.pick
+           RETURNING id""",
+        {**c, "vod_id": vod_id, "now": now, "variant": variant(c), "pick": json.dumps(c)},
+    ).fetchone()[0]
+
+
+def reedit_source(conn: sqlite3.Connection, clip_id: int) -> dict | None:
+    """What a re-edit of the clip needs: the clip, its VOD's link, whether the VOD's files were deleted and whether
+    the clip is on YouTube (a posted video can't change). None when there's no such clip."""
+    row = conn.execute(
+        """SELECT c.id, c.vod_id, c.idx, c.file, c.start_s, c.end_s, c.variant, c.pick, v.url, v.deleted,
+                  EXISTS (SELECT 1 FROM uploads WHERE clip_id = c.id AND platform = 'youtube' AND status != 'failed') AS posted
+           FROM clips c JOIN vods v ON v.id = c.vod_id WHERE c.id = ?""",
+        (clip_id,),
+    ).fetchone()
+    return row and {**row, "pick": json.loads(row["pick"]) if row["pick"] else None}
+
+
+def start_reedit(conn: sqlite3.Connection, clip_id: int, request: str, at: float | None, run_id: int | None = None) -> int:
+    """Record a re-edit as it starts, so one that's killed (Stop, a timeout) still shows: open until it ends."""
+    cur = conn.execute(
+        "INSERT INTO reedits (clip_id, request, at_s, created_at, run_id) VALUES (?, ?, ?, ?, ?)",
+        (clip_id, request, at, utcnow().isoformat(), run_id),
+    )
+    return cur.lastrowid or 0
+
+
+def save_reedit(conn: sqlite3.Connection, reedit_id: int, source: dict, clip: dict) -> tuple[int, str | None] | None:
+    """Record a re-edit that worked: the edited clip of the source's moment is now this one (made, or replaced when there
+    was one), keeping its id, verdict and the text the user edited. Returns its id and the video it replaced, if any.
+    None, changing nothing, when the clip it would replace is on YouTube or going up: its post must keep its video."""
+    conn.execute("BEGIN IMMEDIATE")  # an upload claims its clip the same way: it can't start in between
+    try:
+        old = conn.execute(
+            """SELECT file, EXISTS (SELECT 1 FROM uploads WHERE clip_id = clips.id AND status != 'failed') AS posted
+               FROM clips WHERE vod_id = ? AND start_s = ? AND end_s = ? AND variant = ?""",
+            (source["vod_id"], clip["start"], clip["end"], variant(clip)),
+        ).fetchone()
+        if old and old["posted"]:
+            conn.execute("ROLLBACK")
+            return None
+        result = _upsert(conn, source["vod_id"], clip, utcnow().isoformat())
+        conn.execute("UPDATE reedits SET result_id = ?, edit_score = ? WHERE id = ?", (result, clip.get("edit_score"), reedit_id))
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    return result, old["file"] if old and old["file"] != clip["file"] else None
+
+
+def fail_reedit(conn: sqlite3.Connection, error: str, reedit_id: int | None = None, run_id: int | None = None) -> None:
+    """End the open re-edit (reedit_id), or the one a dashboard run started (run_id: its runner, when the step was killed)."""
+    conn.execute(
+        "UPDATE reedits SET error = ? WHERE (id = ? OR run_id = ?) AND result_id IS NULL AND error IS NULL",
+        (error[:500], reedit_id, run_id),
+    )
+
+
+def setting(conn: sqlite3.Connection, key: str) -> object:
+    """A saved setting, None when it was never saved."""
+    row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+    return row and json.loads(row["value"])
+
+
+def save_setting(conn: sqlite3.Connection, key: str, value: object) -> None:
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+        (key, json.dumps(value)),
+    )
 
 
 def overview(conn: sqlite3.Connection) -> dict:
@@ -327,7 +428,7 @@ def overview(conn: sqlite3.Connection) -> dict:
         uploads.setdefault(r["clip_id"], {})[r["platform"]] = {"url": r["url"], "at": r["uploaded_at"], "status": r["status"]}
     clips = conn.execute(
         """SELECT c.id, c.vod_id, c.idx, c.file, c.start_s, c.end_s, c.title, c.hook, c.caption, c.youtube, c.trend, c.sound,
-                  c.score, c.why, c.verdict, c.edited, c.created_at, v.url AS vod_url,
+                  c.score, c.why, c.verdict, c.edited, c.created_at, c.variant, v.url AS vod_url,
                   COALESCE(NULLIF(c.streamer, ''), v.login, '') AS streamer
            FROM clips c JOIN vods v ON v.id = c.vod_id ORDER BY c.created_at DESC, c.idx"""
     )
@@ -336,9 +437,13 @@ def overview(conn: sqlite3.Connection) -> dict:
                       AS streamer, tier, status, attempts, error, claimed_at, running_at, finished_at
            FROM vods WHERE NOT deleted ORDER BY COALESCE(finished_at, claimed_at) DESC"""
     )
+    asked: dict[int, list] = {}  # re-edits, on the clip asked about and on the edited clip they made
+    for r in conn.execute("SELECT clip_id, result_id, request, at_s, created_at, error FROM reedits ORDER BY id"):
+        for clip in {r["clip_id"], r["result_id"]} - {None}:
+            asked.setdefault(clip, []).append({k: r[k] for k in ("request", "at_s", "created_at", "error", "result_id")})
     return {
         "vods": [dict(r) for r in vods],
-        "clips": [{**r, "uploads": uploads.get(r["id"], {})} for r in map(dict, clips)],
+        "clips": [{**r, "uploads": uploads.get(r["id"], {}), "reedits": asked.get(r["id"], [])} for r in map(dict, clips)],
     }
 
 
@@ -530,8 +635,10 @@ def _ts(value: str) -> datetime.datetime:
     return datetime.datetime.fromisoformat(value)
 
 
-def start_run(conn: sqlite3.Connection, steps: list[str], now: datetime.datetime | None = None) -> int | None:
-    """Record a new run, all its steps waiting. None when a live run is going: one at a time."""
+def start_run(
+    conn: sqlite3.Connection, steps: list[str], job: dict | None = None, now: datetime.datetime | None = None
+) -> int | None:
+    """Record a new run of the job (runs.steps), all its steps waiting. None when a live run is going: one at a time."""
     now = now or utcnow()
     conn.execute("BEGIN IMMEDIATE")
     try:
@@ -539,8 +646,8 @@ def start_run(conn: sqlite3.Connection, steps: list[str], now: datetime.datetime
             conn.execute("ROLLBACK")
             return None
         cur = conn.execute(
-            "INSERT INTO runs (started_at, beat_at, steps) VALUES (?, ?, ?)",
-            (now.isoformat(), now.isoformat(), json.dumps([{"name": n, "status": "waiting"} for n in steps])),
+            "INSERT INTO runs (started_at, beat_at, steps, job) VALUES (?, ?, ?, ?)",
+            (now.isoformat(), now.isoformat(), json.dumps([{"name": n, "status": "waiting"} for n in steps]), json.dumps(job)),
         )
         conn.execute("COMMIT")
         return cur.lastrowid
@@ -592,4 +699,11 @@ def latest_run(conn: sqlite3.Connection, now: datetime.datetime | None = None) -
         steps = [{**s, "status": "interrupted"} if s["status"] in ("waiting", "running") else s for s in steps]
     return {"id": row["id"], "running": not ended, "stopping": bool(row["stop"]) and not ended,
             "started": row["started_at"], "ended": ended, "steps": steps,
-            "doing": json.loads(row["doing"] or "{}") if not ended else {}}  # fmt: skip
+            "doing": json.loads(row["doing"] or "{}") if not ended else {},
+            "job": json.loads(row["job"] or "null")}  # fmt: skip
+
+
+def run_job(conn: sqlite3.Connection, run_id: int) -> dict | None:
+    """What the run was asked to do, None for a run from before jobs (it polled, then posted)."""
+    row = conn.execute("SELECT job FROM runs WHERE id = ?", (run_id,)).fetchone()
+    return row and json.loads(row["job"] or "null")

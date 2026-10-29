@@ -62,6 +62,7 @@ export const ClipFacts = ({ clip: c, className }: { clip: Clip; className?: stri
       </b>,
       link(atTime(c.vod_url, c.start_s), `VOD at ${hms(c.start_s)}`),
       secs(c),
+      ...(c.variant === "edited" ? ["AI-edited"] : []),
       <span className={hot(c) ? "font-semibold text-primary" : undefined}>{`AI score ${score(c.score)}/10`}</span>,
     ]}
   />

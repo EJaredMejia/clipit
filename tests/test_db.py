@@ -315,3 +315,62 @@ def test_variant_migration_keeps_clips_uploads_and_id_sequence(tmp_path, monkeyp
     assert [tuple(r) for r in c.execute("SELECT clip_id, url FROM uploads")] == [(1, "https://youtu.be/x")]
     db.save_clips(c, "v1", [CLIP, {**CLIP, "start": 90.0, "end": 110.0}])
     assert 2 not in [r[0] for r in c.execute("SELECT id FROM clips")]
+
+
+def test_a_reedit_replaces_the_moments_edited_clip_and_outlives_re_picks(conn):
+    db.record_manual(conn, "v1", "u")
+    db.save_clips(conn, "v1", [CLIP])
+    plain = db.reedit_source(conn, 1)
+    assert plain and plain["pick"]["title"] == "t" and not plain["posted"]  # the catalog keeps how the AI made it
+    boom = {**CLIP, "file": "v1/clips/01_a_edited_1.mp4", "edit": {"sfx": [{"at": 2.0, "sound": "boom"}]}}
+    saved = db.save_reedit(conn, db.start_reedit(conn, 1, "a boom", 1.0), plain, boom)
+    assert saved
+    first, old = saved
+    assert first != 1 and old is None  # the plain clip stays; its edit is a clip of its own
+    assert db.set_verdict(conn, first, "keep")
+    edited = db.reedit_source(conn, first)
+    assert edited
+    saved = db.save_reedit(
+        conn, db.start_reedit(conn, first, "louder", None), edited, {**boom, "file": "v1/clips/01_a_edited_2.mp4"}
+    )
+    assert saved
+    again, old = saved
+    assert again == first and old == "v1/clips/01_a_edited_1.mp4"  # same clip, same verdict, new video
+    db.fail_reedit(conn, "the AI gave up", reedit_id=db.start_reedit(conn, first, "nope", None))
+    db.set_verdict(conn, first, None)  # so only the re-edit keeps it through the re-picks
+    db.save_clips(conn, "v1", [CLIP, {**CLIP, "start": 60.0, "end": 80.0}])
+    db.save_clips(conn, "v1", [{**boom, "file": "v1/clips/01_a_edited.mp4", "start": 60.0, "end": 80.0}])  # drops other edits
+    rows = {r["id"]: r for r in db.overview(conn)["clips"]}
+    assert rows[first]["file"] == "v1/clips/01_a_edited_2.mp4"  # neither dropped nor re-rendered over
+    assert [(r["request"], r["error"]) for r in rows[first]["reedits"]] == [
+        ("a boom", None),
+        ("louder", None),
+        ("nope", "the AI gave up"),
+    ]
+    assert [r["request"] for r in rows[1]["reedits"]] == ["a boom"]  # shown on the clip asked about too
+
+
+def test_run_settings_and_jobs_are_kept(conn):
+    assert db.setting(conn, "run") is None
+    db.save_setting(conn, "run", {"top": 3})
+    db.save_setting(conn, "run", {"top": 4})
+    assert db.setting(conn, "run") == {"top": 4}
+    run_id = db.start_run(conn, ["Re-edit the clip"], {"reedit": 1, "request": "x", "at": None})
+    assert run_id and db.run_job(conn, run_id) == {"reedit": 1, "request": "x", "at": None}
+
+
+def test_a_reedit_never_replaces_an_edited_clip_that_is_on_youtube(conn):
+    db.record_manual(conn, "v1", "u")
+    boom = {**CLIP, "file": "v1/clips/01_a_edited.mp4", "edit": {"sfx": [{"at": 2.0, "sound": "boom"}]}}
+    db.save_clips(conn, "v1", [CLIP])
+    db.save_clips(conn, "v1", [boom])
+    edited = conn.execute("SELECT id FROM clips WHERE variant = 'edited'").fetchone()[0]
+    assert db.set_upload(conn, edited, "youtube", "https://youtu.be/x")
+    plain = db.reedit_source(conn, 1)  # the plain clip isn't posted: only the save can see its edit is
+    assert plain and not plain["posted"]
+    reedit = db.start_reedit(conn, 1, "a ding", None)
+    assert db.save_reedit(conn, reedit, plain, {**boom, "file": "v1/clips/01_a_edited_2.mp4"}) is None
+    assert db.clip_file(conn, edited) == "v1/clips/01_a_edited.mp4"
+    db.fail_reedit(conn, "the AI gave up", reedit_id=reedit)
+    db.fail_reedit(conn, "killed", run_id=None)  # no run: closes nothing else
+    assert conn.execute("SELECT error FROM reedits").fetchone()[0] == "the AI gave up"

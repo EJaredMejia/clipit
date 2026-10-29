@@ -134,3 +134,23 @@ def test_high_effort_edits_each_pick_into_files_of_its_own(stages, monkeypatch):
     assert clip["file"] != plain["file"] and (work / clip["file"]).exists() and (work / plain["file"]).exists()
     assert "edit" not in json.loads((work / "picks.json").read_text(encoding="utf-8"))[0]  # the plain clips stay as they are
     assert (work / "posts_edited.md").exists()
+
+
+def test_reedit_starts_from_how_the_ai_made_the_clip_and_renders_a_new_video(stages, monkeypatch):
+    _, out = stages
+    work, (plain,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
+    asked = []
+
+    def polish(cmd, info, pick, cands, words, loud, folder, request, at):
+        asked.append((pick["title"], request, at))
+        return {**pick, "edit": {"cuts": [], "zooms": [], "sfx": [{"at": at, "sound": "boom"}], "texts": [], "emphasis": []}}
+
+    monkeypatch.setattr(pipeline.edit, "polish", polish)
+    # a clip saved before the catalog kept how the AI made it: found in the VOD's picks.json
+    clip = {"id": 1, "vod_id": "v9", "idx": 1, "start_s": plain["start"], "end_s": plain["end"], "variant": "plain", "pick": None}
+    new = pipeline.reedit("https://example/vod", clip, "a boom", 2.0, "ai", out)
+    assert asked == [("t", "a boom", plain["start"] + 2.0)]  # the marked second, in the VOD
+    assert new["file"].startswith("v9/clips/") and (out / new["file"]).exists() and new["file"] != f"v9/{plain['file']}"
+    (work / "transcripts.json").unlink()
+    with pytest.raises(pipeline.ClipitError, match="deleted"):
+        pipeline.reedit("https://example/vod", clip, "a boom", None, "ai", out)

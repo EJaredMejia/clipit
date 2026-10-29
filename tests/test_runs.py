@@ -11,7 +11,7 @@ import pytest
 from clipit import db, runs
 from clipit.util import utcnow
 
-NAMES = [name for name, _, _ in runs.STEPS]
+NAMES = [name for name, _, _ in runs.steps(runs.SETTINGS)]
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def conn(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
 
 
 def fake(monkeypatch: pytest.MonkeyPatch, scripts: dict[str, str]) -> None:
-    monkeypatch.setattr(runs, "command", lambda flag, out: [sys.executable, "-c", scripts[flag]])
+    monkeypatch.setattr(runs, "command", lambda args, out: [sys.executable, "-c", scripts[args[0]], *args])
 
 
 def in_background(conn: sqlite3.Connection, out: Path) -> tuple[int, threading.Thread]:
@@ -100,7 +100,7 @@ def test_stop_lets_a_youtube_post_finish(conn, tmp_path, monkeypatch) -> None:
 
 
 def test_a_hung_step_is_killed(conn, tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(runs, "STEPS", (("Clip", "--poll", 0.5), ("Post", "--upload", 60)))
+    monkeypatch.setattr(runs, "POLL_TIMEOUT", 0.5)
     fake(monkeypatch, {"--poll": "import time; time.sleep(60)", "--upload": "print('posted')"})
     run_id = db.start_run(conn, ["Clip", "Post"])
     assert run_id
@@ -180,3 +180,50 @@ def test_a_step_says_what_its_doing_and_the_next_step_starts_clean(conn, tmp_pat
     wait_for(lambda: db.latest_run(conn)["doing"] == {"what": NAMES[1]}, "the next step starts clean")  # type: ignore[index]
     t.join(30)
     assert db.latest_run(conn)["doing"] == {}  # type: ignore[index]
+
+
+def test_a_run_does_what_its_settings_say(conn, tmp_path, monkeypatch) -> None:
+    fake(monkeypatch, {"--poll": "import sys; print(sys.argv[1:])", "--upload": "print('posted')"})
+    job = {**runs.SETTINGS, "high_effort": True, "upload": False, "lang": "", "prioritize": ["twitch:caedrel"]}
+    run_id = db.start_run(conn, [name for name, _, _ in runs.steps(job)], job)
+    assert run_id
+    runs.run(conn, tmp_path, run_id)
+    assert statuses(conn) == ["done"]  # posting turned off: no YouTube step
+    out = " ".join(runs.tail(tmp_path, run_id))
+    assert "'--high-effort'" in out and "'--lang', ''" in out and "'--prioritize', 'twitch:caedrel'" in out
+
+
+def test_run_settings_are_checked_before_they_become_flags(conn) -> None:
+    ok = {**runs.SETTINGS, "lang": "es", "prioritize": ["Twitch:Caedrel"]}
+    assert runs.clean_settings(ok) == {**ok, "lang": "ES", "prioritize": ["twitch:caedrel"]}
+    for bad in ({"top": True}, {"clips": 0}, {"lang": "en --dry-run"}, {"prioritize": ["caedrel"]}, {"extra": 1}):
+        assert runs.clean_settings({**runs.SETTINGS, **bad}) is None, bad
+    assert runs.settings(conn) == runs.SETTINGS
+    db.save_setting(conn, "run", {"top": 3, "gone": 1})  # saved by an older version: missing keys take the defaults
+    assert runs.settings(conn) == {**runs.SETTINGS, "top": 3}
+
+
+def test_a_reedit_job_passes_the_request_as_one_argument() -> None:
+    job = runs.reedit_job(7, "  -x a boom here  ", 3)
+    assert job == {"reedit": 7, "request": "-x a boom here", "at": 3}
+    assert job
+    [(_, args, _)] = runs.steps(job)
+    assert args == ["--reedit", "7", "--request=-x a boom here", "--at", "3.00"]
+    for bad in ((7, " ", None), (7, "x" * 501, None), (7, "x", float("nan")), (7, "x", True), (True, "x", None)):
+        assert runs.reedit_job(*bad) is None, bad
+
+
+def test_a_killed_reedit_still_shows_on_its_clip(conn, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runs, "REEDIT_TIMEOUT", 0.5)
+    fake(monkeypatch, {"--reedit": "import time; time.sleep(60)"})
+    db.record_manual(conn, "v1", "u")
+    db.save_clips(conn, "v1", [{"idx": 1, "file": "v1/a.mp4", "start": 1.0, "end": 20.0, "title": "t", "hook": "",
+                                "caption": "", "youtube": "", "streamer": "", "trend": "", "sound": "", "score": 7.0, "why": ""}])  # fmt: skip
+    db.start_reedit(conn, 1, "the same clip, from the command line", None)  # going on apart: not this run's to end
+    job = runs.reedit_job(1, "a boom", None)
+    assert job
+    run_id = db.start_run(conn, ["Re-edit the clip"], job)
+    assert run_id
+    db.start_reedit(conn, 1, "a boom", None, run_id)  # what clipit --reedit does first, before it's killed
+    runs.run(conn, tmp_path, run_id)
+    assert [r[0] for r in conn.execute("SELECT error FROM reedits ORDER BY id")] == [None, "the run's step failed"]
