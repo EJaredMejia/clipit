@@ -71,6 +71,16 @@ def test_save_clips_upserts_and_keeps_ids_stable(conn):
     assert [(r["id"], r["title"]) for r in rows] == [(first_id, "new")]
 
 
+def test_a_high_effort_run_with_weak_plain_picks_keeps_the_plain_runs_clips(conn):
+    db.record_manual(conn, "v1", "u")
+    strong, weak = CLIP, {**CLIP, "idx": 2, "file": "v1/clips/02_b.mp4", "start": 30.0, "end": 50.0}
+    db.save_clips(conn, "v1", [strong, weak])  # the plain run
+    edit = {"cuts": [], "zooms": [], "sfx": [], "texts": [], "emphasis": []}
+    db.save_clips(conn, "v1", [{**strong, "edit": edit, "file": "v1/clips/01_a_edited.mp4"}, weak])  # weak one not edited
+    rows = conn.execute("SELECT start_s, variant FROM clips ORDER BY start_s, variant").fetchall()
+    assert [tuple(r) for r in rows] == [(CLIP["start"], "edited"), (CLIP["start"], "plain"), (30.0, "plain")]
+
+
 def test_clips_are_identified_by_their_moment_not_their_rank(conn):
     db.record_manual(conn, "v1", "u")
     a, b = CLIP, {**CLIP, "idx": 2, "file": "v1/clips/02_b.mp4", "start": 30.0, "end": 50.0}

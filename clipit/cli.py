@@ -3,7 +3,7 @@
 clipit https://www.twitch.tv/videos/2906456464
 clipit URL --clips 10 --ai "ollama run qwen3:30b"
 clipit --refresh-trends
-clipit URL --high-effort   (the AI edits every clip, then reviews and improves it until it's really good)
+clipit URL --high-effort   (the AI edits every strong clip, then reviews and improves it until it's really good)
 clipit --reedit 42 --request "a boom when he slams the desk" --at 12.5   (the AI edits clip 42 again, as asked)
 clipit --poll              (clip the latest VODs of trending and big streamers; run it on a timer)
 clipit --poll --dry-run    (only show which VODs it would clip)
@@ -72,8 +72,8 @@ def main() -> None:
     ap.add_argument(
         "--high-effort",
         action="store_true",
-        help="much more AI effort per clip: the AI edits it (jump cuts, zooms, sound effects, pop-up text) and reviews "
-        f"each version until it scores {edit.GOAL}/10, up to {edit.MAX_ROUNDS} AI reviews per clip. Slow",
+        help=f"much more AI effort per clip scored {db.AUTO_SCORE}+: the AI edits it (jump cuts, zooms, sound effects, "
+        f"pop-up text) and reviews each version until it scores {edit.GOAL}/10, up to {edit.MAX_ROUNDS} AI reviews per clip. Slow",
     )
     ap.add_argument(
         "--reedit",
