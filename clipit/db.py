@@ -169,6 +169,7 @@ MIGRATIONS = [
         result_id  INTEGER REFERENCES clips (id) ON DELETE CASCADE,
         request    TEXT NOT NULL,
         at_s       REAL,                 -- the moment the user marked, in seconds of the clip's video
+        run_id     INTEGER,              -- the dashboard run doing it, NULL from the command line
         created_at TEXT NOT NULL,
         edit_score REAL,
         error      TEXT
@@ -367,11 +368,11 @@ def reedit_source(conn: sqlite3.Connection, clip_id: int) -> dict | None:
     return row and {**row, "pick": json.loads(row["pick"]) if row["pick"] else None}
 
 
-def start_reedit(conn: sqlite3.Connection, clip_id: int, request: str, at: float | None) -> int:
+def start_reedit(conn: sqlite3.Connection, clip_id: int, request: str, at: float | None, run_id: int | None = None) -> int:
     """Record a re-edit as it starts, so one that's killed (Stop, a timeout) still shows: open until it ends."""
     cur = conn.execute(
-        "INSERT INTO reedits (clip_id, request, at_s, created_at) VALUES (?, ?, ?, ?)",
-        (clip_id, request, at, utcnow().isoformat()),
+        "INSERT INTO reedits (clip_id, request, at_s, created_at, run_id) VALUES (?, ?, ?, ?, ?)",
+        (clip_id, request, at, utcnow().isoformat(), run_id),
     )
     return cur.lastrowid or 0
 
@@ -399,11 +400,11 @@ def save_reedit(conn: sqlite3.Connection, reedit_id: int, source: dict, clip: di
     return result, old["file"] if old and old["file"] != clip["file"] else None
 
 
-def fail_reedit(conn: sqlite3.Connection, error: str, reedit_id: int | None = None, clip_id: int | None = None) -> None:
-    """End the open re-edit (reedit_id), or every open one of a clip (clip_id: its runner, when the step was killed)."""
+def fail_reedit(conn: sqlite3.Connection, error: str, reedit_id: int | None = None, run_id: int | None = None) -> None:
+    """End the open re-edit (reedit_id), or the one a dashboard run started (run_id: its runner, when the step was killed)."""
     conn.execute(
-        "UPDATE reedits SET error = ? WHERE (id = ? OR clip_id = ?) AND result_id IS NULL AND error IS NULL",
-        (error[:500], reedit_id, clip_id),
+        "UPDATE reedits SET error = ? WHERE (id = ? OR run_id = ?) AND result_id IS NULL AND error IS NULL",
+        (error[:500], reedit_id, run_id),
     )
 
 

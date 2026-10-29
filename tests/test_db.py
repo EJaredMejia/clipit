@@ -372,5 +372,5 @@ def test_a_reedit_never_replaces_an_edited_clip_that_is_on_youtube(conn):
     assert db.save_reedit(conn, reedit, plain, {**boom, "file": "v1/clips/01_a_edited_2.mp4"}) is None
     assert db.clip_file(conn, edited) == "v1/clips/01_a_edited.mp4"
     db.fail_reedit(conn, "the AI gave up", reedit_id=reedit)
-    db.fail_reedit(conn, "killed", clip_id=1)  # a runner closing open re-edits leaves ended ones as they were
+    db.fail_reedit(conn, "killed", run_id=None)  # no run: closes nothing else
     assert conn.execute("SELECT error FROM reedits").fetchone()[0] == "the AI gave up"

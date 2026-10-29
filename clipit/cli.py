@@ -217,7 +217,8 @@ def reedit(conn: sqlite3.Connection, out: Path, clip_id: int, request: str, at: 
     clip = db.reedit_source(conn, clip_id)
     if not clip:
         raise ClipitError(f"there's no clip {clip_id}")
-    reedit_id = db.start_reedit(conn, clip_id, request, at)
+    run = os.environ.get(runs.RUN)  # a step of a dashboard run: its runner closes this re-edit if it's killed
+    reedit_id = db.start_reedit(conn, clip_id, request, at, int(run) if run else None)
     try:
         if clip["posted"]:
             raise ClipitError("this clip is on YouTube already, and a re-edit can't change a posted video")

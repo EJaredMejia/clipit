@@ -148,7 +148,7 @@ def run(conn: sqlite3.Connection, out: Path, run_id: int) -> None:
                 _say(log, f"{step['name']}: clipit {subprocess.list2cmdline(args)}")
                 step["status"] = _step(conn, run_id, done, command(args, out), log, timeout, stoppable=args[0] != UPLOAD)
                 if "reedit" in job and step["status"] != "done":  # killed (Stop, a timeout), it couldn't record why
-                    db.fail_reedit(conn, f"the run's step {step['status']}", clip_id=job["reedit"])
+                    db.fail_reedit(conn, f"the run's step {step['status']}", run_id=run_id)
         except Exception as e:  # the run must still end, or the page shows it running until it goes stale
             logger.exception("run %d failed", run_id)
             _say(log, f"run failed: {type(e).__name__}: {e}")
