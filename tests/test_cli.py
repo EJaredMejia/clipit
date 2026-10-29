@@ -80,7 +80,7 @@ def test_prioritize_reaches_poll_and_upload_as_clean_names(monkeypatch: pytest.M
     monkeypatch.setattr(cli, "refresh_stale_trends", lambda trends_ai: None)
     monkeypatch.setattr(cli.shutil, "which", lambda name: name)
     monkeypatch.setattr(poll, "poll", lambda *a, prioritize, **kw: got.update(poll=prioritize))
-    monkeypatch.setattr(youtube, "upload_next", lambda conn, out, first, since: got.update(upload=first))
+    monkeypatch.setattr(youtube, "upload_next", lambda conn, out, first, run_id: got.update(upload=first))
     cli.main()
     assert got == {"poll": [("twitch", "caedrel"), ("kick", "xqc")], "upload": ["twitch:caedrel", "kick:xqc"]}
 

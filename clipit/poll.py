@@ -101,7 +101,7 @@ def poll(
             if db.status(conn, vod_id) != "done":
                 log(f"would clip {login}: {url}")
             continue
-        if not db.claim(conn, vod_id, url, login, "top"):
+        if not db.claim(conn, vod_id, url, login, "top", run_id=runs.current()):
             continue
         log(f"clipping {login}: {url}")
         runs.progress(what=f"Clipping {login}", vod=[top_n - top_left, top_n], stage="Getting the VOD's details", count=None)
