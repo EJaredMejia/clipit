@@ -150,3 +150,43 @@ def test_non_finite_times_are_rejected_not_clamped_into_another_moment():
     assert edit.revise({**version(), "end": float("inf")}, "Caseoh", INFO, 100, 190, 7.0) is None
     e = edit.clean_edit({"cuts": [{"start": "nan", "end": 120}], "sfx": [{"at": "inf", "sound": "boom"}]}, 110.0, 140.0)
     assert e["cuts"] == [] and e["sfx"] == []
+
+
+def test_a_marked_second_of_the_video_maps_to_the_vod_across_cuts():
+    cut = version(cuts=[{"start": 112.0, "end": 115.0}])
+    assert edit.source_time(cut, 1.0) == 111.0 and edit.source_time(cut, 4.0) == 117.0  # 2 s in, then the cut
+    assert edit.source_time(cut, 999) == 140.0
+
+
+def test_a_reedit_must_change_something_near_the_moment_marked():
+    before = version(zooms=[{"start": 120.0, "end": 121.0, "zoom": 1.3}])
+    assert edit.asked(before, before, None) == ["nothing changed yet from the version the owner asked to change"]
+    far = version(zooms=before["edit"]["zooms"], sfx=[{"at": 130.0, "sound": "boom"}])
+    assert "nothing in the edit is within" in edit.asked(far, before, 125.0)[0]
+    near = version(zooms=before["edit"]["zooms"], sfx=[{"at": 126.0, "sound": "boom"}])
+    assert edit.asked(near, before, 125.0) == []
+
+
+def test_reedit_loops_until_the_request_is_done_and_keeps_the_clips_times(monkeypatch, tmp_path):
+    before = version(zooms=[{"start": 120.0, "end": 121.0, "zoom": 1.3}])
+    boom = {**version(zooms=before["edit"]["zooms"], sfx=[{"at": 125.0, "sound": "boom"}]), "start": 101.0}
+    said = iter([True, False, True])  # round 1 reviews the unchanged clip: the code says it isn't done
+    prompts = []
+
+    def ask(cmd, prompt, schema):
+        prompts.append(prompt)
+        return json.dumps({"name": "Caseoh", "edit_score": 9, "problems": [], "request_done": next(said), "clip": boom})
+
+    monkeypatch.setattr(edit.ai, "ask_ai", ask)
+    done = edit.polish("ai", INFO, before, [MOMENT], [], LOUD, tmp_path, "a boom when he <falls>", 125.0)
+    assert len(prompts) == 3  # round 1: unchanged; round 2: the AI says it isn't done; round 3: done
+    assert done["edit"]["sfx"] == [{"at": 125.0, "sound": "boom"}] and done["start"] == PICK["start"]
+    owner = prompts[0].index("<owner_request>")
+    assert owner < prompts[0].rindex("<stream_data>") and "a boom when he falls" in prompts[0]  # outside the fence
+
+
+def test_reedit_fails_rather_than_keep_a_version_that_ignores_the_request(monkeypatch, tmp_path):
+    before = version(zooms=[{"start": 120.0, "end": 121.0, "zoom": 1.3}])
+    monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema: reply(10, [], before))  # never changes anything
+    with pytest.raises(ClipitError, match="didn't get the re-edit done"):
+        edit.polish("ai", INFO, before, [MOMENT], [], LOUD, tmp_path, "add a boom")

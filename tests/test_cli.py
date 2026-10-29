@@ -127,3 +127,32 @@ def test_every_rejects_what_it_cannot_repeat(monkeypatch: pytest.MonkeyPatch, tm
     with pytest.raises(SystemExit) as e:
         cli.main()
     assert e.value.code == 2  # argparse's usage error
+
+
+def test_a_reedit_is_recorded_done_or_failed_and_the_old_video_goes(tmp_path, monkeypatch):
+    conn = cli.db.connect(tmp_path / "clipit.db")
+    cli.db.record_manual(conn, "v1", "https://www.twitch.tv/videos/1")
+    clip = {"idx": 1, "file": "v1/clips/a.mp4", "start": 1.0, "end": 20.0, "title": "t", "hook": "h", "caption": "c",
+            "youtube": "y", "streamer": "s", "trend": "", "sound": "", "score": 8.0, "why": ""}  # fmt: skip
+    cli.db.save_clips(conn, "v1", [clip])
+    made = []
+
+    def reedit(url, source, request, at, ai_cmd, out):
+        if request == "fail":
+            raise ClipitError("the AI gave up")
+        n = len(made) + 1
+        (out / f"v1/e{n}.mp4").write_bytes(b"mp4")
+        made.append({**clip, "file": f"v1/e{n}.mp4", "edit": {"sfx": [{"at": 2.0, "sound": "boom"}]}})
+        return made[-1]
+
+    monkeypatch.setattr(cli.pipeline, "reedit", reedit)
+    (tmp_path / "v1").mkdir()
+    cli.reedit(conn, tmp_path, 1, "a boom", None, "ai")
+    edited = conn.execute("SELECT id FROM clips WHERE variant = 'edited'").fetchone()[0]
+    cli.reedit(conn, tmp_path, edited, "louder", 3.0, "ai")
+    assert not (tmp_path / "v1/e1.mp4").exists() and (tmp_path / "v1/e2.mp4").exists()  # the replaced video is gone
+    with pytest.raises(ClipitError):
+        cli.reedit(conn, tmp_path, edited, "fail", None, "ai")
+    rows = conn.execute("SELECT request, at_s, error FROM reedits ORDER BY id").fetchall()
+    assert [tuple(r) for r in rows] == [("a boom", None, None), ("louder", 3.0, None), ("fail", None, "the AI gave up")]
+    conn.close()

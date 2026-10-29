@@ -77,6 +77,7 @@ EDIT_SCHEMA = _strict(
     {
         "name": {"type": "string"},
         "edit_score": {"type": "number"},
+        "request_done": {"type": "boolean"},
         "problems": {"type": "array", "items": {"type": "string"}},
         "clip": _strict({**CLIP_PROPERTIES, "edit": _strict(EDIT_PROPERTIES)}),
     }
