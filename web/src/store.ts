@@ -10,6 +10,8 @@ export const PLATFORMS = { tiktok: "TikTok", youtube: "YouTube" } as const;
 export type Platform = keyof typeof PLATFORMS;
 export type Verdict = "keep" | "skip";
 export type Upload = { url: string | null; at: string; status: "uploading" | "done" };
+// A re-edit the user asked for (clipit --reedit): result_id is the edited clip it made; neither it nor error while it runs.
+export type Reedit = { request: string; at_s: number | null; created_at: string; error: string | null; result_id: number | null };
 export type Clip = {
   id: number;
   vod_id: string;
@@ -28,9 +30,11 @@ export type Clip = {
   verdict: Verdict | null;
   edited: number;
   created_at: string;
+  variant: "plain" | "edited"; // edited: the AI's high-effort edit of the moment, a clip of its own
   vod_url: string | null;
   streamer: string;
   uploads: Partial<Record<Platform, Upload>>;
+  reedits: Reedit[];
 };
 export type Vod = {
   id: string;
@@ -48,6 +52,9 @@ export type Data = { vods: Vod[]; clips: Clip[] };
 // A run of clipit --poll, then --upload, started from the page (clipit/runs.py). It goes on without the page or the
 // dashboard, so a reopened page picks it up. Lines are clipit's output: untrusted.
 export type Step = { name: string; status: "waiting" | "running" | "done" | "failed" | "stopped" | "interrupted" };
+// How runs go (clipit/runs.py SETTINGS): saved on the server, a run keeps the ones it started with as its job.
+export type Settings = { top: number; lang: string; clips: number; high_effort: boolean; prioritize: string[]; upload: boolean };
+export type ReeditJob = { reedit: number; request: string; at: number | null };
 export type Run = {
   id: number;
   running: boolean;
@@ -58,7 +65,11 @@ export type Run = {
   // what the running step says it's doing (clipit/runs.py progress): a headline, VOD n of m, its stage and how far
   doing: { what?: string; vod?: [number, number]; stage?: string; count?: [number, number] };
   lines: string[];
+  job: Settings | ReeditJob | null; // null: a run from before jobs, or no run yet
+  settings: Settings; // what the next run does
 };
+
+export const isReedit = (job: Run["job"]): job is ReeditJob => !!job && "reedit" in job;
 
 export const posted = (c: Clip) => Object.keys(c.uploads).length;
 // clips made before descriptions only have the caption; once the user edits, an empty description is their choice
@@ -104,7 +115,7 @@ const initial = {
   sort: "new" as Sort,
   sheet: null as number | null, // clip open in the side sheet, over any tab
   released: [] as number[], // clips whose videos every player let go of, so they can be deleted (Windows locks open files)
-  drafts: {} as Record<string, string>, // text typed but not saved yet: "id:platform" post links, "id:text:field" post text
+  drafts: {} as Record<string, string>, // text typed but not saved yet: "id:platform" post links, "id:text:field" post text, "id:reedit" a re-edit request
   textStatus: {} as Record<string, string>, // "id:text:field" -> what its autosave says, so a re-render never loses an error
   queue: [] as number[], // review deck: unreviewed clip ids in random order, queue[0] is the card on top
   history: [] as { id: number; verdict: Verdict }[], // one per decision made in the deck this visit, newest last, for undo
@@ -213,8 +224,15 @@ export async function loadRun(): Promise<void> {
   const made = runResult(run, get().data.clips);
   const failed = run.steps.filter((s) => s.status === "failed" || s.status === "interrupted").map((s) => s.name);
   const stopped = run.steps.some((s) => s.status === "stopped");
-  const text = `${plural(made.clips, "new clip")}, ${made.posted} posted to YouTube`;
   const open = { label: "See the run", onClick: () => showTab("run") };
+  if (isReedit(run.job)) {
+    const opts = { description: run.job.request, duration: Infinity, closeButton: true, action: open };
+    if (failed.length) toast.error("The re-edit failed", opts);
+    else if (stopped) toast("Re-edit stopped", opts);
+    else toast.success("Re-edit done: the clip has its new video", opts);
+    return;
+  }
+  const text = `${plural(made.clips, "new clip")}, ${made.posted} posted to YouTube`;
   const opts = { description: text, duration: Infinity, closeButton: true, action: open };
   if (failed.length) toast.error(`Run finished, but this failed: ${failed.join(", ")}`, opts);
   else if (stopped) toast(`Run stopped`, opts);
@@ -228,6 +246,30 @@ export async function startRun(): Promise<void> {
     toast.error(`Couldn't start a run: ${(e as Error).message}`);
   }
   await loadRun();
+}
+
+// Saves how the next runs go. False when the server refused them (the message says why).
+export async function saveSettings(settings: Settings): Promise<boolean> {
+  try {
+    await post("/api/settings", { settings });
+  } catch (e) {
+    toast.error(`Couldn't save the run settings: ${(e as Error).message}`);
+    return false;
+  }
+  await loadRun();
+  return true;
+}
+
+// Starts a run that has the AI edit the clip again as asked. at: the second of its video the user marked.
+export async function startReedit(clip: number, request: string, at: number | null): Promise<boolean> {
+  try {
+    await post("/api/reedit", { clip, request, at });
+  } catch (e) {
+    toast.error(`Couldn't start the re-edit: ${(e as Error).message}`);
+    return false;
+  }
+  await loadRun();
+  return true;
 }
 
 export async function stopRun(): Promise<void> {

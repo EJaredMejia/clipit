@@ -4,6 +4,7 @@ clipit https://www.twitch.tv/videos/2906456464
 clipit URL --clips 10 --ai "ollama run qwen3:30b"
 clipit --refresh-trends
 clipit URL --high-effort   (the AI edits every clip, then reviews and improves it until it's really good)
+clipit --reedit 42 --request "a boom when he slams the desk" --at 12.5   (the AI edits clip 42 again, as asked)
 clipit --poll              (clip the latest VODs of trending and big streamers; run it on a timer)
 clipit --poll --dry-run    (only show which VODs it would clip)
 clipit --dashboard         (browse every VOD and clip, mark clips keep/skip and posted)
@@ -24,7 +25,7 @@ import time
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from clipit import ai, dashboard, db, edit, poll, runs, source, youtube
+from clipit import ai, dashboard, db, edit, pipeline, poll, runs, source, youtube
 from clipit.pipeline import process_vod
 from clipit.util import ROOT, ClipitError, log, logger
 
@@ -74,6 +75,14 @@ def main() -> None:
         help="much more AI effort per clip: the AI edits it (jump cuts, zooms, sound effects, pop-up text) and reviews "
         f"each version until it scores {edit.GOAL}/10, up to {edit.MAX_ROUNDS} AI reviews per clip. Slow",
     )
+    ap.add_argument(
+        "--reedit",
+        type=int,
+        metavar="CLIP_ID",
+        help="have the AI edit this clip again until it does what --request asks (the clip's id in the dashboard)",
+    )
+    ap.add_argument("--request", default="", help=f"--reedit: what to change, up to {runs.REQUEST_MAX} characters")
+    ap.add_argument("--at", type=float, metavar="SECONDS", help="--reedit: the second of the clip's video you mean")
     ap.add_argument("--whisper", default="turbo", help="faster-whisper model: tiny, base, small, medium, turbo (default)")
     ap.add_argument("--out", type=Path, default=ROOT / "out", help="working files, clips, logs and the database")
     ap.add_argument(
@@ -119,11 +128,13 @@ def main() -> None:
             ap.error("--every needs a positive number of minutes")
         if not (a.poll or a.upload) or any((a.url, a.dashboard, a.youtube_login, a.refresh_trends)):
             ap.error("--every only repeats --poll and --upload")
+    if a.reedit is not None and not runs.reedit_job(a.reedit, a.request, a.at):
+        ap.error(f"--reedit needs a --request of up to {runs.REQUEST_MAX} characters, and --at from 0 to 600 seconds")
     if isinstance(sys.stdout, io.TextIOWrapper):  # not when stdout was swapped (tests, some service wrappers)
         sys.stdout.reconfigure(errors="replace")  # emoji in stream titles crash cp1252 consoles
-    if not any((a.url, a.refresh_trends, a.poll, a.dashboard, a.youtube_login, a.upload, a.run_steps)):
+    if not any((a.url, a.refresh_trends, a.poll, a.dashboard, a.youtube_login, a.upload, a.run_steps, a.reedit is not None)):
         ap.error("pass a VOD url (or --poll / --upload / --youtube-login / --refresh-trends / --dashboard)")
-    if (a.url or a.poll) and not shutil.which("ffmpeg"):
+    if (a.url or a.poll or a.reedit is not None) and not shutil.which("ffmpeg"):
         sys.exit("ffmpeg not found on PATH")
     setup_logging(a.out)
     if runner := os.environ.get(runs.WATCH):  # a clipping step of a dashboard run: never outlive the runner
@@ -189,6 +200,8 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
             whisper=a.whisper,
             high_effort=a.high_effort,
         )
+    if a.reedit is not None:
+        reedit(conn, a.out, a.reedit, a.request.strip(), a.at, a.ai)
     if a.dashboard:
         dashboard.serve(a.out, a.port)
     if a.run_steps:
@@ -198,3 +211,33 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
         raise ClipitError("posting to YouTube failed (see above)")
     if vods_failed:
         raise ClipitError(f"{vods_failed} VOD{'s' if vods_failed > 1 else ''} failed to clip (see above)")
+
+
+def reedit(conn: sqlite3.Connection, out: Path, clip_id: int, request: str, at: float | None, ai_cmd: str | None) -> None:
+    """Edit one clip again as the user asked, and record it, done or failed, for the dashboard."""
+    clip = db.reedit_source(conn, clip_id)
+    if not clip:
+        raise ClipitError(f"there's no clip {clip_id}")
+    run = os.environ.get(runs.RUN)  # a step of a dashboard run: its runner closes this re-edit if it's killed
+    reedit_id = db.start_reedit(conn, clip_id, request, at, int(run) if run else None)
+    try:
+        if clip["posted"]:
+            raise ClipitError("this clip is on YouTube already, and a re-edit can't change a posted video")
+        if clip["deleted"]:
+            raise ClipitError("this clip's VOD files were deleted, so it can't be re-edited")
+        with db.running(conn, clip["vod_id"]):  # the dashboard mustn't delete the VOD's files meanwhile
+            new = pipeline.reedit(clip["url"], clip, request, at, ai_cmd, out)
+        saved = db.save_reedit(conn, reedit_id, clip, new)
+        if not saved:
+            (out / new["file"]).unlink(missing_ok=True)
+            raise ClipitError("the edited clip of this moment is on YouTube, and a re-edit can't change a posted video")
+    except Exception as e:  # shown with the clip in the dashboard, then the run fails
+        db.fail_reedit(conn, str(e) or type(e).__name__, reedit_id=reedit_id)
+        raise
+    result, old = saved
+    if old:
+        try:
+            (out / old).unlink(missing_ok=True)
+        except OSError:  # playing in the dashboard (Windows locks open files): it's only a leftover in the cache
+            logger.warning("couldn't delete the re-edit's old video %s", old)
+    log(f"re-edited: clip {result} is now {new['file']} (edit {new.get('edit_score', 0):g}/10)")

@@ -98,8 +98,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "ended": None,
                     "steps": [],
                     "doing": {},
+                    "job": None,
                 }
-            return self.send(200, json.dumps({**run, "lines": runs.tail(self.out, run["id"])}).encode())
+                saved = runs.settings(conn)
+            return self.send(200, json.dumps({**run, "lines": runs.tail(self.out, run["id"]), "settings": saved}).encode())
         if m := re.fullmatch(r"/media/(\d+)", path):
             return self.video(int(m[1]))
         self.send(404, b'{"error": "not found"}')
@@ -111,7 +113,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if self.path == "/api/run" and req.get("action") in ("start", "stop"):
             try:
                 with self.conn() as conn:
-                    ok = runs.start(conn, self.out) if req["action"] == "start" else db.stop_run(conn)
+                    ok = runs.start(conn, self.out, runs.settings(conn)) if req["action"] == "start" else db.stop_run(conn)
             except OSError as e:
                 logger.exception("couldn't start a run")
                 return self.send(500, json.dumps({"error": f"couldn't start clipit: {e}"[:500]}).encode())
@@ -119,6 +121,35 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return self.send(
                     409, b'{"error": "a run is already going"}' if req["action"] == "start" else b'{"error": "no run is going"}'
                 )
+            return self.send(200, b'{"ok": true}')
+        if self.path == "/api/settings":
+            if not (settings := runs.clean_settings(req.get("settings"))):
+                return self.send(400, b'{"error": "those run settings aren\'t valid"}')
+            with self.conn() as conn:
+                db.save_setting(conn, "run", settings)
+            return self.send(200, json.dumps(settings).encode())
+        if self.path == "/api/reedit":
+            if not (job := runs.reedit_job(req.get("clip"), req.get("request"), req.get("at"))):
+                return self.send(
+                    400, json.dumps({"error": f"say what to change, in up to {runs.REQUEST_MAX} characters"}).encode()
+                )
+            with self.conn() as conn:
+                clip = db.reedit_source(conn, job["reedit"])
+                why = (
+                    "no such clip" if not clip
+                    else "it's on YouTube already: a re-edit can't change a posted video" if clip["posted"]
+                    else "its VOD's files were deleted" if clip["deleted"]
+                    else ""
+                )  # fmt: skip
+                if why:
+                    return self.send(409 if clip else 404, json.dumps({"error": f"can't re-edit this clip: {why}"}).encode())
+                try:
+                    ok = runs.start(conn, self.out, job)
+                except OSError as e:
+                    logger.exception("couldn't start a re-edit")
+                    return self.send(500, json.dumps({"error": f"couldn't start clipit: {e}"[:500]}).encode())
+            if not ok:
+                return self.send(409, b'{"error": "a run is already going: re-edit once it ends"}')
             return self.send(200, b'{"ok": true}')
         # asked for in so many words: an empty or broken body (read_json gives {}) must never delete anything
         if self.path == "/api/delete-skipped" and req.get("skipped") is True:

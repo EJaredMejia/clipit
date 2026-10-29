@@ -1,4 +1,5 @@
-"""Runs started from the dashboard: `clipit --poll`, then `clipit --upload`, done by a runner process of their own.
+"""Runs started from the dashboard, done by a runner process of their own: `clipit --poll`, then `clipit --upload`,
+with the run settings the user saved in the page (SETTINGS), or a re-edit of one clip (`clipit --reedit`).
 
 The dashboard only starts the runner (start) and reads how it goes: its row in the runs table (db.latest_run) and its
 output, out/logs/run-<id>.log. So a run goes on, and shows again, when the dashboard is closed and reopened.
@@ -7,7 +8,9 @@ Stop (db.stop_run) kills a clipping step with every process it started (ffmpeg, 
 finish: one killed mid-upload may be on YouTube without clipit knowing, and is never retried on its own.
 """
 
+import math
 import os
+import re
 import signal
 import sqlite3
 import subprocess
@@ -17,13 +20,15 @@ import time
 from pathlib import Path
 from typing import IO
 
-from clipit import db
+from clipit import ai, db
 from clipit.util import logger
 
-# (name, flag, timeout in seconds). Clip first, so this run's fresh clips can be posted in it. A poll of a few
-# hours-long VODs takes hours; an upload is one video. A hung step is killed.
-STEPS = (("Clip the latest VODs", "--poll", 8 * 3600), ("Post to YouTube", "--upload", 3600))
+# What a run does when the user never changed it: the CLI's defaults, then posting.
+SETTINGS = {"top": 6, "lang": "EN", "clips": 6, "high_effort": False, "prioritize": [], "upload": True}
+# A hung step is killed. A poll of a few hours-long VODs takes hours; high effort is up to 5 AI reviews per clip.
+POLL_TIMEOUT, HIGH_EFFORT_TIMEOUT, UPLOAD_TIMEOUT, REEDIT_TIMEOUT = 8 * 3600, 24 * 3600, 3600, 2 * 3600
 UPLOAD = "--upload"  # the step Stop never cuts
+REQUEST_MAX = 500  # characters of a re-edit request
 BEAT = 3.0  # seconds between the runner's checks: alive, stop asked, timed out
 KILL_WAIT = 30  # seconds a killed step gets to be gone
 WATCH = "CLIPIT_RUNNER"  # a clipping step gets its runner's pid, to end itself when the runner is gone (watch_runner)
@@ -35,13 +40,66 @@ def log_file(out: Path, run_id: int) -> Path:
     return out / "logs" / f"run-{run_id}.log"
 
 
-def command(flag: str, out: Path) -> list[str]:
-    return [sys.executable, "-m", "clipit", flag, "--out", str(out)]
+def command(args: list[str], out: Path) -> list[str]:
+    return [sys.executable, "-m", "clipit", *args, "--out", str(out)]
 
 
-def start(conn: sqlite3.Connection, out: Path) -> int | None:
-    """Record a run and start its runner in the background, apart from the dashboard. None when one is going."""
-    run_id = db.start_run(conn, [name for name, _, _ in STEPS])
+def clean_settings(raw: object) -> dict | None:
+    """Run settings from the page, checked: they become clipit's flags. None when one is wrong."""
+    if not isinstance(raw, dict) or set(raw) != set(SETTINGS):
+        return None
+    lang, first = raw["lang"], raw["prioritize"]
+    if not (
+        all(isinstance(raw[k], bool) for k in ("high_effort", "upload"))
+        and all(type(raw[k]) is int and 1 <= raw[k] <= 20 for k in ("top", "clips"))
+        and isinstance(lang, str)
+        and re.fullmatch(r"[A-Za-z]{0,3}", lang)  # "" is any language
+        and isinstance(first, list)
+        and len(first) <= 20
+        and all(isinstance(p, str) and ai.TRENDING.fullmatch(f"- {p}") for p in first)
+    ):
+        return None
+    found = [ai.TRENDING.fullmatch(f"- {p}") for p in first]
+    return {**raw, "lang": lang.upper(), "prioritize": [f"{m[1]}:{m[2]}".lower() for m in found if m]}  # like cli.py
+
+
+def settings(conn: sqlite3.Connection) -> dict:
+    """The saved run settings, the defaults for any never saved."""
+    saved = db.setting(conn, "run")
+    saved = {k: saved[k] for k in SETTINGS if k in saved} if isinstance(saved, dict) else {}
+    return clean_settings({**SETTINGS, **saved}) or dict(SETTINGS)
+
+
+def reedit_job(clip: object, request: object, at: object) -> dict | None:
+    """A re-edit from the page, checked: the clip, what to change, and the second of its video the user marked."""
+    if type(clip) is not int or not isinstance(request, str) or not request.strip() or len(request) > REQUEST_MAX:
+        return None
+    if at is not None and (isinstance(at, bool) or not isinstance(at, int | float) or not (math.isfinite(at) and 0 <= at <= 600)):
+        return None
+    return {"reedit": clip, "request": request.strip(), "at": at}
+
+
+def steps(job: dict) -> list[tuple[str, list[str], float]]:
+    """A job's steps: (name, clipit's flags, timeout in seconds). Clip first, so a run's fresh clips can be posted in it."""
+    if "reedit" in job:
+        at = [] if job["at"] is None else ["--at", f"{job['at']:.2f}"]
+        # --request=: a request that starts with "-" would be read as a flag
+        return [("Re-edit the clip", ["--reedit", str(job["reedit"]), f"--request={job['request']}", *at], REEDIT_TIMEOUT)]
+    first = [a for p in job["prioritize"] for a in ("--prioritize", p)]
+    poll = ["--poll", "--top", str(job["top"]), "--lang", job["lang"], "--clips", str(job["clips"]), *first]
+    out: list[tuple[str, list[str], float]] = [
+        ("Clip the latest VODs", [*poll, "--high-effort"], HIGH_EFFORT_TIMEOUT)
+        if job["high_effort"]
+        else ("Clip the latest VODs", poll, POLL_TIMEOUT)
+    ]
+    return out + [("Post to YouTube", [UPLOAD, *first], UPLOAD_TIMEOUT)] if job["upload"] else out
+
+
+def start(conn: sqlite3.Connection, out: Path, job: dict) -> int | None:
+    """Record a run of the job (the run settings, or reedit_job) and start its runner in the background, apart from
+    the dashboard. None when one is going."""
+    plan = steps(job)
+    run_id = db.start_run(conn, [name for name, _, _ in plan], job)
     if run_id is None:
         return None
     kw: dict  # declared outside the branches: pyright skips the branch that isn't for its platform
@@ -57,7 +115,7 @@ def start(conn: sqlite3.Connection, out: Path) -> int | None:
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kw,
         )  # fmt: skip
     except OSError:
-        db.end_run(conn, run_id, [{"name": name, "status": "failed"} for name, _, _ in STEPS])
+        db.end_run(conn, run_id, [{"name": name, "status": "failed"} for name, _, _ in plan])
         raise
     return run_id
 
@@ -75,24 +133,28 @@ def tail(out: Path, run_id: int, lines: int = 1000) -> list[str]:
 
 def run(conn: sqlite3.Connection, out: Path, run_id: int) -> None:
     """The runner (clipit --run-steps): every step in order, a failed one doesn't stop the next, Stop skips the rest."""
-    steps = [{"name": name, "status": "waiting"} for name, _, _ in STEPS]
+    job = db.run_job(conn, run_id) or SETTINGS
+    plan = steps(job)
+    done = [{"name": name, "status": "waiting"} for name, _, _ in plan]
     log_file(out, run_id).parent.mkdir(parents=True, exist_ok=True)
     with log_file(out, run_id).open("a", encoding="utf-8") as log:
         try:
-            for step, (_, flag, timeout) in zip(steps, STEPS, strict=True):
-                if db.beat_run(conn, run_id, steps):
+            for step, (_, args, timeout) in zip(done, plan, strict=True):
+                if db.beat_run(conn, run_id, done):
                     step["status"] = "stopped"
                     continue
                 step["status"] = "running"
                 db.run_doing(conn, run_id, {"what": step["name"]}, replace=True)  # nothing left from the step before
-                _say(log, f"{step['name']}: clipit {flag}")
-                step["status"] = _step(conn, run_id, steps, command(flag, out), log, timeout, stoppable=flag != UPLOAD)
+                _say(log, f"{step['name']}: clipit {subprocess.list2cmdline(args)}")
+                step["status"] = _step(conn, run_id, done, command(args, out), log, timeout, stoppable=args[0] != UPLOAD)
+                if "reedit" in job and step["status"] != "done":  # killed (Stop, a timeout), it couldn't record why
+                    db.fail_reedit(conn, f"the run's step {step['status']}", run_id=run_id)
         except Exception as e:  # the run must still end, or the page shows it running until it goes stale
             logger.exception("run %d failed", run_id)
             _say(log, f"run failed: {type(e).__name__}: {e}")
-            steps = [{**s, "status": "failed"} if s["status"] in ("waiting", "running") else s for s in steps]
+            done = [{**s, "status": "failed"} if s["status"] in ("waiting", "running") else s for s in done]
         finally:
-            db.end_run(conn, run_id, steps)
+            db.end_run(conn, run_id, done)
 
 
 def _step(conn: sqlite3.Connection, run_id: int, steps: list[dict], cmd: list[str], log: IO[str], timeout: float,

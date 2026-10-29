@@ -336,3 +336,27 @@ def test_run_status_and_stop_from_the_page(site: Site, monkeypatch: pytest.Monke
     assert call(url + "/api/run", {"action": "start"})[0] == 409
     assert call(url + "/api/run", {"action": "stop"})[0] == 200
     assert json.loads(call(url + "/api/run")[2])["stopping"]
+
+
+def test_run_settings_from_the_page_are_what_the_next_run_does(site: Site, monkeypatch: pytest.MonkeyPatch) -> None:
+    url, conn, _ = site
+    assert json.loads(call(url + "/api/run")[2])["settings"] == runs.SETTINGS
+    assert call(url + "/api/settings", {"settings": {**runs.SETTINGS, "top": "6; rm -rf"}})[0] == 400
+    assert call(url + "/api/settings", {"settings": {**runs.SETTINGS, "upload": False, "lang": "es"}})[0] == 200
+    started = []
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: started.append(a))
+    assert call(url + "/api/run", {"action": "start"})[0] == 200
+    run = json.loads(call(url + "/api/run")[2])
+    assert started and run["job"]["lang"] == "ES" and [s["name"] for s in run["steps"]] == ["Clip the latest VODs"]
+
+
+def test_reedit_from_the_page_starts_a_run_but_never_for_a_posted_clip(site: Site, monkeypatch: pytest.MonkeyPatch) -> None:
+    url, conn, (clip, posted) = site
+    assert db.set_upload(conn, posted, "youtube", "https://youtu.be/x")
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: None)
+    assert call(url + "/api/reedit", {"clip": clip, "request": " "})[0] == 400
+    assert call(url + "/api/reedit", {"clip": posted, "request": "a boom"})[0] == 409
+    assert call(url + "/api/reedit", {"clip": 999, "request": "a boom"})[0] == 404
+    assert call(url + "/api/reedit", {"clip": clip, "request": "a boom", "at": 2.5})[0] == 200
+    assert json.loads(call(url + "/api/run")[2])["job"] == {"reedit": clip, "request": "a boom", "at": 2.5}
+    assert call(url + "/api/reedit", {"clip": clip, "request": "again"})[0] == 409  # one run at a time

@@ -1,7 +1,7 @@
 // One clip, ready to post: its video, the text for each platform, and the steps to put it up. The Post screen and the
 // Library's side sheet both show it.
-import { Check, CheckCircle2, ChevronRight, Copy, Loader2, Trash2, Upload, X } from "lucide-react";
-import { type FormEvent, Fragment, type ReactNode, useRef, useState } from "react";
+import { Check, CheckCircle2, ChevronRight, Copy, Crosshair, Loader2, Sparkles, Trash2, Upload, X } from "lucide-react";
+import { type FormEvent, Fragment, type ReactNode, type RefObject, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -15,8 +15,10 @@ import {
   deleteClip,
   description,
   flushTexts,
+  isReedit,
   load,
   markPosted,
+  openClip,
   type Platform,
   PLATFORMS,
   postYoutube,
@@ -25,6 +27,8 @@ import {
   saveText,
   saveVerdict,
   setDraft,
+  showTab,
+  startReedit,
   useClipit,
   type Verdict,
 } from "./store";
@@ -34,8 +38,11 @@ const label = "font-heading text-[0.95rem] font-semibold";
 
 export function ClipEditor({ clip: c, layout }: { clip: Clip; layout: "page" | "sheet" }) {
   const released = useClipit((s) => s.released.includes(c.id));
+  const player = useRef<HTMLVideoElement>(null);
   const src = media(c);
-  const video = !released && <video key={src} src={src} controls preload="metadata" playsInline className="size-full object-contain" />;
+  const video = !released && (
+    <video ref={player} key={src} src={src} controls preload="metadata" playsInline className="size-full object-contain" />
+  );
   // Laid out by the room it's given, not the window's width: the same editor sits in a narrow sheet or a wide page.
   // Below 42rem the video stacks above the text; above it, the video stays put beside the text while you scroll.
   if (layout === "sheet") {
@@ -47,7 +54,7 @@ export function ClipEditor({ clip: c, layout }: { clip: Clip; layout: "page" | "
             <div className="aspect-[9/16] h-[min(62dvh,36rem)] @2xl:h-full @2xl:w-full">{video}</div>
           </div>
           <div className="p-5 pt-6 sm:p-8 @2xl:overflow-y-auto">
-            <ClipText clip={c} page={false} />
+            <ClipText clip={c} page={false} player={player} />
           </div>
         </div>
       </div>
@@ -61,13 +68,13 @@ export function ClipEditor({ clip: c, layout }: { clip: Clip; layout: "page" | "
             {video}
           </div>
         </div>
-        <ClipText clip={c} page />
+        <ClipText clip={c} page player={player} />
       </div>
     </div>
   );
 }
 
-function ClipText({ clip: c, page }: { clip: Clip; page: boolean }) {
+function ClipText({ clip: c, page, player }: { clip: Clip; page: boolean; player: RefObject<HTMLVideoElement | null> }) {
   return (
     <div className="min-w-0">
       <h2
@@ -93,6 +100,8 @@ function ClipText({ clip: c, page }: { clip: Clip; page: boolean }) {
         <PostNow clip={c} />
         <UploadBox clip={c} platform="youtube" primary={false} />
       </PlatformBlock>
+
+      <Reedit clip={c} player={player} />
 
       <div className="mt-8 flex flex-wrap items-center gap-3 border-t pt-6" role="group" aria-label="Worth posting?">
         <span className={`${label} mr-auto text-muted-foreground`}>Worth posting?</span>
@@ -325,6 +334,133 @@ function PostNow({ clip: c }: { clip: Clip }) {
         onConfirm={post}
       />
     </>
+  );
+}
+
+const clock = (t: number) => `${Math.floor(t / 60)}:${(t % 60).toFixed(1).padStart(4, "0")}`;
+
+// Ask the AI to edit the clip again: what to change, and the second of the video you mean (it only reads the speech
+// and chat, so it can't see what happens on screen). It runs as a run, in the Run tab. The server refuses the same.
+function Reedit({ clip: c, player }: { clip: Clip; player: RefObject<HTMLVideoElement | null> }) {
+  const key = `${c.id}:reedit`;
+  const text = useClipit((s) => s.drafts[key]) ?? "";
+  const [at, setAt] = useState<number | null>(null);
+  const [sending, setSending] = useState(false);
+  const run = useClipit((s) => s.run);
+  const vodGone = useClipit((s) => s.loaded && !s.data.vods.some((v) => v.id === c.vod_id));
+  const going = !!run?.running && isReedit(run.job) && run.job.reedit === c.id;
+  const blocked = c.uploads.youtube
+    ? "It's on YouTube already, and a re-edit can't change a posted video."
+    : vodGone
+      ? "Its VOD's files were deleted, so it can't be re-edited."
+      : run?.running && !going
+        ? "A run is going. You can re-edit once it ends."
+        : "";
+  const send = async (e: FormEvent) => {
+    e.preventDefault();
+    setSending(true);
+    if (await startReedit(c.id, text.trim(), at)) {
+      setDraft(key, "");
+      setAt(null);
+    }
+    setSending(false);
+  };
+  return (
+    <section className="mt-8" aria-label="Re-edit with AI">
+      <div className="border-b pb-2.5">
+        <h3 className="font-heading text-lg font-bold">Re-edit with AI</h3>
+      </div>
+      {going ? (
+        <div className="mt-4 flex items-center gap-2.5 rounded-xl bg-warn-bg px-3.5 py-3 text-sm font-medium text-warn" role="status">
+          <Loader2 className="size-4 shrink-0 animate-spin motion-reduce:animate-none" />
+          <span>{`Re-editing: “${run.job && isReedit(run.job) ? run.job.request : ""}”. The clip gets its new video when it's done.`}</span>
+          <Button
+            type="button"
+            variant="ghost"
+            size="xs"
+            className="ml-auto text-current"
+            onClick={() => {
+              openClip(null); // the sheet would cover the Run tab
+              showTab("run");
+            }}
+          >
+            See the run
+          </Button>
+        </div>
+      ) : (
+        <form className="mt-4 flex flex-col gap-2" onSubmit={(e) => void send(e)}>
+          <Textarea
+            rows={3}
+            maxLength={500}
+            required
+            aria-label="What to change"
+            placeholder="Like: a boom when he slams the desk, and zoom in on his face"
+            className="min-h-0 resize-y bg-card leading-relaxed"
+            disabled={!!blocked}
+            value={text}
+            onChange={(e) => setDraft(key, e.target.value)}
+          />
+          <p className="text-xs text-muted-foreground">
+            The AI hears the speech and reads the chat, but can't see the video: pause on the moment you mean and mark it.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {at === null ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!!blocked}
+                onClick={() => player.current && setAt(Math.round(player.current.currentTime * 10) / 10)}
+              >
+                <Crosshair data-icon="inline-start" />
+                Mark this moment
+              </Button>
+            ) : (
+              <span className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-sm tabular-nums">
+                {`At ${clock(at)}`}
+                <Button type="button" variant="ghost" size="icon-xs" aria-label="Unmark the moment" onClick={() => setAt(null)}>
+                  <X />
+                </Button>
+              </span>
+            )}
+            <Button type="submit" size="sm" className="ml-auto" disabled={!!blocked || sending || !text.trim()}>
+              {sending ? <Loader2 className="animate-spin" /> : <Sparkles data-icon="inline-start" />}
+              Re-edit
+            </Button>
+          </div>
+          {blocked && <p className="text-sm text-muted-foreground">{blocked}</p>}
+        </form>
+      )}
+      {c.reedits.length > 0 && (
+        <ol className="mt-4 flex flex-col gap-2 text-sm" aria-label="Re-edits asked for">
+          {[...c.reedits].reverse().map((r) => (
+            <li key={r.created_at + r.request} className="rounded-lg bg-muted/50 px-3 py-2">
+              <p className="break-words">
+                {`“${r.request}”`}
+                {r.at_s !== null && <span className="text-muted-foreground">{` at ${clock(r.at_s)}`}</span>}
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {when(r.created_at)}
+                {" · "}
+                {r.error ? (
+                  <span className="text-skip">{`Failed: ${r.error}`}</span>
+                ) : r.result_id !== null && r.result_id !== c.id ? (
+                  <button type="button" className="font-medium text-foreground underline-offset-2 hover:underline" onClick={() => openClip(r.result_id)}>
+                    Open the edited clip
+                  </button>
+                ) : r.result_id !== null ? (
+                  "Done"
+                ) : going ? (
+                  "Running"
+                ) : (
+                  "Didn't finish" // its runner died with the PC, say: nothing closed it
+                )}
+              </p>
+            </li>
+          ))}
+        </ol>
+      )}
+    </section>
   );
 }
 
