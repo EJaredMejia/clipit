@@ -14,7 +14,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from clipit import codex
+from clipit import codex, db
 from clipit.util import ROOT, ClipitError, logger, write_atomic
 
 TRENDS = ROOT / "trends.md"
@@ -66,6 +66,8 @@ Pick the {n} clips most likely to go viral. Rules:
   4-6: fans of the streamer enjoy it, everyone else scrolls past.
   1-3: needs stream context, an inside joke, or nothing much happens.
   A small streamer nobody outside their chat knows rarely earns more than 6: the moment itself has to carry it.
+  Only clips scored {auto_score}+ are posted, and most streams have none: then score every clip low and none is posted. That
+  is the right result, never a reason to round up.
   Riding a trend from the notes above earns points only when the clip is actually about it.
 - No links, @mentions of other accounts, or slurs in any text you write.
 - Hashtags: 3-5, mixing broad ones (gaming, twitch) with specific ones (the game, the meme). A credit line for the
@@ -189,6 +191,7 @@ def build_prompt(info: dict, cands: list[dict], n: int, trends: str) -> str:
         streamer=fenced(info.get("uploader")),
         trends=trends[:MAX_TRENDS_CHARS],
         n=n,
+        auto_score=db.AUTO_SCORE,
         candidates=fenced("\n\n".join(blocks)),
     )
 

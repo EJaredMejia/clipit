@@ -432,8 +432,10 @@ def claim_upload(
     gap: datetime.timedelta,
     now: datetime.datetime | None = None,
     first: list[str] | None = None,
+    since: datetime.datetime | None = None,
 ) -> sqlite3.Row | None:
     """Atomically take the next clip to post automatically, if the pacing allows: from a VOD polling took in the last FRESH
+    (and after `since`: a dashboard run posts only what its own polling clipped)
     (a hand rerun doesn't renew it; clips from old or hand-run VODs are posted only by hand), not on platform yet, kept by the user or unreviewed with
     an AI score of AUTO_SCORE+ (never skipped): clips of the `first` streamers ("site:login") first, then kept, then newest. At most per_day posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
     The upload then ends with set_upload (posted) or fail_upload (retried later, up to MAX_ATTEMPTS)."""
@@ -456,7 +458,7 @@ def claim_upload(
                 (
                     platform,
                     AUTO_SCORE,
-                    (now - FRESH).isoformat(),
+                    max(now - FRESH, since or now - FRESH).isoformat(),
                     MAX_ATTEMPTS,
                     (now - RETRY_AFTER).isoformat(),
                     json.dumps(first or []),
@@ -547,6 +549,11 @@ def start_run(conn: sqlite3.Connection, steps: list[str], now: datetime.datetime
     except BaseException:
         conn.execute("ROLLBACK")
         raise
+
+
+def run_started(conn: sqlite3.Connection, run_id: int) -> datetime.datetime | None:
+    row = conn.execute("SELECT started_at FROM runs WHERE id = ?", (run_id,)).fetchone()
+    return _ts(row["started_at"]) if row else None
 
 
 def beat_run(conn: sqlite3.Connection, run_id: int, steps: list[dict]) -> bool:

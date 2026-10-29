@@ -209,6 +209,20 @@ def test_claim_upload_skips_stale_and_hand_run_clips(conn):
     assert row and row["id"] == rerun  # v1 is fresh at T0; the newer hand-run clip never goes up automatically
 
 
+def test_claim_upload_since_skips_vods_polled_before_the_run(conn):
+    (before,) = kept_clips(conn, 1)  # polling took v1 at T0, an hour before the run
+    run = T0 + datetime.timedelta(hours=1)
+    db.claim(conn, "v2", "u2", "s", "top", now=run + datetime.timedelta(minutes=5))  # this run's polling took v2
+    db.finish(conn, "v2", now=run)
+    db.save_clips(conn, "v2", [{**CLIP, "score": db.AUTO_SCORE}])  # unreviewed, scored just high enough
+    (fresh,) = [r[0] for r in conn.execute("SELECT id FROM clips WHERE vod_id = 'v2'")]
+    conn.execute("UPDATE clips SET created_at = ? WHERE id = ?", (T0.isoformat(), fresh))  # older than the kept one
+    claim = [db.claim_upload(conn, "youtube", 9, datetime.timedelta(0), now=run, since=run) for _ in range(2)]
+    assert [r and r["id"] for r in claim] == [fresh, None]  # the kept clip from before the run never goes up in it
+    row = db.claim_upload(conn, "youtube", 9, datetime.timedelta(0), now=run)
+    assert row and row["id"] == before  # outside a run it's still fresh
+
+
 def test_claim_upload_takes_kept_first_then_high_scoring_unreviewed(conn):
     low, high, kept, skipped = kept_clips(conn, 4)
     for cid, verdict, score in ((low, None, db.AUTO_SCORE - 1), (high, None, db.AUTO_SCORE), (skipped, "skip", 10)):
