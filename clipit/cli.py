@@ -217,6 +217,7 @@ def reedit(conn: sqlite3.Connection, out: Path, clip_id: int, request: str, at: 
     clip = db.reedit_source(conn, clip_id)
     if not clip:
         raise ClipitError(f"there's no clip {clip_id}")
+    reedit_id = db.start_reedit(conn, clip_id, request, at)
     try:
         if clip["posted"]:
             raise ClipitError("this clip is on YouTube already, and a re-edit can't change a posted video")
@@ -224,10 +225,14 @@ def reedit(conn: sqlite3.Connection, out: Path, clip_id: int, request: str, at: 
             raise ClipitError("this clip's VOD files were deleted, so it can't be re-edited")
         with db.running(conn, clip["vod_id"]):  # the dashboard mustn't delete the VOD's files meanwhile
             new = pipeline.reedit(clip["url"], clip, request, at, ai_cmd, out)
+        saved = db.save_reedit(conn, reedit_id, clip, new)
+        if not saved:
+            (out / new["file"]).unlink(missing_ok=True)
+            raise ClipitError("the edited clip of this moment is on YouTube, and a re-edit can't change a posted video")
     except Exception as e:  # shown with the clip in the dashboard, then the run fails
-        db.fail_reedit(conn, clip_id, request, at, str(e) or type(e).__name__)
+        db.fail_reedit(conn, str(e) or type(e).__name__, reedit_id=reedit_id)
         raise
-    result, old = db.save_reedit(conn, clip, new, request, at)
+    result, old = saved
     if old:
         try:
             (out / old).unlink(missing_ok=True)

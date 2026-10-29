@@ -155,6 +155,7 @@ def test_non_finite_times_are_rejected_not_clamped_into_another_moment():
 def test_a_marked_second_of_the_video_maps_to_the_vod_across_cuts():
     cut = version(cuts=[{"start": 112.0, "end": 115.0}])
     assert edit.source_time(cut, 1.0) == 111.0 and edit.source_time(cut, 4.0) == 117.0  # 2 s in, then the cut
+    assert edit.source_time(cut, 2.0) == 115.0  # right at the cut: what plays after it, not the footage cut out
     assert edit.source_time(cut, 999) == 140.0
 
 
@@ -162,7 +163,9 @@ def test_a_reedit_must_change_something_near_the_moment_marked():
     before = version(zooms=[{"start": 120.0, "end": 121.0, "zoom": 1.3}])
     assert edit.asked(before, before, None) == ["nothing changed yet from the version the owner asked to change"]
     far = version(zooms=before["edit"]["zooms"], sfx=[{"at": 130.0, "sound": "boom"}])
-    assert "nothing in the edit is within" in edit.asked(far, before, 125.0)[0]
+    assert "changed nothing within" in edit.asked(far, before, 125.0)[0]
+    assert "changed nothing within" in edit.asked(far, before, 120.5)[0]  # the zoom there was there before
+    assert edit.asked(version(), before, 120.5) == []  # taking the zoom away is a change there too
     near = version(zooms=before["edit"]["zooms"], sfx=[{"at": 126.0, "sound": "boom"}])
     assert edit.asked(near, before, 125.0) == []
 

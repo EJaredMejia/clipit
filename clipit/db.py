@@ -367,20 +367,31 @@ def reedit_source(conn: sqlite3.Connection, clip_id: int) -> dict | None:
     return row and {**row, "pick": json.loads(row["pick"]) if row["pick"] else None}
 
 
-def save_reedit(conn: sqlite3.Connection, source: dict, clip: dict, request: str, at: float | None) -> tuple[int, str | None]:
+def start_reedit(conn: sqlite3.Connection, clip_id: int, request: str, at: float | None) -> int:
+    """Record a re-edit as it starts, so one that's killed (Stop, a timeout) still shows: open until it ends."""
+    cur = conn.execute(
+        "INSERT INTO reedits (clip_id, request, at_s, created_at) VALUES (?, ?, ?, ?)",
+        (clip_id, request, at, utcnow().isoformat()),
+    )
+    return cur.lastrowid or 0
+
+
+def save_reedit(conn: sqlite3.Connection, reedit_id: int, source: dict, clip: dict) -> tuple[int, str | None] | None:
     """Record a re-edit that worked: the edited clip of the source's moment is now this one (made, or replaced when there
-    was one), keeping its id, verdict and the text the user edited. Returns its id and the video it replaced, if any."""
-    conn.execute("BEGIN IMMEDIATE")
+    was one), keeping its id, verdict and the text the user edited. Returns its id and the video it replaced, if any.
+    None, changing nothing, when the clip it would replace is on YouTube or going up: its post must keep its video."""
+    conn.execute("BEGIN IMMEDIATE")  # an upload claims its clip the same way: it can't start in between
     try:
         old = conn.execute(
-            "SELECT file FROM clips WHERE vod_id = ? AND start_s = ? AND end_s = ? AND variant = ?",
+            """SELECT file, EXISTS (SELECT 1 FROM uploads WHERE clip_id = clips.id AND status != 'failed') AS posted
+               FROM clips WHERE vod_id = ? AND start_s = ? AND end_s = ? AND variant = ?""",
             (source["vod_id"], clip["start"], clip["end"], variant(clip)),
         ).fetchone()
+        if old and old["posted"]:
+            conn.execute("ROLLBACK")
+            return None
         result = _upsert(conn, source["vod_id"], clip, utcnow().isoformat())
-        conn.execute(
-            "INSERT INTO reedits (clip_id, result_id, request, at_s, created_at, edit_score) VALUES (?, ?, ?, ?, ?, ?)",
-            (source["id"], result, request, at, utcnow().isoformat(), clip.get("edit_score")),
-        )
+        conn.execute("UPDATE reedits SET result_id = ?, edit_score = ? WHERE id = ?", (result, clip.get("edit_score"), reedit_id))
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
@@ -388,10 +399,11 @@ def save_reedit(conn: sqlite3.Connection, source: dict, clip: dict, request: str
     return result, old["file"] if old and old["file"] != clip["file"] else None
 
 
-def fail_reedit(conn: sqlite3.Connection, clip_id: int, request: str, at: float | None, error: str) -> None:
+def fail_reedit(conn: sqlite3.Connection, error: str, reedit_id: int | None = None, clip_id: int | None = None) -> None:
+    """End the open re-edit (reedit_id), or every open one of a clip (clip_id: its runner, when the step was killed)."""
     conn.execute(
-        "INSERT INTO reedits (clip_id, request, at_s, created_at, error) VALUES (?, ?, ?, ?, ?)",
-        (clip_id, request, at, utcnow().isoformat(), error[:500]),
+        "UPDATE reedits SET error = ? WHERE (id = ? OR clip_id = ?) AND result_id IS NULL AND error IS NULL",
+        (error[:500], reedit_id, clip_id),
     )
 
 

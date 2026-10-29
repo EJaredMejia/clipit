@@ -199,22 +199,27 @@ def owner_request(request: str, at: float | None, clip: dict) -> str:
 
 
 def asked(current: dict, before: dict, at: float | None) -> list[str]:
-    """What our own checks find undone of the user's re-edit: nothing changed yet, or nothing near the moment marked."""
+    """What our own checks find undone of the user's re-edit: nothing changed yet, or no change (an effect added, moved
+    or removed) near the moment marked."""
     if all(current.get(k) == before.get(k) for k in CLIP_KEYS):
         return ["nothing changed yet from the version the owner asked to change"]
-    e = current.get("edit") or {}
-    spans = [*e.get("zooms", []), *e.get("texts", []), *e.get("cuts", [])]
-    if at is not None and not (
-        any(abs(s["at"] - at) <= NEAR for s in e.get("sfx", [])) or any(s["start"] - NEAR <= at <= s["end"] + NEAR for s in spans)
+
+    def effects(c: dict) -> set[str]:
+        e = c.get("edit") or {}
+        return {json.dumps(x, sort_keys=True) for k in ("cuts", "zooms", "sfx", "texts") for x in e.get(k, [])}
+
+    changed = [json.loads(x) for x in effects(current) ^ effects(before)]
+    if at is not None and not any(
+        abs(x["at"] - at) <= NEAR if "at" in x else x["start"] - NEAR <= at <= x["end"] + NEAR for x in changed
     ):
-        return [f"the owner marked {at:.1f}, but nothing in the edit is within {NEAR:g} s of it"]
+        return [f"the owner marked {at:.1f}, but the edit changed nothing within {NEAR:g} s of it"]
     return []
 
 
 def source_time(clip: dict, t: float) -> float:
-    """The VOD second that plays t seconds into the clip's video, across its cuts."""
+    """The VOD second that plays t seconds into the clip's video, across its cuts: at a cut, what plays after it."""
     for a, b in kept(clip):
-        if t <= b - a:
+        if t < b - a:
             return a + t
         t -= b - a
     return clip["end"]

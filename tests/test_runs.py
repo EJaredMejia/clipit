@@ -211,3 +211,18 @@ def test_a_reedit_job_passes_the_request_as_one_argument() -> None:
     assert args == ["--reedit", "7", "--request=-x a boom here", "--at", "3.00"]
     for bad in ((7, " ", None), (7, "x" * 501, None), (7, "x", float("nan")), (7, "x", True), (True, "x", None)):
         assert runs.reedit_job(*bad) is None, bad
+
+
+def test_a_killed_reedit_still_shows_on_its_clip(conn, tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(runs, "REEDIT_TIMEOUT", 0.5)
+    fake(monkeypatch, {"--reedit": "import time; time.sleep(60)"})
+    db.record_manual(conn, "v1", "u")
+    db.save_clips(conn, "v1", [{"idx": 1, "file": "v1/a.mp4", "start": 1.0, "end": 20.0, "title": "t", "hook": "",
+                                "caption": "", "youtube": "", "streamer": "", "trend": "", "sound": "", "score": 7.0, "why": ""}])  # fmt: skip
+    db.start_reedit(conn, 1, "a boom", None)  # what clipit --reedit does first, before it's killed
+    job = runs.reedit_job(1, "a boom", None)
+    assert job
+    run_id = db.start_run(conn, ["Re-edit the clip"], job)
+    assert run_id
+    runs.run(conn, tmp_path, run_id)
+    assert conn.execute("SELECT error FROM reedits").fetchone()[0] == "the run's step failed"

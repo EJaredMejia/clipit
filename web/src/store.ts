@@ -10,7 +10,7 @@ export const PLATFORMS = { tiktok: "TikTok", youtube: "YouTube" } as const;
 export type Platform = keyof typeof PLATFORMS;
 export type Verdict = "keep" | "skip";
 export type Upload = { url: string | null; at: string; status: "uploading" | "done" };
-// A re-edit the user asked for (clipit --reedit): result_id is the edited clip it made, null when it failed.
+// A re-edit the user asked for (clipit --reedit): result_id is the edited clip it made; neither it nor error while it runs.
 export type Reedit = { request: string; at_s: number | null; created_at: string; error: string | null; result_id: number | null };
 export type Clip = {
   id: number;

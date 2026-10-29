@@ -448,8 +448,12 @@ function Reedit({ clip: c, player }: { clip: Clip; player: RefObject<HTMLVideoEl
                   <button type="button" className="font-medium text-foreground underline-offset-2 hover:underline" onClick={() => openClip(r.result_id)}>
                     Open the edited clip
                   </button>
-                ) : (
+                ) : r.result_id !== null ? (
                   "Done"
+                ) : going ? (
+                  "Running"
+                ) : (
+                  "Didn't finish" // its runner died with the PC, say: nothing closed it
                 )}
               </p>
             </li>
