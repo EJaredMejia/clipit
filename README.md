@@ -86,6 +86,12 @@ for dead air and a slow open. The loop goes on until a review scores the edit 9/
 
 The edited clips go next to the plain ones (`clips/..._edited.mp4`, `posts_edited.md`) and are added to the
 dashboard; the plain clips stay as they were. Every review is kept in `edit/` to see what the AI changed and why.
+In the dashboard, tick *High-effort edits* in the Run settings, or ask for a change to one clip with
+[Re-edit with AI](#dashboard):
+
+```bash
+clipit --reedit 42 --request "a ding and a punch-in when he sees the second card" --at 6
+```
 
 ### Clip live streamers automatically
 
@@ -131,7 +137,14 @@ runs in the background.
   then `clipit --upload`), and watch it go: each step, what it's doing now (streamer, VOD 2 of 6, transcribing 3/12)
   and its output. A notice pops up when it ends, with how many clips it made and posted. The run goes on if you close
   the dashboard, and shows again when you reopen it. *Stop* ends clipping right away, ffmpeg and all, but lets a
-  YouTube post that's going finish first, so it's never cut off half sent.
+  YouTube post that's going finish first, so it's never cut off half sent. *Run settings* below it set what the next
+  runs do: how many streamers, clips per VOD, the language, streamers to clip and post first, high-effort edits, and
+  whether to post at all. They're saved, and apply to runs from the dashboard (a `--poll` on a timer keeps its flags).
+- **Re-edit with AI:** in any clip, say what to change ("a boom when he slams the desk") and click *Re-edit*. Pause the
+  video on the moment you mean and click *Mark this moment* first: the AI hears the speech and reads the chat, but
+  can't see the video. The AI edits the clip again and reviews it until it does what you asked (clipit checks that the
+  edit changed something near the second you marked), then renders a new video in place of the old one. A plain clip
+  gets an edited version of its own. It runs as a run, in the Run tab; a clip already on YouTube can't be re-edited.
 - **Clips:** play each one, filter by streamer or search, sort by AI score, and copy the YouTube title, YouTube
   description and TikTok caption with one click.
 - **Review:** mark a clip *Keep* or *Skip*. The tiles at the top count what's left to review and what you kept but
@@ -198,6 +211,7 @@ have the rights to: three copyright strikes delete a channel.
 | `--youtube-login` | | Sign in to the YouTube channel to post to. Once. |
 | `--prioritize` | | `twitch:name` or `kick:name`: with `--poll`, clip their latest VOD first; with `--upload`, post their fresh clips first. Repeatable. For an event that's big right now, like `twitch:caedrel` during Worlds. |
 | `--upload` | | Post a fresh clip you kept, or the AI scored 8+, to YouTube Shorts, if one is due. |
+| `--reedit ID` | | Have the AI edit clip ID (its id in the dashboard) again until it does what `--request` asks. `--at S`: the second of the clip's video you mean. |
 
 ## Output
 

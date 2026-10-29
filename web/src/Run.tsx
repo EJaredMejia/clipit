@@ -1,10 +1,13 @@
-// The Run tab: start clipit --poll, then --upload, from here, and watch each step and its output as it goes. The run
-// goes on when the dashboard is closed, and shows here again when it's reopened.
+// The Run tab: start clipit --poll, then --upload, from here, with the settings saved below, and watch each step and
+// its output as it goes. Re-edits started from a clip run here too. The run goes on when the dashboard is closed, and
+// shows here again when it's reopened.
 import { Check, Circle, CircleSlash, Loader2, Play, Square, X } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
-import { type Run as RunState, runResult, type Step, startRun, stopRun, useClipit } from "./store";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { isReedit, openClip, type Run as RunState, runResult, type Settings, type Step, saveSettings, startRun, stopRun, useClipit } from "./store";
 import { Confirm, Meta, when } from "./ui";
 
 const STEP_ICON: Record<Step["status"], React.ReactNode> = {
@@ -18,7 +21,7 @@ const STEP_ICON: Record<Step["status"], React.ReactNode> = {
 
 export function Run() {
   const run = useClipit((s) => s.run);
-  const made = useClipit(useShallow((s) => (s.run ? runResult(s.run, s.data.clips) : null)));
+  const made = useClipit(useShallow((s) => (s.run && !isReedit(s.run.job) ? runResult(s.run, s.data.clips) : null)));
   const [asking, setAsking] = useState(false);
   const [starting, setStarting] = useState(false);
   const running = !!run?.running;
@@ -37,7 +40,8 @@ export function Run() {
           <h2 className="font-heading text-3xl font-bold">Run clipit</h2>
           <p className="mt-2 text-muted-foreground">
             Clips the latest VODs of trending and big streamers, then posts the next due clip to YouTube Shorts, at most 10 a
-            day and an hour apart. The same as clipit --poll, then clipit --upload. You get a notice here when it ends.
+            day and an hour apart. The same as clipit --poll, then clipit --upload, set up below. You get a notice here
+            when it ends.
           </p>
         </div>
         {running ? (
@@ -64,6 +68,7 @@ export function Run() {
           <Meta
             parts={[
               <b className="font-semibold text-foreground">{run.stopping ? "Stopping" : running ? "Running" : "Last run"}</b>,
+              ...jobParts(run.job),
               `started ${when(run.started)}`,
               ...(run.ended ? [`ended ${when(run.ended)}`] : []),
               ...(made ? [`${made.clips} new clip${made.clips === 1 ? "" : "s"}`, `${made.posted} posted to YouTube`] : []),
@@ -95,6 +100,8 @@ export function Run() {
         run && <p className="text-muted-foreground">No runs yet.</p>
       )}
 
+      {run && <RunSettings saved={run.settings} running={running} />}
+
       <Confirm
         open={asking}
         onOpenChange={setAsking}
@@ -109,6 +116,105 @@ export function Run() {
         onConfirm={() => void stopRun()}
       />
     </div>
+  );
+}
+
+// What the run was asked to do: the clip it re-edits, or what it clips differently from the defaults.
+function jobParts(job: RunState["job"]): React.ReactNode[] {
+  if (isReedit(job)) {
+    return [
+      <button type="button" className="underline-offset-2 hover:underline" onClick={() => openClip(job.reedit)}>
+        {`Re-edit of clip ${job.reedit}`}
+      </button>,
+      `“${job.request}”`,
+    ];
+  }
+  if (!job) return [];
+  return [...(job.high_effort ? ["high effort"] : []), ...(job.upload ? [] : ["no posting"])];
+}
+
+type Form = Omit<Settings, "top" | "clips" | "prioritize"> & { top: string; clips: string; prioritize: string };
+const asForm = (s: Settings): Form => ({ ...s, top: String(s.top), clips: String(s.clips), prioritize: s.prioritize.join("\n") });
+const fieldLabel = "font-heading text-[0.95rem] font-semibold";
+
+// How the next runs go, saved on the server: the flags of clipit --poll and --upload. The server checks them.
+function RunSettings({ saved, running }: { saved: Settings; running: boolean }) {
+  const [form, setForm] = useState<Form | null>(null); // null: showing what's saved
+  const [saving, setSaving] = useState(false);
+  const f = form ?? asForm(saved);
+  const settings: Settings = {
+    ...f,
+    top: Number(f.top),
+    clips: Number(f.clips),
+    lang: f.lang.trim(),
+    prioritize: f.prioritize.split(/[\s,]+/).filter(Boolean),
+  };
+  const changed = form !== null && JSON.stringify(settings) !== JSON.stringify(saved);
+  const edit = (patch: Partial<Form>) => setForm({ ...f, ...patch });
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    if (await saveSettings(settings)) setForm(null);
+    setSaving(false);
+  };
+  const number = (key: "top" | "clips", name: string, hint: string) => (
+    <label className="flex flex-col gap-1.5">
+      <span className={fieldLabel}>{name}</span>
+      <Input type="number" required min={1} max={20} step={1} className="h-10 bg-card" value={f[key]} onChange={(e) => edit({ [key]: e.target.value })} />
+      <span className="text-xs text-muted-foreground">{hint}</span>
+    </label>
+  );
+  const check = (key: "high_effort" | "upload", name: string, hint: string) => (
+    <label className="flex items-start gap-3">
+      <input type="checkbox" className="mt-1 size-4 accent-primary" checked={f[key]} onChange={(e) => edit({ [key]: e.target.checked })} />
+      <span>
+        <span className={fieldLabel}>{name}</span>
+        <span className="block text-sm text-muted-foreground">{hint}</span>
+      </span>
+    </label>
+  );
+  return (
+    <form aria-label="Run settings" className="rounded-2xl border bg-card p-5" onSubmit={(e) => void submit(e)}>
+      <h3 className="font-heading text-lg font-bold">Run settings</h3>
+      <p className="mt-1 text-sm text-muted-foreground">
+        {running ? "The next run uses these. The run going now keeps the ones it started with." : "The next run uses these."}
+      </p>
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        {number("top", "Streamers to clip", "Trending first, then the biggest live")}
+        {number("clips", "Clips per VOD", "How many the AI picks from each")}
+        <label className="flex flex-col gap-1.5">
+          <span className={fieldLabel}>Language</span>
+          <Input className="h-10 bg-card" maxLength={3} pattern="[A-Za-z]{0,3}" value={f.lang} onChange={(e) => edit({ lang: e.target.value })} />
+          <span className="text-xs text-muted-foreground">Stream language code, like EN. Empty for any</span>
+        </label>
+      </div>
+      <label className="mt-4 flex flex-col gap-1.5">
+        <span className={fieldLabel}>Streamers to clip and post first</span>
+        <Textarea
+          rows={2}
+          placeholder="twitch:caedrel"
+          className="min-h-0 resize-y bg-card font-mono text-sm"
+          value={f.prioritize}
+          onChange={(e) => edit({ prioritize: e.target.value })}
+        />
+        <span className="text-xs text-muted-foreground">One per line, twitch:name or kick:name, while an event they cover is big</span>
+      </label>
+      <div className="mt-4 flex flex-col gap-3">
+        {check("high_effort", "High-effort edits", "The AI also edits every clip (cuts, zooms, sounds, pop-up text) and reviews it until it's really good. Much slower")}
+        {check("upload", "Post to YouTube after clipping", "Off: the run only clips, nothing goes up")}
+      </div>
+      <div className="mt-5 flex flex-wrap gap-2">
+        <Button type="submit" disabled={!changed || saving}>
+          {saving ? <Loader2 className="animate-spin motion-reduce:animate-none" /> : <Check />}
+          Save settings
+        </Button>
+        {form && (
+          <Button type="button" variant="ghost" onClick={() => setForm(null)}>
+            Undo changes
+          </Button>
+        )}
+      </div>
+    </form>
   );
 }
 

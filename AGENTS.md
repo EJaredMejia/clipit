@@ -59,13 +59,13 @@ VODs to process; `cli.py` is the only place that parses flags, sets up logging, 
 | `moments.py` | loudness + chat scoring, picks candidate windows |
 | `transcribe.py` | Whisper on the candidate windows |
 | `ai.py` | prompts, calling the AI CLI, validating its picks, trend research |
-| `edit.py` | `--high-effort`: the AI edits each pick (cuts, zooms, sound effects, pop-up text) and reviews it in a loop until a review passes it, checked in code |
+| `edit.py` | `--high-effort`: the AI edits each pick (cuts, zooms, sound effects, pop-up text) and reviews it in a loop until a review passes it, checked in code; `--reedit` uses the same loop with the user's request |
 | `codex.py` | isolated Codex CLI provider, restricted model catalog and structured clip output |
 | `facecam.py` | webcam overlay detection |
 | `render.py` | captions, ffmpeg render, `posts.md` |
 | `util.py` | logging, shell helpers with timeouts, atomic writes, `ClipitError` |
 | `dashboard.py` | `--dashboard`: local HTTP server (127.0.0.1) for the built page in `clipit/web/` and its JSON API, reads and writes via `db.py`, and starts runs (`runs.py`) when the page asks |
-| `runs.py` | runs started from the dashboard: a runner process of their own (`--run-steps`) that does `--poll` then `--upload`, in the `runs` table and `out/logs/run-<id>.log`; steps say what they're doing with `runs.progress`; Stop kills a clipping step's whole process tree but lets a YouTube post finish |
+| `runs.py` | runs started from the dashboard: a runner process of their own (`--run-steps`) that does its job, `--poll` then `--upload` with the run settings saved in the page (`SETTINGS`, `settings` table), or one `--reedit`, in the `runs` table and `out/logs/run-<id>.log`; steps say what they're doing with `runs.progress`; Stop kills a clipping step's whole process tree but lets a YouTube post finish |
 | `youtube.py` | `--youtube-login` and `--upload`: posts kept clips to YouTube Shorts, records each post in `uploads` |
 
 `web/src/` is the dashboard page: `store.ts` is its zustand store (state, and every call to the server as plain
@@ -76,11 +76,11 @@ stays the only server: the page never talks to SQLite or anything else directly,
 | Page file | Job |
 |---|---|
 | `App.tsx` | header, navigation (pill bar on wide screens, tab bar on phones), the clip side sheet, the connection light |
-| `Run.tsx` | run `--poll` then `--upload` from the page: steps, live output, a notice when it ends |
+| `Run.tsx` | run `--poll` then `--upload` from the page: steps, live output, a notice when it ends; the run settings |
 | `Review.tsx` | the deck: drag, throw, keys, undo |
 | `Post.tsx` | kept clips waiting to go up, one at a time |
 | `Library.tsx` | every clip as a frame: filters, search, opens the sheet |
-| `Editor.tsx` | one clip's post text, upload steps, verdict and delete: used by Post and the sheet |
+| `Editor.tsx` | one clip's post text, upload steps, re-edit with AI, verdict and delete: used by Post and the sheet |
 | `Vods.tsx` | the VODs table |
 | `ui.tsx` | formatting, links, badges, lazy video frames, confirm dialogs |
 
@@ -159,6 +159,8 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
 - Log with `util.log` / `util.logger`, never `print`. Use `logger.exception` when a traceback helps.
 
 ### Code
+- Every feature gets a control in the dashboard too, not only a CLI flag: the user works from the dashboard, and the
+  CLI is for scripts and agents. A run setting goes in `runs.SETTINGS`, a one-off job in `runs.steps`.
 - Python 3.11+, type hints on every public function (pyright checks them), imports sorted by ruff.
 - Silence pyright only for wrong third-party stubs, with `# pyright: ignore[rule]` and the reason on the same line.
 - New logic gets a pytest test in `tests/`, using fakes (`monkeypatch`, `tmp_path`) instead of the network.
