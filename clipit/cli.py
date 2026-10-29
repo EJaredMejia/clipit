@@ -175,7 +175,8 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
         log("dry run: not posting to YouTube")
     elif a.upload:
         try:
-            youtube.upload_next(conn, a.out, a.prioritize)
+            # a dashboard run posts only clips of the VODs its own polling took
+            youtube.upload_next(conn, a.out, a.prioritize, run_id=runs.current())
         except Exception:  # logged, and retried on a later run: the rest of this run (polling) still happens
             logger.exception("YouTube upload failed")
             upload_failed = True

@@ -1,6 +1,6 @@
 """Post clips to YouTube Shorts through the official YouTube Data API.
 
-Only clips from polled VODs of the last db.FRESH are posted: the ones the user marked Keep, then unreviewed ones the AI
+Only clips from polled VODs of the last db.FRESH are posted (in a dashboard run, only from VODs that run polled): the ones the user marked Keep, then unreviewed ones the AI
 scored db.AUTO_SCORE+, never skipped ones, at most PER_DAY a day and GAP apart: slow posting through the official API
 is what keeps the channel clear of spam enforcement. Never replace this with browser automation of YouTube Studio.
 
@@ -66,9 +66,9 @@ def metadata(clip: sqlite3.Row) -> dict:
     }
 
 
-def upload_next(conn: sqlite3.Connection, out: Path, first: list[str] | None = None) -> str | None:
+def upload_next(conn: sqlite3.Connection, out: Path, first: list[str] | None = None, run_id: int | None = None) -> str | None:
     """Post the next due clip (db.claim_upload) that isn't on YouTube yet, if the pacing allows. Returns its link.
-    first: streamers ("twitch:login", "kick:login") whose clips go ahead of the rest."""
+    first: streamers ("twitch:login", "kick:login") whose clips go ahead of the rest. run_id: only VODs that dashboard run polled."""
     for clip_id in db.stuck_uploads(conn, "youtube", utcnow() - STUCK):
         logger.warning(
             "clip %d was being posted to YouTube when a run stopped, so it may be up: check YouTube Studio, then in the "
@@ -76,7 +76,7 @@ def upload_next(conn: sqlite3.Connection, out: Path, first: list[str] | None = N
             clip_id,
         )
     creds = _credentials()  # before claiming: a broken login must not use up a clip's attempts
-    clip = db.claim_upload(conn, "youtube", PER_DAY, GAP, first=first)
+    clip = db.claim_upload(conn, "youtube", PER_DAY, GAP, first=first, run_id=run_id)
     if not clip:
         log("no YouTube post due: no fresh clip is kept or scored high enough, or the last post was too recent")
         return None

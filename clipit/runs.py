@@ -190,6 +190,11 @@ def _step(conn: sqlite3.Connection, run_id: int, steps: list[dict], cmd: list[st
 _report: tuple[sqlite3.Connection, int] | None = None  # set in a step of a dashboard run (reporting)
 
 
+def current() -> int | None:
+    """The dashboard run this process is a step of, if any."""
+    return int(run_id) if (run_id := os.environ.get(RUN)) else None
+
+
 def reporting(conn: sqlite3.Connection) -> None:
     """In a step of a dashboard run (its RUN is set): progress() reports to the run, through conn."""
     global _report

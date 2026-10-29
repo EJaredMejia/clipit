@@ -175,6 +175,10 @@ MIGRATIONS = [
         error      TEXT
     );
     """,
+    # The dashboard run whose polling claimed the VOD (NULL outside one): a run posts only its own clips.
+    """
+    ALTER TABLE vods ADD COLUMN run_id INTEGER;
+    """,
 ]
 TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")
@@ -200,8 +204,11 @@ def connect(path: Path) -> sqlite3.Connection:
     return conn
 
 
-def claim(conn: sqlite3.Connection, vod_id: str, url: str, login: str | None, tier: str, now=None) -> bool:
-    """Atomically take a VOD for processing. False when it's done, another run has it, or it failed too often."""
+def claim(
+    conn: sqlite3.Connection, vod_id: str, url: str, login: str | None, tier: str, now=None, run_id: int | None = None
+) -> bool:
+    """Atomically take a VOD for processing, for the dashboard run run_id if any. False when it's done, another run has
+    it, or it failed too often."""
     now = now or utcnow()
     conn.execute("BEGIN IMMEDIATE")  # take the write lock before reading, so two pollers can't both claim
     try:
@@ -215,13 +222,13 @@ def claim(conn: sqlite3.Connection, vod_id: str, url: str, login: str | None, ti
                 conn.execute("ROLLBACK")
                 return False
             conn.execute(
-                "UPDATE vods SET status = 'processing', attempts = attempts + 1, error = NULL, claimed_at = ? WHERE id = ?",
-                (now.isoformat(), vod_id),
+                "UPDATE vods SET status = 'processing', attempts = attempts + 1, error = NULL, claimed_at = ?, run_id = ? WHERE id = ?",
+                (now.isoformat(), run_id, vod_id),
             )
         else:
             conn.execute(
-                "INSERT INTO vods (id, url, login, tier, status, attempts, claimed_at) VALUES (?, ?, ?, ?, 'processing', 1, ?)",
-                (vod_id, url, login, tier, now.isoformat()),
+                "INSERT INTO vods (id, url, login, tier, status, attempts, claimed_at, run_id) VALUES (?, ?, ?, ?, 'processing', 1, ?, ?)",
+                (vod_id, url, login, tier, now.isoformat(), run_id),
             )
         conn.execute("COMMIT")
         return True
@@ -537,8 +544,10 @@ def claim_upload(
     gap: datetime.timedelta,
     now: datetime.datetime | None = None,
     first: list[str] | None = None,
+    run_id: int | None = None,
 ) -> sqlite3.Row | None:
     """Atomically take the next clip to post automatically, if the pacing allows: from a VOD polling took in the last FRESH
+    (and in a dashboard run, run_id: one its own polling took)
     (a hand rerun doesn't renew it; clips from old or hand-run VODs are posted only by hand), not on platform yet, kept by the user or unreviewed with
     an AI score of AUTO_SCORE+ (never skipped): clips of the `first` streamers ("site:login") first, then kept, then newest. At most per_day posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
     The upload then ends with set_upload (posted) or fail_upload (retried later, up to MAX_ATTEMPTS)."""
@@ -555,13 +564,15 @@ def claim_upload(
                 """SELECT c.id, c.file, c.title, c.youtube, c.caption, c.edited FROM clips c
                    JOIN vods v ON v.id = c.vod_id
                    LEFT JOIN uploads u ON u.clip_id = c.id AND u.platform = ?
-                   WHERE (c.verdict = 'keep' OR c.verdict IS NULL AND c.score >= ?) AND v.tier != 'manual' AND v.claimed_at >= ?
+                   WHERE (c.verdict = 'keep' OR c.verdict IS NULL AND c.score >= ?) AND v.tier != 'manual' AND v.claimed_at >= ? AND (? IS NULL OR v.run_id = ?)
                      AND (u.clip_id IS NULL OR (u.status = 'failed' AND u.attempts < ? AND u.uploaded_at < ?))
                    ORDER BY IIF(v.url LIKE '%kick.com/%', 'kick:', 'twitch:') || lower(v.login) NOT IN (SELECT value FROM json_each(?)), c.verdict IS NULL, c.created_at DESC, c.idx LIMIT 1""",
                 (
                     platform,
                     AUTO_SCORE,
                     (now - FRESH).isoformat(),
+                    run_id,
+                    run_id,
                     MAX_ATTEMPTS,
                     (now - RETRY_AFTER).isoformat(),
                     json.dumps(first or []),
