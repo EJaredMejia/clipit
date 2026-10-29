@@ -136,6 +136,24 @@ def test_high_effort_edits_each_pick_into_files_of_its_own(stages, monkeypatch):
     assert (work / "posts_edited.md").exists()
 
 
+def test_picks_scored_under_min_score_are_dropped_before_rendering(stages, monkeypatch):
+    _, out = stages
+    picked = pipeline.ai.pick_clips
+
+    def two(*a):
+        (c,) = picked(*a)
+        return [c, {**c, "start": c["start"] + 30, "end": c["end"] + 30, "score": pipeline.MIN_SCORE - 1}]
+
+    monkeypatch.setattr(pipeline.ai, "pick_clips", two)
+    _, clips = pipeline.process_vod("https://example/vod", n_clips=2, ai_cmd="ai", out_root=out)
+    assert [c["score"] for c in clips] == [8.0]
+
+    monkeypatch.setattr(pipeline.ai, "pick_clips", lambda *a: [{**c, "score": 1.0} for c in picked(*a)])
+    monkeypatch.setattr(pipeline.source, "stream_urls", lambda url: pytest.fail("fetched the video with nothing to render"))
+    _, clips = pipeline.process_vod("https://example/vod2", n_clips=1, ai_cmd="ai", out_root=out / "b")
+    assert clips == []  # a VOD with only trash picks is done, not failed
+
+
 def test_high_effort_leaves_low_scored_picks_plain(stages, monkeypatch):
     _, out = stages
     picked = pipeline.ai.pick_clips

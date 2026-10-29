@@ -21,6 +21,7 @@ from clipit import ai, db, edit, facecam, kick, moments, render, runs, source, t
 from clipit.util import ROOT, ClipitError, log, logger, mmss, slug, write_atomic
 
 MAX_DURATION = 48 * 3600  # bounds disk use (~2.5 GB of audio); longer VODs are skipped
+MIN_SCORE = 5  # picks the AI scored under this (1-10) are dropped: trash nobody would keep, not worth rendering
 
 
 def cached_json(path: Path, make: Callable[[], Any]) -> Any:
@@ -79,7 +80,7 @@ def process_vod(
     info: dict | None = None,
     high_effort: bool = False,
 ) -> tuple[Path, list[dict]]:
-    """Make up to n_clips clips from a VOD. Returns (work folder, rendered clips). Raises ClipitError when it can't.
+    """Make up to n_clips clips from a VOD, none the AI scored under MIN_SCORE. Returns (work folder, rendered clips). Raises ClipitError when it can't.
     `info` is source.fetch_info(url), when the caller already has it. high_effort: the AI edits each pick scored db.AUTO_SCORE+
     and reviews it until it's done (clipit.edit), into picks_edited.json and posts_edited.md so the plain clips stay as they are."""
     info = info or source.fetch_info(url)
@@ -135,6 +136,12 @@ def process_vod(
         return ai.pick_clips(ai_cmd, info, cands, n_clips, work)
 
     picks = cached_json(work / "picks.json", ask)  # delete picks.json to re-ask the AI
+    if dropped := [p for p in picks if p["score"] < MIN_SCORE]:
+        log(f"dropping {len(dropped)} of {len(picks)} picks the AI scored under {MIN_SCORE}")
+        picks = [p for p in picks if p["score"] >= MIN_SCORE]
+    if not picks:
+        log("no pick worth rendering: the VOD has no good clips")
+        return work, []
     words = [w for segs in tr.values() for s in segs for w in s["words"]]
     picks_file, posts_file = ("picks_edited.json", "posts_edited.md") if high_effort else ("picks.json", "posts.md")
     if high_effort:
