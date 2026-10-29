@@ -181,7 +181,7 @@ function RunSettings({ saved, running }: { saved: Settings; running: boolean }) 
       </p>
       <div className="mt-4 grid gap-4 sm:grid-cols-3">
         {number("top", "Streamers to clip", "Trending first, then the biggest live")}
-        {number("clips", "Clips per VOD", "How many the AI picks from each")}
+        {number("clips", "Max clips per VOD", "The AI picks up to this many, fewer or none if the VOD is weak")}
         <label className="flex flex-col gap-1.5">
           <span className={fieldLabel}>Language</span>
           <Input className="h-10 bg-card" maxLength={3} pattern="[A-Za-z]{0,3}" value={f.lang} onChange={(e) => edit({ lang: e.target.value })} />

@@ -131,8 +131,8 @@ def process_vod(
     cands = candidates(windows, tr, msgs, loud, rate)
 
     def ask():
-        log(f"asking the AI to pick {n_clips} clips from {len(cands)} candidates")
-        progress(f"The AI is picking {n_clips} clips from {len(cands)} moments")
+        log(f"asking the AI to pick up to {n_clips} clips from {len(cands)} candidates")
+        progress(f"The AI is picking up to {n_clips} clips from {len(cands)} moments")
         return ai.pick_clips(ai_cmd, info, cands, n_clips, work)
 
     picks = cached_json(work / "picks.json", ask)  # delete picks.json to re-ask the AI
