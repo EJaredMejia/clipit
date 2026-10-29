@@ -182,7 +182,8 @@ def process_vod(
     if not rendered:
         raise ClipitError("every clip failed to render, see the log")
 
-    write_atomic(work / picks_file, json.dumps(picks, indent=2))
+    # dropped picks stay in the file: an old clip of one, kept by the user, is found there to re-edit it (made_as)
+    write_atomic(work / picks_file, json.dumps([*picks, *dropped], indent=2))
     render.write_posts(work / posts_file, info, url, rendered)
     log(f"done: {len(rendered)} clips in {work / 'clips'} (captions + titles in {work / posts_file})")
     return work, rendered
