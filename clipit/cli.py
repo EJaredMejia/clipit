@@ -57,7 +57,9 @@ def refresh_stale_trends(trends_ai: str | None) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(prog="clipit", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("url", nargs="?", help="Twitch or Kick VOD link (other yt-dlp sites work too, without chat)")
-    ap.add_argument("-n", "--clips", type=int, default=6, help="how many clips to make per VOD (default 6)")
+    ap.add_argument(
+        "-n", "--clips", type=int, default=6, help="most clips to make per VOD, fewer or none when it is weak (default 6)"
+    )
     ap.add_argument(
         "--ai",
         default=ai.default_ai(),

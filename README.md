@@ -138,7 +138,7 @@ runs in the background.
   and its output. A notice pops up when it ends, with how many clips it made and posted. The run goes on if you close
   the dashboard, and shows again when you reopen it. *Stop* ends clipping right away, ffmpeg and all, but lets a
   YouTube post that's going finish first, so it's never cut off half sent. *Run settings* below it set what the next
-  runs do: how many streamers, clips per VOD, the language, streamers to clip and post first, high-effort edits, and
+  runs do: how many streamers, the most clips per VOD, the language, streamers to clip and post first, high-effort edits, and
   whether to post at all. They're saved, and apply to runs from the dashboard (a `--poll` on a timer keeps its flags).
 - **Re-edit with AI:** in any clip, say what to change ("a boom when he slams the desk") and click *Re-edit*. Pause the
   video on the moment you mean and click *Mark this moment* first: the AI hears the speech and reads the chat, but
@@ -195,7 +195,7 @@ have the rights to: three copyright strikes delete a channel.
 | Option | Default | Description |
 |---|---|---|
 | `URL` | | Twitch or Kick VOD link (`https://kick.com/<channel>/videos/<id>`). Other sites yt-dlp supports work too, without chat. |
-| `-n`, `--clips N` | `6` | Clips per VOD. |
+| `-n`, `--clips N` | `6` | Most clips per VOD: the AI picks fewer, or none, when the VOD is weak. |
 | `--high-effort` | | Edit every clip (cuts, zooms, sound effects, pop-up text) and have the AI review and improve it until it's done. See [High-effort clips](#high-effort-clips). |
 | `--ai CMD` | Claude Code, then Codex | The AI that picks clips: `codex` uses the isolated built-in provider; other values are commands that read a prompt on stdin and print the answer. **Don't give custom commands tools**: prompts contain Twitch chat written by strangers. |
 | `--trends-ai CMD` | Claude Code, then Codex | The AI for `--refresh-trends`, which needs web search. Use `codex` for Codex with web search only. |
