@@ -213,7 +213,7 @@ def owner_request(request: str, at: float | None, clip: dict) -> str:
 
 def asked(current: dict, before: dict, at: float | None) -> list[str]:
     """What our own checks find undone of the user's re-edit: nothing changed yet, or no change (an effect added, moved
-    or removed) near the moment marked."""
+    or removed) near the moment marked. A new layout or focus changes every frame, the marked one too."""
     if all(current.get(k) == before.get(k) for k in CLIP_KEYS):
         return ["nothing changed yet from the version the owner asked to change"]
 
@@ -222,8 +222,11 @@ def asked(current: dict, before: dict, at: float | None) -> list[str]:
         return {json.dumps(x, sort_keys=True) for k in ("cuts", "zooms", "sfx", "texts") for x in e.get(k, [])}
 
     changed = [json.loads(x) for x in effects(current) ^ effects(before)]
-    if at is not None and not any(
-        abs(x["at"] - at) <= NEAR if "at" in x else x["start"] - NEAR <= at <= x["end"] + NEAR for x in changed
+    framing = [(c.get("edit") or {}).get(k) for c in (current, before) for k in ("layout", "focus")]
+    if (
+        at is not None
+        and framing[:2] == framing[2:]
+        and not any(abs(x["at"] - at) <= NEAR if "at" in x else x["start"] - NEAR <= at <= x["end"] + NEAR for x in changed)
     ):
         return [f"the owner marked {at:.1f}, but the edit changed nothing within {NEAR:g} s of it"]
     return []

@@ -157,10 +157,11 @@ def process_vod(
             log(f"editing clip {i}/{len(picks)} until it's done (up to {edit.MAX_ROUNDS} AI reviews)")
             progress("The AI is editing and reviewing the clips", i - 1, len(picks))
             polish = functools.partial(
-                edit.polish, ai_cmd, info, p, cands, words, loud, work / "edit", look=preview(urls, layouts, words)
+                edit.polish, ai_cmd, info, p, cands, words, loud, work / "edit", look=preview(url, layouts, words)
             )
             edited.append(cached_json(work / "edit" / f"{p['start']:.1f}-{p['end']:.1f}.json", polish))
         picks = edited
+        urls = source.stream_urls(url)  # editing can outlast the links fetched before it
 
     (work / "clips").mkdir(exist_ok=True)
     rendered, (login, site) = [], streamer(info)
@@ -222,19 +223,22 @@ def render_clip(urls: list[str], layouts: list, c: dict, words: list, out: Path)
     render.render(urls, c, [w for w in words if c["start"] - 0.05 <= w[0] and w[1] <= c["end"] + 0.3], out, cam)
 
 
-def preview(urls: list[str], layouts: list, words: list) -> Callable[[dict, Path], list[tuple[str, Path]]]:
+def preview(url: str, layouts: list, words: list) -> Callable[[dict, Path], list[tuple[str, Path]]]:
     """edit.polish's look: the stream itself at the version's middle, then the version rendered into folder, as the
-    pictures its review sees. A failed render logs a warning and the review goes on without them (the clip's real
-    render reports the error too)."""
+    pictures its review sees. Each look fetches fresh stream links: editing every clip can outlast them. A failed
+    render logs a warning and the review goes on without them (the clip's real render reports the error too)."""
 
     def look(clip: dict, folder: Path) -> list[tuple[str, Path]]:
         folder.mkdir(exist_ok=True)
         video, stream = folder / "preview.mp4", folder / "stream.jpg"
         try:
+            urls = source.stream_urls(url)
             render.source_frame(urls[0], (clip["start"] + clip["end"]) / 2, stream)
             render_clip(urls, layouts, clip, words, video)
             frames = render.frames(video, edit.shown(clip), folder)
-            return [("the stream", stream), *((f"{t:.1f} s", f) for t, f in frames)]
+            # ffmpeg can succeed without writing a picture (frames() checks its own too)
+            first = [("the stream", stream)] if stream.exists() else []
+            return [*first, *((f"{t:.1f} s", f) for t, f in frames)]
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
             logger.warning("couldn't render frames for the review: %s", str(getattr(e, "stderr", "") or e)[-500:])
             return []
@@ -265,11 +269,11 @@ def reedit(url: str, clip: dict, request: str, at: float | None, ai_cmd: str | N
     log(f"re-editing clip {clip['id']}: {request}")
     progress("The AI is re-editing the clip and reviewing it")
     at_vod = None if at is None else edit.source_time(pick, at)
-    urls = source.stream_urls(url)
-    layouts = webcam_layouts(work, urls, float(info["duration"]))
+    layouts = webcam_layouts(work, source.stream_urls(url), float(info["duration"]))
     cands = candidates(windows, tr, msgs, loud, rate)
-    look = preview(urls, layouts, words)
+    look = preview(url, layouts, words)
     new = edit.polish(ai_cmd, info, pick, cands, words, loud, work / "edit", request, at_vod, look)
+    urls = source.stream_urls(url)  # the edit can outlast the links fetched before it
     login, site = streamer(info)
     c = {**pick, **new, "idx": clip["idx"], "streamer": login, "site": site}
     c["file"] = clip_file(clip["idx"], c, time.strftime("_%Y%m%d%H%M%S"))

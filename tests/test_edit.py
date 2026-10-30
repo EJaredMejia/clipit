@@ -201,6 +201,8 @@ def test_a_reedit_must_change_something_near_the_moment_marked():
     assert edit.asked(version(), before, 120.5) == []  # taking the zoom away is a change there too
     near = version(zooms=before["edit"]["zooms"], sfx=[{"at": 126.0, "sound": "boom"}])
     assert edit.asked(near, before, 125.0) == []
+    reframed = version(zooms=before["edit"]["zooms"], layout="crop", focus=0.4)
+    assert edit.asked(reframed, before, 135.0) == []  # a new framing changes the marked frame too
 
 
 def test_reedit_loops_until_the_request_is_done_and_keeps_the_clips_times(monkeypatch, tmp_path):
