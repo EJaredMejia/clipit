@@ -181,7 +181,7 @@ function RunSettings({ saved, running }: { saved: Settings; running: boolean }) 
       </p>
       <div className="mt-4 grid gap-4 sm:grid-cols-3">
         {number("top", "Streamers to clip", "Trending first, then the biggest live")}
-        {number("clips", "Clips per VOD", "How many the AI picks from each")}
+        {number("clips", "Max clips per VOD", "The AI picks up to this many, fewer or none if the VOD is weak")}
         <label className="flex flex-col gap-1.5">
           <span className={fieldLabel}>Language</span>
           <Input className="h-10 bg-card" maxLength={3} pattern="[A-Za-z]{0,3}" value={f.lang} onChange={(e) => edit({ lang: e.target.value })} />
@@ -200,7 +200,7 @@ function RunSettings({ saved, running }: { saved: Settings; running: boolean }) 
         <span className="text-xs text-muted-foreground">One per line, twitch:name or kick:name, while an event they cover is big</span>
       </label>
       <div className="mt-4 flex flex-col gap-3">
-        {check("high_effort", "High-effort edits", "The AI also edits every clip (cuts, zooms, sounds, pop-up text, framing), looks at frames of it and reviews it until it's really good. Much slower")}
+        {check("high_effort", "High-effort edits", "The AI also edits every clip it scored high enough to post (cuts, zooms, sounds, pop-up text, framing), looks at frames of it and reviews it until it's really good. Much slower")}
         {check("upload", "Post to YouTube after clipping", "Off: the run only clips, nothing goes up")}
       </div>
       <div className="mt-5 flex flex-wrap gap-2">
