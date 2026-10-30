@@ -121,10 +121,10 @@ def test_loop_shows_frames_of_each_version_to_an_ai_that_sees_pictures(monkeypat
 
     def look(clip, folder):
         looked.append((clip.get("edit"), folder.name))
-        return [(0.0, shot), (1.0, shot)]
+        return [("the stream", shot), ("0.0 s", shot)]
 
     def ask(cmd, prompt, schema, images):
-        sent.append((images, "frames of the CURRENT version" in prompt))
+        sent.append((images, "in order: the stream, 0.0 s." in prompt))
         return reply(9, [], version(zooms=[{"start": 120.0, "end": 121.0, "zoom": 1.3}]))
 
     monkeypatch.setattr(edit.ai, "ask_ai", ask)
@@ -226,3 +226,23 @@ def test_reedit_fails_rather_than_keep_a_version_that_ignores_the_request(monkey
     monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema, images: reply(10, [], before))  # never changes anything
     with pytest.raises(ClipitError, match="didn't get the re-edit done"):
         edit.polish("ai", INFO, before, [MOMENT], [], LOUD, tmp_path, "add a boom")
+
+
+def test_clean_edit_keeps_only_a_known_layout_and_a_focus_inside_the_frame():
+    assert edit.clean_edit({"layout": "crop", "focus": 1.7}, 110.0, 140.0) == {
+        **{k: [] for k in edit.LIMITS},
+        "layout": "crop",
+        "focus": 1.0,
+    }
+    odd = edit.clean_edit({"layout": "; rm -rf", "focus": "nan"}, 110.0, 140.0)
+    assert "layout" not in odd and "focus" not in odd
+
+
+def test_loop_keeps_the_framing_a_later_version_leaves_out(monkeypatch, tmp_path):
+    zoom = [{"start": 120.0, "end": 121.0, "zoom": 1.3}]
+    framed, unframed = version(zooms=zoom, layout="crop", focus=0.3), version(zooms=zoom)
+    unframed["edit"]["sfx"] = [{"at": 120.0, "sound": "boom"}]
+    replies = iter([reply(3, ["x"], framed), reply(5, ["add a boom"], unframed), reply(9, [], unframed)])
+    monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema, images: next(replies))
+    done = edit.polish("ai", INFO, PICK, [MOMENT], [], LOUD, tmp_path)
+    assert done["edit"]["sfx"] and (done["edit"]["layout"], done["edit"]["focus"]) == ("crop", 0.3)

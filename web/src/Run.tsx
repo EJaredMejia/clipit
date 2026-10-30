@@ -200,7 +200,7 @@ function RunSettings({ saved, running }: { saved: Settings; running: boolean }) 
         <span className="text-xs text-muted-foreground">One per line, twitch:name or kick:name, while an event they cover is big</span>
       </label>
       <div className="mt-4 flex flex-col gap-3">
-        {check("high_effort", "High-effort edits", "The AI also edits every clip (cuts, zooms, sounds, pop-up text) and reviews it until it's really good. Much slower")}
+        {check("high_effort", "High-effort edits", "The AI also edits every clip (cuts, zooms, sounds, pop-up text, framing), looks at frames of it and reviews it until it's really good. Much slower")}
         {check("upload", "Post to YouTube after clipping", "Off: the run only clips, nothing goes up")}
       </div>
       <div className="mt-5 flex flex-wrap gap-2">

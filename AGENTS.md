@@ -59,7 +59,7 @@ VODs to process; `cli.py` is the only place that parses flags, sets up logging, 
 | `moments.py` | loudness + chat scoring, picks candidate windows |
 | `transcribe.py` | Whisper on the candidate windows |
 | `ai.py` | prompts, calling the AI CLI, validating its picks, trend research |
-| `edit.py` | `--high-effort`: the AI edits each pick (cuts, zooms, sound effects, pop-up text) and reviews it in a loop until a review passes it, checked in code; `--reedit` uses the same loop with the user's request |
+| `edit.py` | `--high-effort`: the AI edits each pick (cuts, zooms, sound effects, pop-up text, layout and crop) and reviews it in a loop until a review passes it, checked in code; an AI that sees pictures reviews frames of each version rendered; `--reedit` uses the same loop with the user's request |
 | `codex.py` | isolated Codex CLI provider, restricted model catalog and structured clip output |
 | `facecam.py` | webcam overlay detection |
 | `render.py` | captions, ffmpeg render, `posts.md` |

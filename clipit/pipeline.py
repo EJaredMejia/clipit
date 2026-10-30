@@ -210,16 +210,19 @@ def render_clip(urls: list[str], layouts: list, c: dict, words: list, out: Path)
     render.render(urls, c, [w for w in words if c["start"] - 0.05 <= w[0] and w[1] <= c["end"] + 0.3], out, cam)
 
 
-def preview(urls: list[str], layouts: list, words: list) -> Callable[[dict, Path], list[tuple[float, Path]]]:
-    """edit.polish's look: a version rendered into folder, as the frames its review sees. A failed render logs a
-    warning and the review goes on without frames (the clip's real render reports the error too)."""
+def preview(urls: list[str], layouts: list, words: list) -> Callable[[dict, Path], list[tuple[str, Path]]]:
+    """edit.polish's look: the stream itself at the version's middle, then the version rendered into folder, as the
+    pictures its review sees. A failed render logs a warning and the review goes on without them (the clip's real
+    render reports the error too)."""
 
-    def look(clip: dict, folder: Path) -> list[tuple[float, Path]]:
+    def look(clip: dict, folder: Path) -> list[tuple[str, Path]]:
         folder.mkdir(exist_ok=True)
-        video = folder / "preview.mp4"
+        video, stream = folder / "preview.mp4", folder / "stream.jpg"
         try:
+            render.source_frame(urls[0], (clip["start"] + clip["end"]) / 2, stream)
             render_clip(urls, layouts, clip, words, video)
-            return render.frames(video, edit.shown(clip), folder)
+            frames = render.frames(video, edit.shown(clip), folder)
+            return [("the stream", stream), *((f"{t:.1f} s", f) for t, f in frames)]
         except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
             logger.warning("couldn't render frames for the review: %s", str(getattr(e, "stderr", "") or e)[-500:])
             return []

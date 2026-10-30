@@ -72,7 +72,7 @@ EDIT_PROPERTIES = {
     "sfx": {"type": "array", "items": _strict({"at": {"type": "number"}, "sound": {"type": "string"}})},
     "texts": {"type": "array", "items": _strict({**SPAN, "text": {"type": "string"}})},
     "emphasis": {"type": "array", "items": {"type": "string"}},
-    "layout": {"type": "string", "enum": ["split", "crop", "fill"]},
+    "layout": {"type": "string", "enum": ["split", "cam", "crop", "fill"]},
     "focus": {"type": "number"},
 }
 # A review of one high-effort clip (clipit.edit): the verdict on the current version, then the improved version.
