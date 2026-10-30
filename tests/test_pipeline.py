@@ -119,15 +119,19 @@ def test_high_effort_edits_each_pick_into_files_of_its_own(stages, monkeypatch):
     work, (plain,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
     polished = []
 
-    def polish(cmd, info, pick, cands, words, loud, folder):
+    def polish(cmd, info, pick, cands, words, loud, folder, look):
         polished.append(pick)
+        events.append("edited")
         return {
             **pick,
             "edit": {"cuts": [], "zooms": [], "sfx": [{"at": pick["start"], "sound": "boom"}], "texts": [], "emphasis": []},
         }
 
+    events = []
+    monkeypatch.setattr(pipeline.source, "stream_urls", lambda url: events.append("links") or ["https://example/v.m3u8"])
     monkeypatch.setattr(pipeline.edit, "polish", polish)
     pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out, high_effort=True)
+    assert events[-2:] == ["edited", "links"]  # the clips render from links fetched after the editing
     _, (clip,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out, high_effort=True)
     assert len(polished) == 1  # the second run used the cached edit
     assert polished[0]["start"] == plain["start"]  # edits the plain pick
@@ -174,7 +178,7 @@ def test_reedit_starts_from_how_the_ai_made_the_clip_and_renders_a_new_video(sta
     work, (plain,) = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=out)
     asked = []
 
-    def polish(cmd, info, pick, cands, words, loud, folder, request, at):
+    def polish(cmd, info, pick, cands, words, loud, folder, request, at, look):
         asked.append((pick["title"], request, at))
         return {**pick, "edit": {"cuts": [], "zooms": [], "sfx": [{"at": at, "sound": "boom"}], "texts": [], "emphasis": []}}
 
@@ -187,3 +191,16 @@ def test_reedit_starts_from_how_the_ai_made_the_clip_and_renders_a_new_video(sta
     (work / "transcripts.json").unlink()
     with pytest.raises(pipeline.ClipitError, match="deleted"):
         pipeline.reedit("https://example/vod", clip, "a boom", None, "ai", out)
+
+
+def test_preview_fetches_fresh_links_and_skips_a_stream_picture_ffmpeg_didnt_write(monkeypatch, tmp_path):
+    fetched, shot = [], tmp_path / "frame01.jpg"
+    monkeypatch.setattr(pipeline.source, "stream_urls", lambda url: fetched.append(url) or ["https://v", "https://a"])
+    monkeypatch.setattr(pipeline.render, "source_frame", lambda url, t, path: None)  # exits fine, writes nothing
+    monkeypatch.setattr(pipeline, "render_clip", lambda *a: None)
+    monkeypatch.setattr(pipeline.render, "frames", lambda video, times, folder: [(0.0, shot)])
+    look = pipeline.preview("https://example/vod", [], [])
+    clip = {"start": 10.0, "end": 30.0}
+    assert look(clip, tmp_path / "r1") == [("0.0 s", shot)]
+    look(clip, tmp_path / "r2")
+    assert len(fetched) == 2  # every round renders from links fetched for it

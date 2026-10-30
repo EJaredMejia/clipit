@@ -151,7 +151,7 @@ def test_defaults_fall_back_to_codex_and_explicit_alias_avoids_the_shell(monkeyp
 
     monkeypatch.setattr(codex, "ask", ask)
     assert ai.ask_ai("codex", "clip prompt") == "codex answer"
-    assert received == [("clip prompt", {"schema": codex.PICKS_SCHEMA, "timeout": ai.AI_TIMEOUT})]
+    assert received == [("clip prompt", {"schema": codex.PICKS_SCHEMA, "timeout": ai.AI_TIMEOUT, "images": ()})]
     monkeypatch.setattr(ai, "_claude", lambda: "claude -p")
     assert ai.default_ai() == 'claude -p --tools ""'
 

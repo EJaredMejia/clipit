@@ -112,6 +112,8 @@ SFX = {
     "pop": "aevalsrc='0.6*sin(2*PI*(900-1500*t)*t)*exp(-30*t)':d=0.2",
 }
 LOUDNORM = "loudnorm=I=-14:TP=-1.5"
+# webcam over gameplay, the webcam alone, one full-screen 9:16 crop, the whole frame on a blur
+LAYOUTS = ("split", "cam", "crop", "fill")
 STEREO = "aformat=sample_rates=48000:channel_layouts=stereo"
 
 
@@ -139,24 +141,66 @@ def edit_graph(edit: dict, start: float, subs: str, audio: int) -> str:
     return graph + (f"aselect={keep},asetpts=N/SR/TB," if cuts else "") + LOUDNORM + "[a]"
 
 
+def frames(video: Path, times: list[float], folder: Path) -> list[tuple[float, Path]]:
+    """(time, still) of a rendered clip at times (seconds into it), half size, as frame01.jpg... in folder."""
+    out = []
+    for i, t in enumerate(times, 1):
+        path = folder / f"frame{i:02d}.jpg"
+        sh(
+            ["ffmpeg", "-v", "error", "-y", "-ss", f"{t:.2f}", "-i", str(video), "-frames:v", "1", "-vf", "scale=540:-2"]
+            + ["-q:v", "4", str(path)],
+            timeout=60,
+        )
+        if path.exists():  # a time past the last frame makes no picture, without an error
+            out.append((t, path))
+    return out
+
+
+def source_frame(url: str, t: float, path: Path) -> None:
+    """The stream itself at VOD second t, before any layout, with a line every 10% of its width: what the edit's
+    focus is measured on."""
+    vf = "scale=960:-2,drawgrid=w=iw/10:h=ih:t=2:c=yellow@0.8"
+    sh(["ffmpeg", "-v", "error", "-y", *REMOTE, "-ss", f"{t:.2f}", "-i", url, "-frames:v", "1", "-vf", vf, str(path)], 120)
+
+
+def centered(at: str, lo: str, hi: str) -> str:
+    """A crop's x that centers it on at, kept inside lo-hi. Commas escaped: a bare one starts the next filter."""
+    return f"clip({at}-ow/2\\,{lo}\\,{hi}-ow)"
+
+
 def render(urls: list[str], clip: dict, words: list, out: Path, cam: list[float] | None = None) -> None:
-    """Seek straight into the remote stream and render 1080x1920 with captions:
-    facecam on top + center-cropped gameplay below, or blurred fill + full frame when there's no facecam."""
+    """Seek straight into the remote stream and render 1080x1920 with captions, in the edit's layout (LAYOUTS), by
+    default facecam on top + gameplay below, or blurred fill + full frame when there's no facecam. The edit's focus
+    (0-1, default the middle) is the middle of what to keep across the stream (across the webcam box for cam): the
+    gameplay panel or the full-screen crop is centered on it, as far as the frame allows."""
     s, d = clip["start"], clip["end"] - clip["start"]
-    if cam:
+    ass, edit = out.with_suffix(".ass"), clip.get("edit")
+    layout, focus = (edit or {}).get("layout") or ("split" if cam else "fill"), (edit or {}).get("focus", 0.5)
+    if cam and layout == "split":
         x, y, w, h = cam
         graph = (
             f"[0:v]split[a][b];[a]crop=iw*{w:.4f}:ih*{h:.4f}:iw*{x:.4f}:ih*{y:.4f},scale={TOP[0]}:{TOP[1]},setsar=1[top];"
-            f"[b]crop=ih*{TOP[0]}/{1920 - TOP[1]}:ih,scale={TOP[0]}:{1920 - TOP[1]},setsar=1[bot];[top][bot]vstack"
+            f"[b]crop=ih*{TOP[0]}/{1920 - TOP[1]}:ih:{centered(f'iw*{focus:.2f}', '0', 'iw')}:0,scale={TOP[0]}:{1920 - TOP[1]},setsar=1[bot];"
+            "[top][bot]vstack"
         )
         hook_y, cap_y = TOP[1], 1450  # hook sits on the seam, captions on the lower gameplay
+    elif cam and layout == "cam":  # a 9:16 cut of the webcam box
+        x, y, w, h = cam
+        cw = f"min(iw*{w:.4f}\\,ih*{h:.4f}*9/16)"  # comma escaped, as in centered
+        graph = (
+            f"[0:v]crop={cw}:ih*{h:.4f}:{centered(f'iw*{x + w * focus:.4f}', f'iw*{x:.4f}', f'iw*{x + w:.4f}')}:ih*{y:.4f},"
+            "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,setsar=1"
+        )
+        hook_y, cap_y = 330, 1400
+    elif layout == "crop":
+        graph = f"[0:v]crop=ih*9/16:ih:{centered(f'iw*{focus:.2f}', '0', 'iw')}:0,scale=1080:1920,setsar=1"
+        hook_y, cap_y = 330, 1400
     else:
         graph = (
             "[0:v]split[a][b];[a]scale=270:480:force_original_aspect_ratio=increase,crop=270:480,boxblur=8,"
             "scale=1080:1920,eq=brightness=-0.12[bg];[b]scale=1080:-2[fg];[bg][fg]overlay=0:(H-h)/2"
         )
         hook_y, cap_y = 540, 1400
-    ass, edit = out.with_suffix(".ass"), clip.get("edit")
     pops, emphasis = (edit["texts"], edit["emphasis"]) if edit else ([], [])
     ass.write_text(make_ass(clip.get("hook", ""), words, s, d, hook_y, cap_y, pops, emphasis), encoding="utf-8")
     subs = f"subtitles={ass.name}"  # relative name: avoids Windows path escaping

@@ -84,6 +84,11 @@ trends, scores it, lists what's still wrong and returns an improved version. Cli
 for dead air and a slow open. The loop goes on until a review scores the edit 9/10 with nothing left to fix, or after
 5 reviews, when the best-reviewed version wins. Up to 5 AI calls per clip, so keep `-n` small.
 
+With Claude Code or Codex the review also sees the clip: each round renders the current version and shows the AI
+frames of it (the open, each cut, zoom and pop-up text), so it catches text over a face or a zoom on nothing. It also
+picks how the stream fills the phone: webcam over gameplay, the webcam alone, one full-screen 9:16 crop (IRL
+streams), or the whole frame on a blur, and where across the stream the crop sits. Each round then takes a render too, so it's slower.
+
 The edited clips go next to the plain ones (`clips/..._edited.mp4`, `posts_edited.md`) and are added to the
 dashboard; the plain clips stay as they were. Every review is kept in `edit/` to see what the AI changed and why.
 In the dashboard, tick *High-effort edits* in the Run settings, or ask for a change to one clip with

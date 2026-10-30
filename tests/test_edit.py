@@ -69,7 +69,7 @@ def test_loop_reviews_until_a_version_passes_and_never_accepts_an_unedited_one(m
     replies = iter([reply(10, [], first), reply(7, ["add a boom on the fall"], better), reply(9, [], better)])
     prompts = []
 
-    def ask(cmd, prompt, schema):
+    def ask(cmd, prompt, schema, images):
         prompts.append(prompt)
         return next(replies)
 
@@ -85,7 +85,7 @@ def test_loop_always_ends_on_the_best_reviewed_version(monkeypatch, tmp_path):
     edits = [version(zooms=[{"start": 120.0, "end": 121.0 + i, "zoom": 1.3}]) for i in range(edit.MAX_ROUNDS)]
     scores = [3, 8, 6, 8, 5]
     replies = iter([reply(s, ["more"], e) for s, e in zip(scores, edits, strict=True)])
-    monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema: next(replies))
+    monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema, images: next(replies))
     done = edit.polish("ai", INFO, PICK, [MOMENT], [], LOUD, tmp_path)
     assert done["edit_score"] == 8 and done["edit"]["zooms"][0]["end"] == 123.0  # the later of the two 8s
 
@@ -94,13 +94,46 @@ def test_loop_keeps_revisions_inside_the_moment_and_fails_without_any_review(mon
     moved = version(zooms=[{"start": 120.0, "end": 121.0, "zoom": 1.3}])
     moved.update(start=50.0, end=400.0)  # the AI tried to stretch the clip outside the moment it came from
     replies = iter([reply(5, ["x"], moved), reply(9, [], moved)])
-    monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema: next(replies))
+    monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema, images: next(replies))
     done = edit.polish("ai", INFO, PICK, [MOMENT], [], LOUD, tmp_path)
     assert (done["start"], done["end"]) == (100.0, 160.0)  # the moment's start, then trimmed to 60 s
 
-    monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema: "no json here")
+    monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema, images: "no json here")
     with pytest.raises(ClipitError):
         edit.polish("ai", INFO, PICK, [MOMENT], [], LOUD, tmp_path)
+
+
+def test_shown_frames_cover_the_open_each_cut_zoom_and_text_in_clip_time():
+    clip = version(
+        cuts=[{"start": 120.0, "end": 125.0}],
+        zooms=[{"start": 130.0, "end": 132.0, "zoom": 1.3}],
+        texts=[{"start": 112.0, "end": 114.0, "text": "NO WAY"}],
+    )
+    assert edit.clip_time(clip, 131.0) == 16.0 and edit.clip_time(clip, 122.0) == 10.0  # after the 5 s cut; in it
+    assert edit.shown(clip) == [0.0, 1.0, 3.0, 4.0, 8.0, 9.7, 10.3, 12.0, 16.0, 20.0, 24.0]  # 25 s plays
+    busy = version(texts=[{"start": 110.0 + i, "end": 111.0 + i, "text": "x"} for i in range(30)])
+    assert len(edit.shown(busy)) == edit.MAX_FRAMES
+
+
+def test_loop_shows_frames_of_each_version_to_an_ai_that_sees_pictures(monkeypatch, tmp_path):
+    shot = tmp_path / "frame01.jpg"
+    looked, sent = [], []
+
+    def look(clip, folder):
+        looked.append((clip.get("edit"), folder.name))
+        return [("the stream", shot), ("0.0 s", shot)]
+
+    def ask(cmd, prompt, schema, images):
+        sent.append((images, "in order: the stream, 0.0 s." in prompt))
+        return reply(9, [], version(zooms=[{"start": 120.0, "end": 121.0, "zoom": 1.3}]))
+
+    monkeypatch.setattr(edit.ai, "ask_ai", ask)
+    edit.polish("claude -p", INFO, PICK, [MOMENT], [], LOUD, tmp_path, look=look)
+    assert sent == [([shot, shot], True)] * 2 and looked[0] == (None, "110.0-140.0_round1")
+    assert looked[1][0]["zooms"]  # round 2 looks at the version round 1 returned
+    sent.clear()
+    edit.polish("ollama run qwen3", INFO, PICK, [MOMENT], [], LOUD, tmp_path, look=look)  # can't see pictures
+    assert sent == [([], False)] * 2 and len(looked) == 2
 
 
 def test_prompt_fences_the_ais_own_earlier_output_too():
@@ -140,7 +173,7 @@ def test_dead_air_counts_across_a_cut_because_both_sides_play_back_to_back():
 def test_an_edit_never_raises_the_viral_score_that_gates_automatic_posting(monkeypatch, tmp_path):
     hyped = {**version(zooms=[{"start": 120.0, "end": 121.0, "zoom": 1.3}]), "score": 10}
     replies = iter([reply(5, ["x"], hyped), reply(9, [], hyped)])
-    monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema: next(replies))
+    monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema, images: next(replies))
     done = edit.polish("ai", INFO, PICK, [MOMENT], [], LOUD, tmp_path)
     assert done["score"] == PICK["score"]
 
@@ -168,6 +201,8 @@ def test_a_reedit_must_change_something_near_the_moment_marked():
     assert edit.asked(version(), before, 120.5) == []  # taking the zoom away is a change there too
     near = version(zooms=before["edit"]["zooms"], sfx=[{"at": 126.0, "sound": "boom"}])
     assert edit.asked(near, before, 125.0) == []
+    reframed = version(zooms=before["edit"]["zooms"], layout="crop", focus=0.4)
+    assert edit.asked(reframed, before, 135.0) == []  # a new framing changes the marked frame too
 
 
 def test_reedit_loops_until_the_request_is_done_and_keeps_the_clips_times(monkeypatch, tmp_path):
@@ -176,7 +211,7 @@ def test_reedit_loops_until_the_request_is_done_and_keeps_the_clips_times(monkey
     said = iter([True, False, True])  # round 1 reviews the unchanged clip: the code says it isn't done
     prompts = []
 
-    def ask(cmd, prompt, schema):
+    def ask(cmd, prompt, schema, images):
         prompts.append(prompt)
         return json.dumps({"name": "Caseoh", "edit_score": 9, "problems": [], "request_done": next(said), "clip": boom})
 
@@ -190,6 +225,26 @@ def test_reedit_loops_until_the_request_is_done_and_keeps_the_clips_times(monkey
 
 def test_reedit_fails_rather_than_keep_a_version_that_ignores_the_request(monkeypatch, tmp_path):
     before = version(zooms=[{"start": 120.0, "end": 121.0, "zoom": 1.3}])
-    monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema: reply(10, [], before))  # never changes anything
+    monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema, images: reply(10, [], before))  # never changes anything
     with pytest.raises(ClipitError, match="didn't get the re-edit done"):
         edit.polish("ai", INFO, before, [MOMENT], [], LOUD, tmp_path, "add a boom")
+
+
+def test_clean_edit_keeps_only_a_known_layout_and_a_focus_inside_the_frame():
+    assert edit.clean_edit({"layout": "crop", "focus": 1.7}, 110.0, 140.0) == {
+        **{k: [] for k in edit.LIMITS},
+        "layout": "crop",
+        "focus": 1.0,
+    }
+    odd = edit.clean_edit({"layout": "; rm -rf", "focus": "nan"}, 110.0, 140.0)
+    assert "layout" not in odd and "focus" not in odd
+
+
+def test_loop_keeps_the_framing_a_later_version_leaves_out(monkeypatch, tmp_path):
+    zoom = [{"start": 120.0, "end": 121.0, "zoom": 1.3}]
+    framed, unframed = version(zooms=zoom, layout="crop", focus=0.3), version(zooms=zoom)
+    unframed["edit"]["sfx"] = [{"at": 120.0, "sound": "boom"}]
+    replies = iter([reply(3, ["x"], framed), reply(5, ["add a boom"], unframed), reply(9, [], unframed)])
+    monkeypatch.setattr(edit.ai, "ask_ai", lambda cmd, prompt, schema, images: next(replies))
+    done = edit.polish("ai", INFO, PICK, [MOMENT], [], LOUD, tmp_path)
+    assert done["edit"]["sfx"] and (done["edit"]["layout"], done["edit"]["focus"]) == ("crop", 0.3)

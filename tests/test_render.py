@@ -1,3 +1,6 @@
+import shutil
+import subprocess
+
 import pytest
 
 from clipit import render, util
@@ -85,3 +88,61 @@ def test_write_atomic_leaves_no_temp_file(tmp_path):
     p = tmp_path / "x.json"
     util.write_atomic(p, "{}")
     assert p.read_text() == "{}" and list(tmp_path.iterdir()) == [p]
+
+
+@pytest.mark.parametrize(
+    ("edit", "cam", "expect"),
+    [
+        (
+            None,
+            [0.0, 0.0, 0.3, 0.3],
+            "crop=ih*1080/1152:ih:clip(iw*0.50-ow/2\\,0\\,iw-ow):0",
+        ),  # webcam: split, gameplay in the middle
+        (
+            {"layout": "crop", "focus": 0.25},
+            [0.0, 0.0, 0.3, 0.3],
+            "crop=ih*9/16:ih:clip(iw*0.25-ow/2\\,0\\,iw-ow):0",
+        ),  # AI chose the crop
+        ({"layout": "cam", "focus": 1.0}, [0.1, 0.0, 0.3, 0.3], "clip(iw*0.4000-ow/2\\,iw*0.1000\\,iw*0.4000-ow)"),
+        ({"layout": "split", "focus": 0.8}, None, "boxblur"),  # split without a webcam falls back to the blur
+        ({"layout": "cam"}, None, "boxblur"),  # so does cam
+    ],
+)
+def test_render_lays_out_the_stream_as_the_edit_chose(monkeypatch, tmp_path, edit, cam, expect):
+    graphs = []
+
+    def fake_sh(cmd, timeout, cwd):
+        graphs.append(cmd[cmd.index("-filter_complex") + 1])
+        (cwd / cmd[-1]).write_bytes(b"mp4")
+
+    monkeypatch.setattr(render, "sh", fake_sh)
+    full = {"cuts": [], "zooms": [], "sfx": [], "texts": [], "emphasis": [], **edit} if edit else None
+    clip = {"start": 10.0, "end": 30.0, "hook": "hi", "edit": full}
+    render.render(["https://v", "https://a"], clip, [], tmp_path / "c.mp4", cam)
+    assert expect in graphs[0] and (tmp_path / "c.mp4").exists()
+
+
+@pytest.mark.skipif(not shutil.which("ffmpeg"), reason="needs ffmpeg")
+@pytest.mark.parametrize("layout", render.LAYOUTS)
+def test_every_layout_is_a_filter_graph_ffmpeg_runs(monkeypatch, tmp_path, layout):
+    def real_ffmpeg(cmd, timeout, cwd):  # the graph on a test picture instead of the stream
+        graph = cmd[cmd.index("-filter_complex") + 1]
+        src = ["-f", "lavfi", "-i", "testsrc2=s=1920x1080:d=0.5", "-f", "lavfi", "-i", "anullsrc=d=0.5"]
+        subprocess.run(
+            ["ffmpeg", "-v", "error", *src, "-filter_complex", graph, "-map", "[v]", "-map", "[a]", "-f", "null", "-"],
+            check=True,
+            cwd=cwd,
+            timeout=60,
+        )
+        (cwd / cmd[-1]).write_bytes(b"mp4")
+
+    monkeypatch.setattr(render, "sh", real_ffmpeg)
+    edit = {"layout": layout, "focus": 0.7, "zooms": [{"start": 10.1, "end": 10.3, "zoom": 1.3}]}
+    clip = {"start": 10.0, "end": 10.5, "hook": "hi", "edit": None}
+    render.render(
+        ["https://v", "https://a"],
+        {**clip, "edit": {**edit, "cuts": [], "sfx": [], "texts": [], "emphasis": []}},
+        [],
+        tmp_path / "c.mp4",
+        [0.7, 0.0, 0.3, 0.4],
+    )

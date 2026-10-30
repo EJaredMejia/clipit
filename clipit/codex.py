@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from collections.abc import Sequence
 from pathlib import Path
 
 from clipit.util import ClipitError
@@ -71,6 +72,8 @@ EDIT_PROPERTIES = {
     "sfx": {"type": "array", "items": _strict({"at": {"type": "number"}, "sound": {"type": "string"}})},
     "texts": {"type": "array", "items": _strict({**SPAN, "text": {"type": "string"}})},
     "emphasis": {"type": "array", "items": {"type": "string"}},
+    "layout": {"type": "string", "enum": ["split", "cam", "crop", "fill"]},
+    "focus": {"type": "number"},
 }
 # A review of one high-effort clip (clipit.edit): the verdict on the current version, then the improved version.
 EDIT_SCHEMA = _strict(
@@ -114,9 +117,12 @@ def _restricted_catalog(raw: str) -> str:
         raise ClipitError("Codex returned an unsupported model catalog; update the Codex CLI") from exc
 
 
-def ask(prompt: str, *, web_search: bool = False, schema: dict = PICKS_SCHEMA, timeout: float = 900) -> str:
+def ask(
+    prompt: str, *, web_search: bool = False, schema: dict = PICKS_SCHEMA, timeout: float = 900, images: Sequence[Path] = ()
+) -> str:
     """Run a fresh Codex request with only the supplied prompt and optional trend web search.
-    Without web search the reply must match schema: the clip picks, or a high-effort review."""
+    Without web search the reply must match schema: the clip picks, or a high-effort review.
+    images: pictures attached to the prompt (no tool reads them: view_image stays disabled)."""
     executable = find_cli()
     if not executable:
         raise ClipitError("Codex CLI not found. Install Codex, run `codex login`, then retry --ai codex")
@@ -164,6 +170,8 @@ def ask(prompt: str, *, web_search: bool = False, schema: dict = PICKS_SCHEMA, t
                 schema_path = root / "picks.schema.json"
                 schema_path.write_text(json.dumps(schema), encoding="utf-8")
                 args += ["--output-schema", str(schema_path)]
+            for image in images:
+                args += ["--image", str(Path(image).resolve())]
             args.append("-")
             remaining = deadline - time.monotonic()
             if remaining <= 0:
