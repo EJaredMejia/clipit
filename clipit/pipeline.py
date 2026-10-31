@@ -11,7 +11,7 @@ import subprocess
 import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -80,10 +80,12 @@ def process_vod(
     out_root: Path = ROOT / "out",
     info: dict | None = None,
     high_effort: bool = False,
+    clipped: Sequence[tuple[int, int]] = (),
 ) -> tuple[Path, list[dict]]:
     """Make up to n_clips clips from a VOD, none the AI scored under MIN_SCORE. Returns (work folder, rendered clips). Raises ClipitError when it can't.
     `info` is source.fetch_info(url), when the caller already has it. high_effort: the AI edits each pick scored db.AUTO_SCORE+
-    and reviews it until it's done (clipit.edit), into picks_edited.json and posts_edited.md so the plain clips stay as they are."""
+    and reviews it until it's done (clipit.edit), into picks_edited.json and posts_edited.md so the plain clips stay as they are.
+    clipped: (second, views) of moments people clipped in this VOD (site.clip_moments), looked at first."""
     info = info or source.fetch_info(url)
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(info["id"])):  # it becomes a folder name
         raise ClipitError(f"unexpected video id {info['id']!r}")
@@ -115,7 +117,7 @@ def process_vod(
         np.save(tmp, moments.loudness(audio()))
         tmp.replace(loud_file)
     score, loud, rate = moments.signals(dur, np.load(loud_file), msgs)
-    windows = moments.windows(score, max(10, n_clips * 3), dur)
+    windows = moments.windows(score, max(10, n_clips * 3), dur, clipped)
 
     tr_file = work / "transcripts.json"
     tr = json.loads(tr_file.read_text(encoding="utf-8")) if tr_file.exists() else {}
@@ -129,7 +131,7 @@ def process_vod(
             log(f"  {i}/{len(todo)} @ {mmss(w[0])}")
             progress("Transcribing the best moments", i, len(todo))
 
-    cands = candidates(windows, tr, msgs, loud, rate)
+    cands = candidates(windows, tr, msgs, loud, rate, clipped)
 
     def ask():
         log(f"asking the AI to pick up to {n_clips} clips from {len(cands)} candidates")
@@ -220,13 +222,22 @@ def review(cmd: str | None, info: dict, clip: dict, words: list, work: Path) -> 
         clip["why"] = ("Review failed: " + "; ".join(failed))[: ai.TEXT_FIELDS["why"]]
 
 
-def candidates(windows: list[tuple[int, int]], tr: dict, msgs: list, loud: np.ndarray, rate: np.ndarray) -> list[dict]:
+def candidates(
+    windows: list[tuple[int, int]],
+    tr: dict,
+    msgs: list,
+    loud: np.ndarray,
+    rate: np.ndarray,
+    clipped: Sequence[tuple[int, int]] = (),
+) -> list[dict]:
     """The moments the AI picks from: transcript, chat and how loud and busy each one is."""
     cands = []
     for s, e in windows:
         stats = f"audio peak +{loud[s:e].max() - np.median(loud):.0f} dB"
         if rate.any():
             stats = f"chat {rate[s:e].mean() / rate.mean():.1f}x normal, " + stats
+        if views := sum(v for t, v in clipped if s <= t < e):
+            stats = f"viewers clipped this, {views} views, " + stats
         cands.append(
             {"start": s, "end": e, "segments": tr[f"{s}-{e}"], "stats": stats, "chat": [m for m in msgs if s <= m[0] < e]}
         )

@@ -3,6 +3,7 @@
 import re
 import subprocess
 import threading
+from collections.abc import Sequence
 from pathlib import Path
 
 import numpy as np
@@ -68,6 +69,12 @@ def peaks(score: np.ndarray, k: int, gap: int) -> list[int]:
     return sorted(picked)
 
 
-def windows(score: np.ndarray, k: int, duration: float) -> list[tuple[int, int]]:
-    """The k best (start, end) windows around peaks, never overlapping."""
-    return [(max(0, t - WINDOW[0]), min(int(duration), t + WINDOW[1])) for t in peaks(score, k, gap=sum(WINDOW) + 30)]
+def windows(score: np.ndarray, k: int, duration: float, clipped: Sequence[tuple[int, int]] = ()) -> list[tuple[int, int]]:
+    """The k best (start, end) windows, never overlapping: first the moments people clipped ((second, views), a clip
+    starts just before its moment), then the peaks."""
+    gap = sum(WINDOW) + 30
+    points: list[int] = []
+    for t in (*(t + WINDOW[0] // 2 for t, _ in clipped), *peaks(score, k, gap=gap)):
+        if 0 <= t < duration and all(abs(t - p) >= gap for p in points):
+            points.append(int(t))
+    return [(max(0, t - WINDOW[0]), min(int(duration), t + WINDOW[1])) for t in points[:k]]

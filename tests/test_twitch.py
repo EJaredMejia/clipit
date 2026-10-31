@@ -113,3 +113,12 @@ def test_top_clipped_adds_up_a_streamers_clips_across_games(monkeypatch):
     monkeypatch.setattr(twitch, "MIN_CLIP_VIEWS", 2)
     monkeypatch.setattr(twitch, "gql", lambda query: {"games": {"edges": games}})
     assert twitch.top_clipped() == [("a", 10, "EN"), ("b", 7, "EN")]
+
+
+def test_clip_moments_are_only_this_vods_most_viewed_first(monkeypatch):
+    def clip(vod, at, views):
+        return {"node": {"video": vod and {"id": vod}, "videoOffsetSeconds": at, "viewCount": views}}
+
+    edges = [clip("1", 50, 10), clip("2", 60, 99), clip("1", 70, 40), clip("1", None, 500), clip(None, 80, 500)]
+    monkeypatch.setattr(twitch, "gql", lambda q, v: {"user": {"clips": {"edges": edges}}})
+    assert twitch.clip_moments("x", {"id": "1"}) == [(70, 40), (50, 10)]

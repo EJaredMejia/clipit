@@ -1,4 +1,5 @@
 import datetime
+from types import SimpleNamespace
 
 import pytest
 
@@ -127,7 +128,7 @@ def world(tmp_path, monkeypatch):
 
 def test_poll_pass(world):
     conn, calls, out = world
-    assert poll.poll(conn, top_n=3, lang="EN", out_root=out) == 1  # v3 failed: the caller hears of it
+    assert poll.poll(conn, top_n=3, lang="EN", out_root=out) == 0  # v1 worked: a broken VOD among good ones is no failed pass
     assert calls == ["v1", "v3"]  # big2 has no VOD so mid takes its slot; s1 and s2 are too small
     assert db.status(conn, "v1") == "done" and db.status(conn, "v3") == "failed"
     assert conn.execute("SELECT file FROM clips WHERE vod_id = 'v1'").fetchone()["file"] == "v1/clips/01_a.mp4"
@@ -235,3 +236,17 @@ def test_a_failed_search_still_clips_by_the_ranking(world, monkeypatch):
     monkeypatch.setattr(poll.ai, "find_hot", broken)
     poll.poll(conn, top_n=1, out_root=out, search_ai="search")
     assert calls == ["v1"]
+
+
+def test_a_failed_clip_lookup_only_loses_the_hint():
+    def broken(login, vod):
+        raise OSError("down")
+
+    assert poll.moments_of(SimpleNamespace(clip_moments=broken), "a", {}) == []
+
+
+def test_a_pass_where_every_vod_failed_says_so(world):
+    conn, calls, out = world
+    poll.poll(conn, top_n=1, lang="EN", out_root=out)  # v1 works
+    assert poll.poll(conn, top_n=1, lang="EN", out_root=out) == 1  # only v3 left, and it fails
+    assert calls == ["v1", "v3"]

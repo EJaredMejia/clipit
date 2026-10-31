@@ -99,6 +99,17 @@ def find_hot(search_ai: str | None) -> list[tuple[str, str]]:
     return [(site, login) for site, login, _ in found if login not in BLOCKED | NOT_STREAMERS]
 
 
+def moments_of(site: ModuleType, login: str, vod: dict) -> list[tuple[int, int]]:
+    """Where people clipped this VOD. Failing to find out only loses a hint: chat and loudness still pick moments."""
+    try:
+        found = site.clip_moments(login, vod)
+    except Exception:
+        logger.warning("could not get the clips of %s", login, exc_info=True)
+        return []
+    log(f"{len(found)} clipped moment(s) in {login}'s VOD")
+    return found
+
+
 def poll(
     conn: sqlite3.Connection,
     top_n: int = 6,
@@ -111,7 +122,7 @@ def poll(
 ) -> int:
     """One polling pass. Safe to run on a timer, and even twice at once. prioritize: (site, name) clipped first.
     search_ai: the AI command with web search that finds who's popping off (ai.find_hot).
-    Returns how many VODs failed: the rest are still tried, but the caller can tell the pass didn't go well."""
+    Returns how many VODs failed if none worked: one broken VOD among good ones is logged, not a failed pass."""
     now = utcnow()
     failed = 0
     top_left = top_n
@@ -161,7 +172,7 @@ def poll(
         )
         try:
             with db.heartbeat(conn, vod_id):
-                _, clips = process_vod(url, out_root=out_root, **pipeline_opts)
+                _, clips = process_vod(url, out_root=out_root, clipped=moments_of(site, login, vod), **pipeline_opts)
             db.save_clips(conn, vod_id, [{**c, "file": f"{vod_id}/{c['file']}"} for c in clips])
             db.finish(conn, vod_id)
             good = good or any(c["score"] >= db.AUTO_SCORE for c in clips)
@@ -174,4 +185,4 @@ def poll(
                 p.unlink()
     if top_n > 0 and not good and not dry_run:
         logger.warning("no clip scored %d+ this pass: nothing from it is good enough to post", db.AUTO_SCORE)
-    return failed
+    return failed if failed == tried else 0
