@@ -193,7 +193,7 @@ def process_vod(
 
     for i, c in enumerate(rendered, 1):
         progress("A reviewer is watching the clips", i - 1, len(rendered))
-        review(ai_cmd, info, c, words, work)
+        review(ai_cmd, info, c, words, work, functools.partial(remade, url, layouts, words, cands, dur, work))
 
     # dropped picks stay in the file: an old clip of one, kept by the user, is found there to re-edit it (made_as)
     write_atomic(work / picks_file, json.dumps([*picks, *dropped], indent=2))
@@ -202,27 +202,64 @@ def process_vod(
     return work, rendered
 
 
-def review(cmd: str | None, info: dict, clip: dict, words: list, work: Path) -> None:
-    """A separate reviewer watches a clip good enough to post by itself. If it fails any check, its score drops under
-    db.AUTO_SCORE and the reasons go in "why", so it stays for the user to judge but never posts alone. A review that
-    never happened (the AI failed) stops the clip too, and is asked again if the VOD is run again."""
-    clip.setdefault("picked_score", clip["score"])
-    if clip["picked_score"] < db.AUTO_SCORE or clip.get("reviewed"):
-        return
+def watch(cmd: str | None, info: dict, clip: dict, words: list, work: Path) -> list[str]:
+    """What a separate reviewer found wrong with the finished clip, watching all of it (ai.veto)."""
     said = sorted({(edit.clip_time(clip, w[0]), w[2]) for w in words if clip["start"] <= w[0] < clip["end"]})  # windows overlap
     spoken = " ".join(f"[{t:.0f}s] {w}" if i % 8 == 0 else w for i, (t, w) in enumerate(said))
     length = sum(b - a for a, b in edit.kept(clip))  # the edit's cuts make the video shorter than its time range
     with tempfile.TemporaryDirectory(prefix="clipit-") as tmp:
         try:
-            stills = render.sheets(work / clip["file"], Path(tmp))
+            sheets = render.sheets(work / clip["file"], Path(tmp))
         except (ClipitError, subprocess.SubprocessError):
-            stills = []  # veto stops a clip it can't see
-        failed = ai.veto(cmd, clip, clip.get("streamer") or info.get("uploader"), spoken, stills, length)
+            sheets = []  # veto stops a clip it can't see
+        return ai.veto(cmd, clip, clip.get("streamer") or info.get("uploader"), spoken, sheets, length)
+
+
+def review(
+    cmd: str | None,
+    info: dict,
+    clip: dict,
+    words: list,
+    work: Path,
+    remake: Callable[[dict, float, float], bool] | None = None,
+) -> None:
+    """A separate reviewer watches a clip good enough to post by itself. If it fails any check, the clip is cut again once
+    around the peak the reviewer saw (remake: the picker only reads words) and watched again. If it still fails, its
+    score drops under db.AUTO_SCORE and the reasons go in "why", so it stays for the user to judge but never posts alone.
+    A review that never happened (the AI failed) stops the clip too, and is asked again if the VOD is run again."""
+    clip.setdefault("picked_score", clip["score"])
+    if clip["picked_score"] < db.AUTO_SCORE or clip.get("reviewed"):
+        return
+    failed = watch(cmd, info, clip, words, work)
+    seen = clip.pop("seen", None)
+    if failed and seen and remake and not clip.get("edit") and remake(clip, *seen):  # an edit's times are tied to its cut
+        failed = watch(cmd, info, clip, words, work)
+        clip.pop("seen", None)
     clip["reviewed"] = not any(f.startswith("review:") for f in failed)
     clip["score"] = db.AUTO_SCORE - 1.0 if failed else clip["picked_score"]
     if failed:
         log(f"review stopped {clip['file']}: " + "; ".join(failed))
         clip["why"] = ("Review failed: " + "; ".join(failed))[: ai.TEXT_FIELDS["why"]]
+
+
+def remade(
+    url: str, layouts: list, words: list, cands: list[dict], dur: float, work: Path, clip: dict, peak: float, end: float
+) -> bool:
+    """Render the clip again around the peak its reviewer saw, in place of the old video. False leaves it as it was."""
+    cut = ai.recut(clip, peak, end, cands, dur)
+    if not cut:
+        return False
+    new = {**clip, "start": cut[0], "end": cut[1]}
+    new["file"] = clip_file(clip["idx"], new)
+    log(f"cutting {clip['file']} again: {cut[0]:g}-{cut[1]:g} s, where the reviewer saw the peak")
+    try:
+        render_clip(source.stream_urls(url), layouts, new, words, work / new["file"])
+    except (subprocess.SubprocessError, ClipitError) as e:
+        logger.warning("couldn't cut %s again: %s", clip["file"], e)
+        return False
+    (work / clip["file"]).unlink(missing_ok=True)
+    clip.update(new)
+    return True
 
 
 def candidates(

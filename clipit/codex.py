@@ -77,10 +77,12 @@ HOT_SCHEMA = _strict(
 )
 VETO_SCHEMA = _strict(
     {
+        "peak": {"type": "number"},
+        "end": {"type": "number"},
         "checks": {
             "type": "array",
             "items": _strict({"name": {"type": "string"}, "passed": {"type": "boolean"}, "evidence": {"type": "string"}}),
-        }
+        },
     }
 )
 EDIT_PROPERTIES = {

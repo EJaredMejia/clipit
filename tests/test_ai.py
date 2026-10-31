@@ -306,3 +306,30 @@ def test_a_missing_or_impossible_peak_means_the_end():
     for clip in ({"start": 10.0, "end": 70.0}, {"start": 10.0, "end": 70.0, "peak": 500.0}):
         got = ai.cut_to_peak(clip, [])
         assert (got["start"], got["end"]) == (50.0, 70.0)
+
+
+def test_only_a_peak_inside_the_video_counts():
+    assert ai.seen_cut({"peak": 5, "end": 18.5}, 20.0) == (5.0, 18.5)
+    assert ai.seen_cut({"peak": 5, "end": 900}, 20.0) == (5.0, 20.0)  # a bad end loses only the end
+    assert ai.seen_cut({"peak": 900, "end": 18}, 20.0) is None
+    assert ai.seen_cut({"peak": True}, 20.0) is None
+
+
+def test_recut_opens_just_before_the_peak_on_a_sentence():
+    clip = {"start": 100.0, "end": 130.0}
+    said = [{"start": 100, "end": 130, "segments": [{"start": 110.5, "end": 112.0}, {"start": 120.0, "end": 127.5}]}]
+    assert ai.recut(clip, 12.0, 28.0, said, 5000.0) == (110.5, 127.5)
+
+
+def test_recut_never_opens_on_the_slow_sentence_before_the_peak():
+    said = [{"start": 100, "end": 130, "segments": [{"start": 107.0, "end": 111.0}]}]
+    assert ai.recut({"start": 100.0, "end": 130.0}, 12.0, 28.0, said, 5000.0) == (109.0, 128.0)
+
+
+def test_recut_keeps_a_full_clip_and_stays_inside_the_vod():
+    assert ai.recut({"start": 100.0, "end": 130.0}, 10.0, 12.0, [], 5000.0) == (107.0, 122.0)
+    assert ai.recut({"start": 100.0, "end": 130.0}, 25.0, 30.0, [], 130.0) is None  # too little video left
+
+
+def test_recut_leaves_a_clip_already_cut_there():
+    assert ai.recut({"start": 100.0, "end": 130.0}, 3.0, 30.0, [], 5000.0) is None

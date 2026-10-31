@@ -270,3 +270,43 @@ def test_cuts_count_against_the_review_length(monkeypatch, tmp_path):
     edit = {"cuts": [{"start": 10.0, "end": 30.0}]}
     pipeline.review("x", {}, {"score": 9.0, "start": 0.0, "end": 50.0, "file": "c.mp4", "edit": edit}, [], tmp_path)
     assert seen == [30.0]
+
+
+def test_a_stopped_clip_is_cut_again_once_and_the_second_watch_decides(monkeypatch, tmp_path):
+    monkeypatch.setattr(pipeline.render, "sheets", lambda *a: [])
+    answers = [["hook: slow"], []]
+
+    def veto(cmd, clip, *a):
+        clip["seen"] = (5.0, 18.0)
+        return answers.pop(0)
+
+    monkeypatch.setattr(pipeline.ai, "veto", veto)
+    cuts = []
+    clip = {"score": 9.0, "start": 0.0, "end": 20.0, "file": "c.mp4", "why": ""}
+    pipeline.review("x", {}, clip, [], tmp_path, lambda c, peak, end: cuts.append((peak, end)) or True)
+    assert cuts == [(5.0, 18.0)] and clip["score"] == 9.0 and clip["reviewed"] and "seen" not in clip
+
+
+def test_a_clip_that_fails_after_its_recut_stays_under_the_bar(monkeypatch, tmp_path):
+    monkeypatch.setattr(pipeline.render, "sheets", lambda *a: [])
+
+    def veto(cmd, clip, *a):
+        clip["seen"] = (5.0, 18.0)
+        return ["share: mild"]
+
+    monkeypatch.setattr(pipeline.ai, "veto", veto)
+    calls = []
+    clip = {"score": 9.0, "start": 0.0, "end": 20.0, "file": "c.mp4", "why": ""}
+    pipeline.review("x", {}, clip, [], tmp_path, lambda *a: calls.append(a) or True)
+    assert len(calls) == 1 and clip["score"] < pipeline.db.AUTO_SCORE
+
+
+def test_remade_swaps_the_video_and_the_times(monkeypatch, tmp_path):
+    monkeypatch.setattr(pipeline.source, "stream_urls", lambda url: ["u"])
+    monkeypatch.setattr(pipeline, "render_clip", lambda urls, layouts, c, words, out: out.write_bytes(b"new"))
+    (tmp_path / "clips").mkdir()
+    (tmp_path / "old.mp4").write_bytes(b"old")
+    clip = {"idx": 1, "title": "t", "start": 100.0, "end": 130.0, "file": "old.mp4"}
+    assert pipeline.remade("url", [], [], [], 5000.0, tmp_path, clip, 12.0, 28.0)
+    assert clip["start"] == 109.0 and clip["file"] != "old.mp4"
+    assert (tmp_path / clip["file"]).exists() and not (tmp_path / "old.mp4").exists()

@@ -25,6 +25,7 @@ AI_TIMEOUT = 900
 TEXT_FIELDS = {"title": 100, "hook": 80, "description": 1000, "trend": 200, "sound": 200, "why": 300}
 MAX_HASHTAGS = 5
 LEAD, TAIL, SNAP = 20, 6, 3  # seconds kept before and after a clip's peak, and how far a cut moves to meet a sentence
+OPEN = 3  # seconds a clip recut by its reviewer opens before the peak it saw
 CLIP_LEN = (15, 60)  # seconds, as the prompt asks; longer picks are trimmed to 60 s (a window's first 60 s end on its peak)
 # a leading "Streamer" is the unnamed subject; later ones may be someone else, "streamers" always are
 STREAMER = re.compile(r"^(?:the |this )?streamer\b", re.I)
@@ -116,8 +117,11 @@ On-screen hook: {hook}
 Words spoken: {spoken}
 </stream_data>
 
+Also say where the video should really open and close: "peak" is the second where the biggest thing starts to happen
+on screen or in the sound, "end" the last second worth watching. The clip may be cut again around them.
+
 Answer with ONLY this JSON (no commentary), one entry per check:
-{{"checks": [{{"name": "hook", "passed": false, "evidence": "what you saw, in one line"}}]}}"""
+{{"peak": 5.0, "end": 19.0, "checks": [{{"name": "hook", "passed": false, "evidence": "what you saw, in one line"}}]}}"""
 
 
 # a streamer named by the user, as `twitch:<login>` or `kick:<slug>`
@@ -293,6 +297,17 @@ def failed_checks(reply: object) -> list[str]:
     return failed
 
 
+def seen_cut(reply: dict, length: float) -> tuple[float, float] | None:
+    """The (peak, end) a reviewer saw, seconds into the video, checked: None without a usable peak, the video's own end
+    without a usable end."""
+    peak, end = reply.get("peak"), reply.get("end")
+    if isinstance(peak, bool) or not isinstance(peak, int | float) or not 0 <= peak <= length:
+        return None
+    if isinstance(end, bool) or not isinstance(end, int | float) or not peak < end <= length:
+        end = length
+    return float(peak), float(end)
+
+
 def veto(
     cmd: str | None, clip: dict, streamer: object, spoken: str, sheets: Sequence[tuple[float, Path]], length: float
 ) -> list[str]:
@@ -310,7 +325,9 @@ def veto(
         spoken=fenced(spoken)[:4000],
     )
     try:
-        return failed_checks(extract_json(ask_ai(cmd, prompt, codex.VETO_SCHEMA, [p for _, p in sheets])))
+        reply = extract_json(ask_ai(cmd, prompt, codex.VETO_SCHEMA, [p for _, p in sheets]))
+        clip["seen"] = seen_cut(reply, length)
+        return failed_checks(reply)
     except (ClipitError, ValueError) as e:
         logger.warning("the review of %s failed: %s", clip.get("file"), e)
         return ["review: failed"]
@@ -362,6 +379,26 @@ def clean(clips: object, duration: float, n: int) -> list[dict]:
     return best[:n]
 
 
+def spoken_in(cands: list[dict], lo: float, hi: float) -> list[dict]:
+    return [g for c in cands if c["start"] <= hi and lo <= c["end"] for g in c["segments"]]
+
+
+def nearest(t: float, marks: list[float]) -> float:
+    """The mark within SNAP s of t that's closest to it, else t."""
+    return min((m for m in marks if abs(m - t) <= SNAP), key=lambda m: abs(m - t), default=t)
+
+
+def recut(clip: dict, peak: float, end: float, cands: list[dict], duration: float) -> tuple[float, float] | None:
+    """New (start, end) in VOD seconds from the peak and end a reviewer saw, seconds into the clip: it opens right before
+    the peak, on a sentence if one starts there, and never runs under the shortest clip. None when that's the cut it already has."""
+    at, stop = clip["start"] + peak, clip["start"] + end
+    said = spoken_in(cands, at - OPEN - SNAP, stop + SNAP)
+    s = max(0.0, nearest(at - OPEN, [g["start"] for g in said if at - OPEN <= g["start"] <= at]))  # never back into the slow part
+    e = nearest(stop, [g["end"] for g in said if g["end"] >= at])
+    s, e = round(s, 1), round(min(duration, max(e, s + CLIP_LEN[0])), 1)
+    return None if abs(s - clip["start"]) < 1 and abs(e - clip["end"]) < 1 or e - s < CLIP_LEN[0] else (s, e)
+
+
 def cut_to_peak(clip: dict, cands: list[dict]) -> dict:
     """The clip tightened around its peak, in code because a pick left to the AI drags: at most LEAD s before it and TAIL s
     after, cuts moved to where a sentence starts and ends, never under the shortest clip. No usable peak: its end is
@@ -369,11 +406,7 @@ def cut_to_peak(clip: dict, cands: list[dict]) -> dict:
     lo, hi = clip["start"], clip["end"]
     peak = clip.get("peak", hi)
     peak = peak if lo <= peak <= hi else hi
-    said = [g for c in cands if c["start"] <= hi and lo <= c["end"] for g in c["segments"]]
-
-    def nearest(t: float, marks: list[float]) -> float:
-        return min((m for m in marks if abs(m - t) <= SNAP), key=lambda m: abs(m - t), default=t)
-
+    said = spoken_in(cands, lo, hi)
     s = nearest(max(lo, peak - LEAD), [g["start"] for g in said if lo <= g["start"] <= peak])
     e = nearest(min(hi, peak + TAIL), [g["end"] for g in said if peak <= g["end"] <= hi])
     if e - s < CLIP_LEN[0]:
