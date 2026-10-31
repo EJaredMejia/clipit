@@ -43,7 +43,6 @@ def test_most_clipped_come_first_on_both_sites_live_or_not_and_only_once():
         ("t2", 80000, "EN", poll.twitch),
         ("clavicular", 5000, "EN", poll.kick),
         ("spanish", 70000, "ES", poll.kick),
-        ("few", 999, "EN", poll.kick),
         ("riotgames", 60000, "EN", poll.twitch),
     ]
     got = [(s[0], s[3]) for s in poll.candidates(streams, "EN", clipped)]
@@ -136,6 +135,13 @@ def test_poll_pass(world):
 
     assert poll.poll(conn, top_n=3, lang="EN", out_root=out) == 0
     assert len(calls) == 2  # nothing new: v1 done, v3 waits RETRY_AFTER
+
+
+def test_a_repeat_pass_gives_an_already_clipped_streamers_slot_to_the_next(world):
+    conn, calls, out = world
+    poll.poll(conn, top_n=1, lang="EN", out_root=out)
+    poll.poll(conn, top_n=1, lang="EN", out_root=out)
+    assert calls == ["v1", "v3"]  # big1 is done, big2 has no VOD, mid gets the slot
 
 
 def test_one_streamers_vod_lookup_failing_does_not_end_the_pass(world, monkeypatch):

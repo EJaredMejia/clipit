@@ -61,7 +61,7 @@ def candidates(
     last day (live or not), then live streamers with at least MIN_VIEWERS. Each group biggest first, alternating sites."""
     sites = {site.__name__.rsplit(".", 1)[1]: site for site in SITES}
     out: list[Stream] = [(name, 0, "", sites[site]) for site, name in first if name.lower() not in BLOCKED]
-    for group, least in ((clipped, kick.MIN_CLIP_VIEWS), (streams, MIN_VIEWERS)):
+    for group, least in ((clipped, 0), (streams, MIN_VIEWERS)):
         picked = {(s[0].lower(), s[3]) for s in out}  # someone in two groups would take two slots
         out += mix(
             [
@@ -97,14 +97,17 @@ def poll(
     runs.progress(what="Finding streamers to clip")
     first = list(dict.fromkeys(prioritize))
     clipped = everywhere("top_clipped")
-    log(f"most clipped today: {', '.join(f'{s[0]} ({s[1]} views)' for s in clipped[:10]) or 'unknown, going by live viewers'}")
     try:
         live = live_streams()
     except ClipitError:
         if not first and not clipped:
             raise
         live = []  # both live lists down (each logged): the other streamers' VODs may still be reachable
-    for login, _, _, site in candidates(live, lang, clipped, first):
+    picks = candidates(live, lang, clipped, first)
+    log(f"streamers to try: {', '.join(s[0] for s in picks[:10]) or 'none'}")
+    if not clipped:
+        logger.warning("no clip ranking from any site, going by live viewers")
+    for login, _, _, site in picks:
         if top_left <= 0:
             break
         try:
@@ -114,14 +117,15 @@ def poll(
         except Exception:  # one streamer's VOD list failing (API change, odd data) must not end the pass
             logger.warning("could not list VODs of %s", login, exc_info=True)
             continue
-        top_left -= 1  # an already-clipped VOD still fills its slot, so we don't drift down the list
         vod_id, url = site.vod_ref(login, vod)
         if dry_run:
             if db.status(conn, vod_id) != "done":
+                top_left -= 1
                 log(f"would clip {login}: {url}")
             continue
         if not db.claim(conn, vod_id, url, login, "top", run_id=runs.current()):
-            continue
+            continue  # already clipped: the next streamer takes the slot, so a repeat pass finds someone new
+        top_left -= 1
         log(f"clipping {login}: {url}")
         runs.progress(what=f"Clipping {login}", vod=[top_n - top_left, top_n], stage="Getting the VOD's details", count=None)
         try:

@@ -70,7 +70,7 @@ Pick up to {n} clips most likely to go viral, or none if nothing here would stop
 - Hashtags: 3-5, mixing broad ones (gaming, twitch) with specific ones (the game, the meme). A credit line for the
   streamer and their hashtag are added for you.
 Answer with ONLY this JSON (no commentary). No emoji in "hook".
-{{"name": "the name fans call the streamer", "clips": [{{"start": 1234.5, "end": 1262.0, "title": "YouTube Shorts title naming the streamer, under 70 chars", "hook": "on-screen text naming the streamer, max 8 words", "description": "post text for TikTok and YouTube naming the streamer: 1-2 sentences that make people watch, no hashtags", "hashtags": ["3 to 5 hashtags, no # sign"], "trend": "trend or format this fits", "sound": "trending sound to add in-app, or empty", "score": 3, "why": "one line: what makes it work or holds it back"}}]}}
+{{"name": "the name fans call the streamer", "clips": [{{"start": 1234.5, "end": 1262.0, "title": "YouTube Shorts title naming the streamer, under 70 chars", "hook": "on-screen text naming the streamer, max 8 words", "description": "post text for TikTok and YouTube naming the streamer: 1-2 sentences that make people watch, no hashtags", "hashtags": ["3 to 5 hashtags, no # sign"], "trend": "format this fits, or empty", "sound": "sound that fits to add in-app, or empty", "score": 3, "why": "one line: what makes it work or holds it back"}}]}}
 
 <stream_data>
 Stream title: {title}

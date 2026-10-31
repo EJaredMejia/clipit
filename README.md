@@ -113,7 +113,7 @@ Each pass:
    streams) and Kick's top 500. A name live on both sites is clipped on both, since the same name can belong to two
    different people: skip a simulcast's repeats in the dashboard. If one site's API is down, the pass goes on with the
    other.
-3. **Who to clip:** 6 streamers (`--top`): the most clipped first, live or not, then the biggest live with at least 2,000 viewers. For each, it clips their latest *finished* VOD, ignoring a stream that's still live. A channel with no usable VOD gives its slot to the next one.
+3. **Who to clip:** 6 streamers (`--top`): the most clipped first, live or not, then the biggest live with at least 2,000 viewers. For each, it clips their latest *finished* VOD, ignoring a stream that's still live. A channel with no usable VOD, or one already clipped, gives its slot to the next one.
 4. Skips VODs that ended more than 2 days ago and anything already done. Only English streams by default (`--lang ""` for any).
 5. Each VOD is claimed in the database before processing, so two overlapping passes never do the same one. Finished VODs are never redone. Failed ones retry up to 3 times, at least an hour apart, and a pass that crashed mid-VOD is taken over 30 minutes after it stopped refreshing its claim. Downloaded audio is deleted after each VOD to save disk.
 

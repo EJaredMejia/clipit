@@ -94,7 +94,7 @@ def test_latest_vod_skips_live_and_sub_only(monkeypatch):
             "status": "public",
             "duration": 3600,
             "start_time": "2026-10-24T20:50:47Z",
-            "language": "en",
+            "language": "en-IN",
         },
     ]
     monkeypatch.setattr(kick, "get", lambda url: {"id": 668, "followers_count": "7"} if "/v2/" in url else {"data": vods})
@@ -114,12 +114,18 @@ def test_kick_chat_failure_fails_the_vod(monkeypatch):
         pipeline.get_chat({"extractor": "kick:vod", "id": "x", "channel_id": "668", "timestamp": START, "duration": 60})
 
 
+def test_followers_survive_a_format_change():
+    assert kick.followers({"followers_count": "144296"}) == 144296
+    assert kick.followers({"followers_count": "1.2K"}) == 0 == kick.followers({})
+
+
 def test_top_clipped_adds_up_views_and_reads_languages_off_vods(monkeypatch):
     pages = {
         "https://kick.com/api/v2/clips?sort=view&time=day": {
             "clips": [
                 {"channel": {"slug": "a"}, "views": 5},
                 {"channel": {"slug": "b"}, "views": 7},
+                {"channel": None, "views": 99},
                 {"channel": {"slug": "nobody"}, "views": 50},
                 {"channel": {"slug": "../evil"}, "views": 99},
             ],

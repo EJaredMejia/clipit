@@ -14,14 +14,13 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from clipit.twitch import RETRY_WAITS
+from clipit.twitch import MIN_CLIP_VIEWS, RETRY_WAITS
 from clipit.util import ClipitError, logger
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"  # Kick answers 403 to urllib's default user agent
 PAGES = 5  # 100 live streams a page, most viewers first: 5 pages reach down to the smaller streamers
 CLIP_PAGES = 5  # 20 clips a page, most viewed first: by page 5 they are down to ~80 views
 MIN_FOLLOWERS = 100_000  # a clip can blow up on a nobody: seen 19,000 views for a channel of 1,023 followers
-MIN_CLIP_VIEWS = 1000  # views on a streamer's clips of the last day: less is no sign people want their clips
 MAX_PAGES = 1500  # chat pages per VOD: ~19 min at GAP, alongside the audio download
 GAP = 0.75  # seconds between requests: Kick answered 429 after 182 requests at ~2.2/s, and held 400 at 1.3/s
 _turn = threading.Lock()
@@ -78,7 +77,7 @@ def top_clipped() -> list[tuple[str, int, str]]:
     for _ in range(CLIP_PAGES):
         d = get(f"https://kick.com/api/v2/clips?sort=view&time=day{cursor}")
         for c in d["clips"]:
-            slug = c["channel"]["slug"]
+            slug = (c.get("channel") or {}).get("slug") or ""  # a deleted channel's clip must not lose the ranking
             if re.fullmatch(r"[A-Za-z0-9_-]{1,40}", slug):
                 views[slug] = views.get(slug, 0) + c["views"]
         if not d.get("nextCursor"):
@@ -96,6 +95,15 @@ def top_clipped() -> list[tuple[str, int, str]]:
     return found
 
 
+def followers(channel: dict) -> int:
+    """A channel's followers, a string in Kick's reply. Only the ranking needs them: an odd value must not stop clipping."""
+    try:
+        return int(channel.get("followers_count") or 0)
+    except (TypeError, ValueError):
+        logger.warning("unexpected Kick follower count %r", channel.get("followers_count"))
+        return 0
+
+
 def latest_vod(slug: str) -> dict | None:
     """Newest finished public VOD as {id, publishedAt, lengthSeconds, language, followers}, or None (none yet, still live, sub-only...)."""
     channel = get(f"https://kick.com/api/v2/channels/{check_slug(slug)}")
@@ -105,8 +113,8 @@ def latest_vod(slug: str) -> dict | None:
         "id": v["id"],
         "publishedAt": v["start_time"],
         "lengthSeconds": v["duration"],
-        "language": (v.get("language") or "").upper(),
-        "followers": int(channel.get("followers_count") or 0),  # a string, in Kick's reply
+        "language": (v.get("language") or "").split("-")[0].upper(),  # "en-IN" is English for --lang EN
+        "followers": followers(channel),
     }
 
 

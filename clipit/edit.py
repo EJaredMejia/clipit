@@ -76,7 +76,7 @@ Our own checks of the current version found:
 {checks}
 
 Answer with ONLY this JSON (no commentary). No emoji in "hook".
-{{"name": "the name fans call the streamer", "edit_score": 6, "request_done": false, "problems": ["0:12 dead air before the punchline: cut 1250.0-1252.5"], "clip": {{"start": 1234.5, "end": 1262.0, "title": "...", "hook": "...", "description": "...", "hashtags": ["..."], "trend": "...", "sound": "trending sound to add in-app, or empty", "score": 7, "why": "one line: what makes it work or holds it back", "edit": {{"cuts": [{{"start": 1240.0, "end": 1241.5}}], "zooms": [{{"start": 1255.0, "end": 1256.5, "zoom": 1.3}}], "sfx": [{{"at": 1255.0, "sound": "boom"}}], "texts": [{{"start": 1236.0, "end": 1238.0, "text": "HE HAS NO IDEA"}}], "emphasis": ["rent"]}}}}}}
+{{"name": "the name fans call the streamer", "edit_score": 6, "request_done": false, "problems": ["0:12 dead air before the punchline: cut 1250.0-1252.5"], "clip": {{"start": 1234.5, "end": 1262.0, "title": "...", "hook": "...", "description": "...", "hashtags": ["..."], "trend": "format this fits, or empty", "sound": "sound that fits to add in-app, or empty", "score": 7, "why": "one line: what makes it work or holds it back", "edit": {{"cuts": [{{"start": 1240.0, "end": 1241.5}}], "zooms": [{{"start": 1255.0, "end": 1256.5, "zoom": 1.3}}], "sfx": [{{"at": 1255.0, "sound": "boom"}}], "texts": [{{"start": 1236.0, "end": 1238.0, "text": "HE HAS NO IDEA"}}], "emphasis": ["rent"]}}}}}}
 
 <stream_data>
 Stream title: {title}
