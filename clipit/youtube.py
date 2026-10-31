@@ -1,7 +1,7 @@
 """Post clips to YouTube Shorts through the official YouTube Data API.
 
 Only clips from polled VODs of the last db.FRESH are posted (in a dashboard run, only from VODs that run polled): the ones the user marked Keep, then unreviewed ones the AI
-scored db.AUTO_SCORE+, never skipped ones, and when a dashboard run has none of those its best fresh clip anyway, at most PER_DAY a day and GAP apart: slow posting through the official API
+scored db.AUTO_SCORE+, never skipped ones, at most PER_DAY a day and GAP apart: slow posting through the official API
 is what keeps the channel clear of spam enforcement. Never replace this with browser automation of YouTube Studio.
 
 Credentials live in ~/.clipit/, outside the repo and the out folder: the OAuth client the user downloads from
@@ -78,7 +78,7 @@ def upload_next(conn: sqlite3.Connection, out: Path, first: list[str] | None = N
     creds = _credentials()  # before claiming: a broken login must not use up a clip's attempts
     clip = db.claim_upload(conn, "youtube", PER_DAY, GAP, first=first, run_id=run_id)
     if not clip:
-        log("no YouTube post due: no fresh clip to post, or the last post was too recent")
+        log("no YouTube post due: no fresh clip is kept or scored high enough, or the last post was too recent")
         return None
     return _post(conn, creds, clip, out)
 
