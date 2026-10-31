@@ -24,6 +24,7 @@ AI_TIMEOUT = 900
 # caption for the streamer credit and hashtags that render.post_texts adds.
 TEXT_FIELDS = {"title": 100, "hook": 80, "description": 1000, "trend": 200, "sound": 200, "why": 300}
 MAX_HASHTAGS = 5
+LEAD, TAIL, SNAP = 20, 6, 3  # seconds kept before and after a clip's peak, and how far a cut moves to meet a sentence
 CLIP_LEN = (15, 60)  # seconds, as the prompt asks; longer picks are trimmed to 60 s (a window's first 60 s end on its peak)
 # a leading "Streamer" is the unnamed subject; later ones may be someone else, "streamers" always are
 STREAMER = re.compile(r"^(?:the |this )?streamer\b", re.I)
@@ -43,6 +44,8 @@ Pick up to {n} clips most likely to go viral, or none if nothing here would stop
 - A candidate marked "viewers clipped this" is a moment strangers already chose: start there, it beats any chat or
   audio spike. Make your own cut and write your own words, with your own angle on why it matters.
 - Cold open: start on the first second that matters, never dead air or slow setup. The first 2 seconds must hook.
+- "peak" is the second of the single biggest thing in the clip: the hit, the shock, the punchline. At most {lead} s
+  of setup before it and {tail} s after it are kept, the rest is cut, so choose the peak with that in mind.
 - End right on the payoff / punchline, or on a line that loops back into the start. No trailing filler.
 - Must make sense with zero stream context. Skip ad reads, waiting screens and quiet moments unless chat proves something big happened.
 - Fewer is fine if the candidates are weak, and an empty "clips" list is the right answer for a dull stream.
@@ -72,7 +75,7 @@ Pick up to {n} clips most likely to go viral, or none if nothing here would stop
 - Hashtags: 3-5, mixing broad ones (gaming, twitch) with specific ones (the game, the meme). A credit line for the
   streamer and their hashtag are added for you.
 Answer with ONLY this JSON (no commentary). No emoji in "hook".
-{{"name": "the name fans call the streamer", "clips": [{{"start": 1234.5, "end": 1262.0, "title": "YouTube Shorts title naming the streamer, under 70 chars", "hook": "on-screen text naming the streamer, max 8 words", "description": "post text for TikTok and YouTube naming the streamer: 1-2 sentences that make people watch, no hashtags", "hashtags": ["3 to 5 hashtags, no # sign"], "trend": "format this fits, or empty", "sound": "sound that fits to add in-app, or empty", "score": 3, "why": "one line: what makes it work or holds it back"}}]}}
+{{"name": "the name fans call the streamer", "clips": [{{"start": 1234.5, "end": 1262.0, "peak": 1256.0, "title": "YouTube Shorts title naming the streamer, under 70 chars", "hook": "on-screen text naming the streamer, max 8 words", "description": "post text for TikTok and YouTube naming the streamer: 1-2 sentences that make people watch, no hashtags", "hashtags": ["3 to 5 hashtags, no # sign"], "trend": "format this fits, or empty", "sound": "sound that fits to add in-app, or empty", "score": 3, "why": "one line: what makes it work or holds it back"}}]}}
 
 <stream_data>
 Stream title: {title}
@@ -272,6 +275,8 @@ def build_prompt(info: dict, cands: list[dict], n: int) -> str:
         n=n,
         auto_score=db.AUTO_SCORE,
         max_post=MAX_POST_LEN,
+        lead=LEAD,
+        tail=TAIL,
         candidates=fenced("\n\n".join(blocks)),
     )
 
@@ -347,12 +352,34 @@ def clean(clips: object, duration: float, n: int) -> list[dict]:
         if e - s >= CLIP_LEN[0]:
             text = {k: str(c.get(k) or "").strip()[:cap] for k, cap in TEXT_FIELDS.items()}
             out.append({**text, "hashtags": hashtags(c.get("hashtags")), "start": s, "end": e, "score": score})
+            if isinstance(c.get("peak"), int | float):
+                out[-1]["peak"] = float(c["peak"])
     best, seen = [], set()
     for c in sorted(out, key=lambda c: -c["score"]):
         if (c["start"], c["end"]) not in seen:  # the same moment twice would be one clip
             seen.add((c["start"], c["end"]))
             best.append(c)
     return best[:n]
+
+
+def cut_to_peak(clip: dict, cands: list[dict]) -> dict:
+    """The clip tightened around its peak, in code because a pick left to the AI drags: at most LEAD s before it and TAIL s
+    after, cuts moved to where a sentence starts and ends, never under the shortest clip. No usable peak: its end is
+    what the prompt asks for there."""
+    lo, hi = clip["start"], clip["end"]
+    peak = clip.get("peak", hi)
+    peak = peak if lo <= peak <= hi else hi
+    said = [g for c in cands if c["start"] <= hi and lo <= c["end"] for g in c["segments"]]
+
+    def nearest(t: float, marks: list[float]) -> float:
+        return min((m for m in marks if abs(m - t) <= SNAP), key=lambda m: abs(m - t), default=t)
+
+    s = nearest(max(lo, peak - LEAD), [g["start"] for g in said if lo <= g["start"] <= peak])
+    e = nearest(min(hi, peak + TAIL), [g["end"] for g in said if peak <= g["end"] <= hi])
+    if e - s < CLIP_LEN[0]:
+        e = min(hi, s + CLIP_LEN[0])
+        s = max(lo, e - CLIP_LEN[0])
+    return {**clip, "start": round(s, 1), "end": round(e, 1)}
 
 
 def name_streamer(picks: list[dict], *names: object) -> list[dict]:
@@ -383,6 +410,7 @@ def pick_clips(cmd: str | None, info: dict, cands: list[dict], n: int, work: Pat
         )
     except (ValueError, AttributeError):
         raise ClipitError(f"AI reply wasn't valid JSON, see {work / 'ai_reply.txt'}") from None
+    picks = [cut_to_peak(p, cands) for p in picks]
     if not picks and reply_json.get("clips") != []:  # only an explicit empty list means "nothing good": else retry the VOD
         raise ClipitError(f"AI picked no usable clips, see {work / 'ai_reply.txt'}")
     return picks

@@ -38,6 +38,7 @@ TEXT_FIELDS = ("title", "hook", "description", "trend", "sound", "why")
 CLIP_PROPERTIES = {
     "start": {"type": "number"},
     "end": {"type": "number"},
+    "peak": {"type": "number"},
     **{field: {"type": "string"} for field in TEXT_FIELDS},
     "hashtags": {"type": "array", "items": {"type": "string"}},
     "score": {"type": "number"},

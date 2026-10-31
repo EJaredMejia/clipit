@@ -141,6 +141,7 @@ recorded by hand from the dashboard until then.
   each finished clip, as contact sheets of its frames (`render.sheets`), that
   reached `db.AUTO_SCORE`, answers `ai.CHECKS`, and code decides: any failed check,
   a clip over `ai.MAX_POST_LEN`, or a reviewer that couldn't see it drops the score below the bar (`pipeline.review`).
+  Cuts are made in code too (`ai.cut_to_peak`): a clip keeps `ai.LEAD` s before the peak the picker names and `ai.TAIL` s after.
   The dashboard's "Post to YouTube now" is the user posting by hand, like uploading in YouTube Studio: any clip, no
   pacing, but it counts toward the pace of the automatic posts.
 - Each upload is claimed in `uploads` before it's sent (`db.claim_upload`, `db.claim_clip_upload`), so a clip is never
