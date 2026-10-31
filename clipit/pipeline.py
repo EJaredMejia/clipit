@@ -209,15 +209,12 @@ def review(cmd: str | None, info: dict, clip: dict, words: list, work: Path) -> 
     clip.setdefault("picked_score", clip["score"])
     if clip["picked_score"] < db.AUTO_SCORE or clip.get("reviewed"):
         return
-    spoken = " ".join(
-        w for _, w in sorted({(w[0], w[2]) for w in words if clip["start"] <= w[0] < clip["end"]})
-    )  # windows overlap
+    said = sorted({(edit.clip_time(clip, w[0]), w[2]) for w in words if clip["start"] <= w[0] < clip["end"]})  # windows overlap
+    spoken = " ".join(f"[{t:.0f}s] {w}" if i % 8 == 0 else w for i, (t, w) in enumerate(said))
     length = sum(b - a for a, b in edit.kept(clip))  # the edit's cuts make the video shorter than its time range
     with tempfile.TemporaryDirectory(prefix="clipit-") as tmp:
         try:
-            stills = render.frames(
-                work / clip["file"], [0.5, 2, length * 0.3, length * 0.55, length * 0.8, length - 1], Path(tmp)
-            )
+            stills = render.sheets(work / clip["file"], Path(tmp))
         except (ClipitError, subprocess.SubprocessError):
             stills = []  # veto stops a clip it can't see
         failed = ai.veto(cmd, clip, clip.get("streamer") or info.get("uploader"), spoken, stills, length)

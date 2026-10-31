@@ -138,7 +138,8 @@ recorded by hand from the dashboard until then.
   those come first among the moments, and we cut our own clip from the VOD and write our own text. Never download or
   repost someone's clip, or reuse its title or wording: the user wants clips we make, and reposts lose reach on YouTube.
   The score alone proves nothing: the picker grades its own pick from a transcript. So a separate reviewer watches
-  stills of each finished clip that reached `db.AUTO_SCORE`, answers `ai.CHECKS`, and code decides: any failed check,
+  each finished clip, as contact sheets of its frames (`render.sheets`), that
+  reached `db.AUTO_SCORE`, answers `ai.CHECKS`, and code decides: any failed check,
   a clip over `ai.MAX_POST_LEN`, or a reviewer that couldn't see it drops the score below the bar (`pipeline.review`).
   The dashboard's "Post to YouTube now" is the user posting by hand, like uploading in YouTube Studio: any clip, no
   pacing, but it counts toward the pace of the automatic posts.

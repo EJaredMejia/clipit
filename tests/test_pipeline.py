@@ -34,7 +34,7 @@ def stages(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline.ai, "pick_clips", pick)
     monkeypatch.setattr(pipeline.facecam, "find_layouts", lambda url, dur: [])
     monkeypatch.setattr(pipeline.ai, "veto", lambda *a: [])
-    monkeypatch.setattr(pipeline.render, "frames", lambda *a: [])
+    monkeypatch.setattr(pipeline.render, "sheets", lambda *a: [])
     monkeypatch.setattr(pipeline.facecam, "clip_cam", lambda *a: None)
     monkeypatch.setattr(pipeline.facecam, "clip_face", lambda *a: None)
     monkeypatch.setattr(pipeline.render, "render", lambda urls, clip, words, out, cam: out.write_bytes(b"mp4"))
@@ -254,7 +254,7 @@ def test_one_clip_whose_stream_cant_be_read_doesnt_lose_the_vod(stages, monkeypa
 
 def test_a_review_that_never_happened_is_asked_again(monkeypatch, tmp_path):
     answers = [["review: failed"], []]
-    monkeypatch.setattr(pipeline.render, "frames", lambda *a: [])
+    monkeypatch.setattr(pipeline.render, "sheets", lambda *a: [])
     monkeypatch.setattr(pipeline.ai, "veto", lambda *a: answers.pop(0))
     clip = {"score": 9.0, "start": 0.0, "end": 20.0, "file": "c.mp4", "why": ""}
     pipeline.review("x", {}, clip, [], tmp_path)
@@ -265,7 +265,7 @@ def test_a_review_that_never_happened_is_asked_again(monkeypatch, tmp_path):
 
 def test_cuts_count_against_the_review_length(monkeypatch, tmp_path):
     seen = []
-    monkeypatch.setattr(pipeline.render, "frames", lambda *a: [])
+    monkeypatch.setattr(pipeline.render, "sheets", lambda *a: [])
     monkeypatch.setattr(pipeline.ai, "veto", lambda *a: seen.append(a[-1]) or [])
     edit = {"cuts": [{"start": 10.0, "end": 30.0}]}
     pipeline.review("x", {}, {"score": 9.0, "start": 0.0, "end": 50.0, "file": "c.mp4", "edit": edit}, [], tmp_path)

@@ -98,9 +98,11 @@ CHECKS = {
 }
 VETO_PROMPT = """You are the toughest viewer on YouTube Shorts: 19 years old, thumb on the screen, a hundred other
 videos waiting. Someone else picked and wants to post this clip. Your job is to stop bad clips going out, and a clip
-you wrongly stop costs nothing. The pictures are stills from the finished video, in order, at these seconds: {times}.
+you wrongly stop costs nothing. You are watching the finished video: each picture is a sheet of frames, two for every
+second, left to right then top to bottom, and the sheets start at these seconds: {times}. Follow what moves and changes
+from frame to frame, because a shove or a shock lasts only a few of them. The marks in the words spoken are seconds.
 
-Answer each check from what the pictures and the words show, never from what the text below promises. Passing means
+Answer each check from what the frames and the words show, never from what the text below promises. Passing means
 you'd bet on it: when in doubt, it fails.
 {checks}
 
@@ -287,23 +289,23 @@ def failed_checks(reply: object) -> list[str]:
 
 
 def veto(
-    cmd: str | None, clip: dict, streamer: object, spoken: str, stills: Sequence[tuple[float, Path]], length: float
+    cmd: str | None, clip: dict, streamer: object, spoken: str, sheets: Sequence[tuple[float, Path]], length: float
 ) -> list[str]:
     """Why a finished clip of length seconds mustn't post by itself, empty if a reviewer watched it and every check
     passed. A reviewer that can't see it, or fails, stops the clip: only something that watched it may let it through."""
     if length > MAX_POST_LEN:
         return [f"length: {length:.0f} s, over {MAX_POST_LEN} s"]
-    if not cmd or not stills or not sees_images(cmd):
+    if not cmd or not sheets or not sees_images(cmd):
         return ["review: no AI could watch it"]
     prompt = VETO_PROMPT.format(
-        times=", ".join(f"{t:.1f}" for t, _ in stills),
+        times=", ".join(f"{t:.1f}" for t, _ in sheets),
         checks="\n".join(f'- "{name}": {check}' for name, check in CHECKS.items()),
         streamer=fenced(streamer)[:100],
         hook=fenced(clip["hook"]),
         spoken=fenced(spoken)[:4000],
     )
     try:
-        return failed_checks(extract_json(ask_ai(cmd, prompt, codex.VETO_SCHEMA, [p for _, p in stills])))
+        return failed_checks(extract_json(ask_ai(cmd, prompt, codex.VETO_SCHEMA, [p for _, p in sheets])))
     except (ClipitError, ValueError) as e:
         logger.warning("the review of %s failed: %s", clip.get("file"), e)
         return ["review: failed"]

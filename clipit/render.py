@@ -117,6 +117,7 @@ SFX = {
 LOUDNORM = "loudnorm=I=-14:TP=-1.5"
 # webcam over gameplay, the webcam alone, one full-screen 9:16 crop, the whole frame on a blur
 LAYOUTS = ("split", "cam", "crop", "fill")
+SHEET, SHEET_FPS = (6, 3), 2  # a contact sheet's columns and rows, and frames of each second: 9 s a sheet, faces still legible
 STEREO = "aformat=sample_rates=48000:channel_layouts=stereo"
 
 
@@ -157,6 +158,15 @@ def frames(video: Path, times: list[float], folder: Path) -> list[tuple[float, P
         if path.exists():  # a time past the last frame makes no picture, without an error
             out.append((t, path))
     return out
+
+
+def sheets(video: Path, folder: Path) -> list[tuple[float, Path]]:
+    """The whole clip as contact sheets, sheet01.jpg... in folder, with the second each starts at: AI CLIs take pictures,
+    not video, so SHEET_FPS frames of every second is how one watches a clip, motion included."""
+    cols, rows = SHEET
+    vf = f"fps={SHEET_FPS},scale=240:-2,tile={cols}x{rows}"
+    sh(["ffmpeg", "-v", "error", "-y", "-i", str(video), "-vf", vf, "-q:v", "4", str(folder / "sheet%02d.jpg")], timeout=120)
+    return [(i * cols * rows / SHEET_FPS, p) for i, p in enumerate(sorted(folder.glob("sheet*.jpg")))]
 
 
 def source_frame(url: str, t: float, path: Path) -> None:

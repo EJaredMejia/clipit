@@ -163,3 +163,12 @@ def test_a_layout_chosen_without_an_edit_renders(monkeypatch, tmp_path):
     clip = {"start": 10.0, "end": 30.0, "hook": "hi", "edit": {"layout": "crop", "focus": 0.3}}
     render.render(["https://v"], clip, [], tmp_path / "c.mp4", None)
     assert (tmp_path / "c.mp4").exists()
+
+
+def test_sheets_say_which_second_each_starts_at(monkeypatch, tmp_path):
+    def fake_sh(cmd, timeout):
+        (tmp_path / "sheet02.jpg").write_bytes(b"x")
+        (tmp_path / "sheet01.jpg").write_bytes(b"x")
+
+    monkeypatch.setattr(render, "sh", fake_sh)
+    assert render.sheets(tmp_path / "c.mp4", tmp_path) == [(0.0, tmp_path / "sheet01.jpg"), (9.0, tmp_path / "sheet02.jpg")]
