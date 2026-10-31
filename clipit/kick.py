@@ -20,7 +20,7 @@ from clipit.util import ClipitError, logger
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"  # Kick answers 403 to urllib's default user agent
 PAGES = 5  # 100 live streams a page, most viewers first: 5 pages reach down to the smaller streamers
 CLIP_PAGES = 5  # 20 clips a page, most viewed first: by page 5 they are down to ~80 views
-CLIP_STREAMERS = 15  # each one costs two requests, to read its language off its VODs
+MIN_CLIP_VIEWS = 1000  # views on a streamer's clips of the last day: less is no sign people want their clips
 MAX_PAGES = 1500  # chat pages per VOD: ~19 min at GAP, alongside the audio download
 GAP = 0.75  # seconds between requests: Kick answered 429 after 182 requests at ~2.2/s, and held 400 at 1.3/s
 _turn = threading.Lock()
@@ -69,8 +69,9 @@ def live_streams() -> list[tuple[str, int, str]]:
 
 
 def top_clipped() -> list[tuple[str, int, str]]:
-    """Streamers by views on their clips of the last day as (slug, views, language). Kick's clips have no language, so
-    it's read from each streamer's latest VOD, and one with no usable VOD is left out: it couldn't be clipped anyway."""
+    """Streamers with MIN_CLIP_VIEWS on their clips of the last day as (slug, views, language). Kick's clips have no
+    language, so it's read from each one's latest VOD (two requests), and one with no usable VOD is left out: it couldn't
+    be clipped anyway."""
     views: dict[str, int] = {}
     cursor = ""
     for _ in range(CLIP_PAGES):
@@ -83,7 +84,7 @@ def top_clipped() -> list[tuple[str, int, str]]:
             break
         cursor = "&cursor=" + urllib.parse.quote(d["nextCursor"])
     found = []
-    for slug, n in sorted(views.items(), key=lambda s: -s[1])[:CLIP_STREAMERS]:
+    for slug, n in sorted((s for s in views.items() if s[1] >= MIN_CLIP_VIEWS), key=lambda s: -s[1]):
         try:
             vod = latest_vod(slug)
         except Exception:  # one banned or odd channel must not lose the whole ranking

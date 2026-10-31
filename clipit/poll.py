@@ -16,7 +16,6 @@ from clipit.pipeline import process_vod
 from clipit.util import ROOT, ClipitError, log, logger, utcnow
 
 MIN_VIEWERS = 2000  # smaller streamers' clips don't get views
-MIN_CLIP_VIEWS = 1000  # views on a streamer's clips of the last day: less is no sign people want their clips
 MAX_AGE = datetime.timedelta(days=2)  # older VODs aren't worth clipping anymore
 # Never clipped, on any site, even when most clipped or prioritized: known to copyright-strike clip channels until banned.
 BLOCKED = frozenset({"pokimane"})
@@ -60,7 +59,7 @@ def candidates(
     last day (live or not), then live streamers with at least MIN_VIEWERS. Each group biggest first, alternating sites."""
     sites = {site.__name__.rsplit(".", 1)[1]: site for site in SITES}
     out: list[Stream] = [(name, 0, "", sites[site]) for site, name in first if name.lower() not in BLOCKED]
-    for group, least in ((clipped, MIN_CLIP_VIEWS), (streams, MIN_VIEWERS)):
+    for group, least in ((clipped, kick.MIN_CLIP_VIEWS), (streams, MIN_VIEWERS)):
         picked = {(s[0].lower(), s[3]) for s in out}  # someone in two groups would take two slots
         out += mix(
             [

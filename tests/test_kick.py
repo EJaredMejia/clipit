@@ -129,6 +129,7 @@ def test_top_clipped_adds_up_views_and_reads_languages_off_vods(monkeypatch):
                 {"channel": {"slug": "a"}, "views": 4},
                 {"channel": {"slug": "banned"}, "views": 3},
                 {"channel": {"slug": "novods"}, "views": 2},
+                {"channel": {"slug": "tiny"}, "views": 1},
             ]
         },
     }
@@ -136,8 +137,9 @@ def test_top_clipped_adds_up_views_and_reads_languages_off_vods(monkeypatch):
     def vod(slug):
         if slug == "banned":
             raise OSError("404")
-        return {"a": {"language": "EN"}, "b": {"language": "ES"}}.get(slug)
+        return {"a": {"language": "EN"}, "b": {"language": "ES"}, "tiny": {"language": "EN"}}.get(slug)
 
+    monkeypatch.setattr(kick, "MIN_CLIP_VIEWS", 2)
     monkeypatch.setattr(kick, "get", pages.__getitem__)
     monkeypatch.setattr(kick, "latest_vod", vod)
     assert kick.top_clipped() == [("a", 9, "EN"), ("b", 7, "ES")]
