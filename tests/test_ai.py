@@ -244,7 +244,7 @@ def answers(**failed):
 
 def test_one_failed_check_stops_a_clip_whatever_the_rest_say():
     assert ai.failed_checks(answers()) == []
-    assert ai.failed_checks(answers(visible="a static shared screen")) == ["visible: a static shared screen"]
+    assert ai.failed_checks(answers(real="a static shared screen")) == ["real: a static shared screen"]
 
 
 def test_a_check_left_out_or_answered_loosely_fails():
