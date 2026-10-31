@@ -39,7 +39,7 @@ export function Run() {
         <div className="max-w-xl">
           <h2 className="font-heading text-3xl font-bold">Run clipit</h2>
           <p className="mt-2 text-muted-foreground">
-            Clips the latest VODs of the streamers getting the most clip views today on Twitch and Kick, then posts the next due clip to YouTube Shorts, at most 10 a
+            An AI searches the web for who something just happened to today and clips them all, then the streamers getting the most clip views on Twitch and Kick, starting from the moments viewers clipped. A separate AI watches each clip before it posts by itself, then the next due clip goes to YouTube Shorts, at most 10 a
             day and an hour apart. The same as clipit --poll, then clipit --upload, set up below. You get a notice here
             when it ends.
           </p>
@@ -180,7 +180,7 @@ function RunSettings({ saved, running }: { saved: Settings; running: boolean }) 
         {running ? "The next run uses these. The run going now keeps the ones it started with." : "The next run uses these."}
       </p>
       <div className="mt-4 grid gap-4 sm:grid-cols-3">
-        {number("top", "Streamers to clip", "Most clip views today first, then the biggest live")}
+        {number("top", "Streamers to clip", "At least this many, and everyone the AI search finds")}
         {number("clips", "Max clips per VOD", "The AI picks up to this many, fewer or none if the VOD is weak")}
         <label className="flex flex-col gap-1.5">
           <span className={fieldLabel}>Language</span>

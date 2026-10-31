@@ -66,6 +66,22 @@ def _strict(properties: dict) -> dict:
 
 
 SPAN = {"start": {"type": "number"}, "end": {"type": "number"}}
+HOT_SCHEMA = _strict(
+    {
+        "streamers": {
+            "type": "array",
+            "items": _strict({field: {"type": "string"} for field in ("site", "login", "why")}),
+        }
+    }
+)
+VETO_SCHEMA = _strict(
+    {
+        "checks": {
+            "type": "array",
+            "items": _strict({"name": {"type": "string"}, "passed": {"type": "boolean"}, "evidence": {"type": "string"}}),
+        }
+    }
+)
 EDIT_PROPERTIES = {
     "cuts": {"type": "array", "items": _strict(SPAN)},
     "zooms": {"type": "array", "items": _strict({**SPAN, "zoom": {"type": "number"}})},
@@ -117,9 +133,11 @@ def _restricted_catalog(raw: str) -> str:
         raise ClipitError("Codex returned an unsupported model catalog; update the Codex CLI") from exc
 
 
-def ask(prompt: str, *, schema: dict = PICKS_SCHEMA, timeout: float = 900, images: Sequence[Path] = ()) -> str:
-    """Run a fresh Codex request with only the supplied prompt.
-    The reply must match schema: the clip picks, or a high-effort review.
+def ask(
+    prompt: str, *, web_search: bool = False, schema: dict = PICKS_SCHEMA, timeout: float = 900, images: Sequence[Path] = ()
+) -> str:
+    """Run a fresh Codex request with only the supplied prompt. web_search only for a prompt holding no untrusted text.
+    The reply must match schema: the clip picks, a high-effort review, or the streamers a search found.
     images: pictures attached to the prompt (no tool reads them: view_image stays disabled)."""
     executable = find_cli()
     if not executable:
@@ -158,7 +176,7 @@ def ask(prompt: str, *, schema: dict = PICKS_SCHEMA, timeout: float = 900, image
                 "-c",
                 "project_doc_max_bytes=0",
                 "-c",
-                'web_search="disabled"',
+                'web_search="live"' if web_search else 'web_search="disabled"',
                 "-c",
                 "model_catalog_json=" + json.dumps(catalog_path.as_posix()),
             ]

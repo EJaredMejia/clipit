@@ -22,6 +22,9 @@ LIVE = """query { streams(first: 30) { edges { node { viewersCount language broa
   games(first: 30) { edges { node { streams(first: 30) { edges { node { viewersCount language broadcaster { login } } } } } } } }"""
 CLIPS = """query { games(first: 30) { edges { node {
   clips(first: 30, criteria: {period: LAST_DAY, sort: VIEWS_DESC}) { edges { node { viewCount language broadcaster { login followers { totalCount } } } } } } } } }"""
+# Only where and how many views: a clip points us at a moment, we cut our own from the VOD and never reuse its title or video.
+MOMENTS = """query($login: String!) { user(login: $login) {
+  clips(first: 30, criteria: {period: LAST_WEEK, sort: VIEWS_DESC}) { edges { node { viewCount videoOffsetSeconds video { id } } } } } }"""
 VODS = """query($login: String!) {
   user(login: $login) { videos(first: 3, type: ARCHIVE, sort: TIME) { edges { node { id publishedAt lengthSeconds status } } } } }"""
 
@@ -97,6 +100,18 @@ def latest_vod(login: str) -> dict | None:
     user = gql(VODS, {"login": login})["user"]
     vods = [e["node"] for e in ((user or {}).get("videos") or {}).get("edges", [])]
     return next((v for v in vods if v["status"] == "RECORDED"), None)
+
+
+def clip_moments(login: str, vod: dict) -> list[tuple[int, int]]:
+    """Where in this VOD people clipped, as (second, views), most viewed first. Clips with no offset are left out."""
+    user = gql(MOMENTS, {"login": login})["user"]
+    clips = [e["node"] for e in ((user or {}).get("clips") or {}).get("edges", [])]
+    found = [
+        (int(c["videoOffsetSeconds"]), int(c["viewCount"]))
+        for c in clips
+        if (c.get("video") or {}).get("id") == vod["id"] and c.get("videoOffsetSeconds") is not None
+    ]
+    return sorted(found, key=lambda m: -m[1])
 
 
 def vod_ref(login: str, vod: dict) -> tuple[str, str]:
