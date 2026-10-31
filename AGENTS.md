@@ -42,6 +42,11 @@ done, with the PR link. If something only the user can decide comes up, ask, and
 Locally, run pyright with `--pythonpath` pointed at the venv's python when you work in a worktree: without it, imports
 don't resolve and real errors hide among them.
 
+If Greptile is out of tokens or credits, its review won't come, so the local AI takes its place, using the same AI you
+are running on: Codex reviews with `codex review`, Claude Code with its `/code-review` command. Review the PR's whole
+diff against `main` after each push and hold its findings to the same bar: fix each one, or say why not in a PR comment.
+Repeat until a review comes back with nothing open, and tell the user in the PR that the local AI stood in for Greptile.
+
 ## Architecture
 
 `clipit/` has one module per pipeline stage. `pipeline.process_vod()` runs them in order; `poll.py` decides which
