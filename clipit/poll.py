@@ -1,6 +1,7 @@
 """Decide which streams to clip and run the pipeline on each one's latest finished VOD, on Twitch and Kick.
 
-Streamers getting the most clip views today first, alternating between sites, then big live streamers. Each VOD is claimed in the
+Streamers who already gave a good clip first, then the ones getting the most clip views today, alternating between
+sites, then big live streamers. A pass goes on past its top_n until it has a good clip, up to EXTRA more VODs. Each VOD is claimed in the
 SQLite catalog before processing, so overlapping runs never double-process and finished VODs are never redone.
 """
 
@@ -17,6 +18,7 @@ from clipit.util import ROOT, ClipitError, log, logger, utcnow
 
 MIN_VIEWERS = 2000  # smaller streamers' clips don't get views
 MAX_AGE = datetime.timedelta(days=2)  # older VODs aren't worth clipping anymore
+EXTRA = 6  # more VODs a pass may try to find a clip good enough to post: bounded, each one takes minutes and AI calls
 # Never clipped, on any site, even when most clipped or prioritized: known to copyright-strike clip channels until banned.
 BLOCKED = frozenset({"pokimane"})
 # Tournament and company channels: famous and clipped, but no streamer to name. shortcut: the ones seen, add more as they show up.
@@ -94,8 +96,9 @@ def poll(
     now = utcnow()
     failed = 0
     top_left = top_n
+    extra_left, good = EXTRA, False
     runs.progress(what="Finding streamers to clip")
-    first = list(dict.fromkeys(prioritize))
+    first = list(dict.fromkeys([*prioritize, *db.proven_streamers(conn)]))
     clipped = everywhere("top_clipped")
     try:
         live = live_streams()
@@ -108,7 +111,7 @@ def poll(
     if not clipped:
         logger.warning("no clip ranking from any site, going by live viewers")
     for login, _, _, site in picks:
-        if top_left <= 0:
+        if top_left <= 0 and (good or dry_run or extra_left <= 0):
             break
         try:
             vod = site.latest_vod(login)
@@ -125,14 +128,19 @@ def poll(
             continue
         if not db.claim(conn, vod_id, url, login, "top", run_id=runs.current()):
             continue  # already clipped: the next streamer takes the slot, so a repeat pass finds someone new
-        top_left -= 1
+        if top_left > 0:
+            top_left -= 1
+        else:
+            extra_left -= 1
+        tried = top_n - top_left + EXTRA - extra_left
         log(f"clipping {login}: {url}")
-        runs.progress(what=f"Clipping {login}", vod=[top_n - top_left, top_n], stage="Getting the VOD's details", count=None)
+        runs.progress(what=f"Clipping {login}", vod=[tried, max(tried, top_n)], stage="Getting the VOD's details", count=None)
         try:
             with db.heartbeat(conn, vod_id):
                 _, clips = process_vod(url, out_root=out_root, **pipeline_opts)
             db.save_clips(conn, vod_id, [{**c, "file": f"{vod_id}/{c['file']}"} for c in clips])
             db.finish(conn, vod_id)
+            good = good or any(c["score"] >= db.AUTO_SCORE for c in clips)
         except Exception as e:  # one bad VOD (sub-only, deleted...) must not stop the rest
             logger.exception("VOD %s failed", vod_id)
             db.finish(conn, vod_id, error=f"{type(e).__name__}: {e}"[:1000])
@@ -140,4 +148,6 @@ def poll(
         finally:  # the ~300 MB audio is only needed while processing; a later rerun re-downloads it
             for p in (Path(out_root) / vod_id).glob("audio.*"):
                 p.unlink()
+    if top_n > 0 and not good and not dry_run:
+        logger.warning("no clip scored %d+ this pass: nothing from it is good enough to post", db.AUTO_SCORE)
     return failed

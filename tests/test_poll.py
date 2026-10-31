@@ -53,7 +53,7 @@ def test_prioritized_streamers_are_clipped_first(world, monkeypatch):
     conn, calls, out = world
     monkeypatch.setattr(poll.twitch, "top_clipped", lambda: [("big1", 50000, "EN")])
     poll.poll(conn, top_n=1, lang="EN", out_root=out, prioritize=[("twitch", "mid")])
-    assert calls == ["v3"]  # mid's VOD takes the only slot, ahead of the most clipped big1
+    assert calls == ["v3", "v1"]  # mid goes ahead of the most clipped big1, who gets tried as mid's VOD fails
 
 
 def test_live_streams_keep_both_sites_and_survive_one_being_down(monkeypatch):
@@ -189,3 +189,36 @@ def test_dry_run_touches_nothing(world):
     conn, calls, out = world
     poll.poll(conn, top_n=2, lang="EN", dry_run=True, out_root=out)
     assert calls == [] and conn.execute("SELECT count(*) FROM vods").fetchone()[0] == 0
+
+
+def weak_unless(monkeypatch, good_url_end):
+    real = poll.process_vod
+
+    def scored(url, out_root, **kw):
+        work, clips = real(url, out_root, **kw)
+        return work, [{**c, "score": 8.0 if url.endswith(good_url_end) else 5.0} for c in clips]
+
+    monkeypatch.setattr(poll, "process_vod", scored)
+
+
+def test_a_pass_goes_on_past_top_n_until_it_has_a_good_clip_and_then_stops(world, monkeypatch):
+    conn, calls, out = world
+    monkeypatch.setattr(poll.db, "proven_streamers", lambda conn: [("twitch", "big1"), ("twitch", "s1"), ("twitch", "s2")])
+    weak_unless(monkeypatch, "/4")
+    poll.poll(conn, top_n=1, out_root=out)
+    assert calls == ["v1", "v4"]  # s2 comes next, but the pass has its good clip
+
+
+def test_a_pass_with_no_good_clip_gives_up_after_extra_vods(world, monkeypatch):
+    conn, calls, out = world
+    weak_unless(monkeypatch, "/never")
+    monkeypatch.setattr(poll, "EXTRA", 1)
+    poll.poll(conn, top_n=1, out_root=out)
+    assert len(calls) == 2
+
+
+def test_streamers_with_a_good_clip_before_are_tried_first(world, monkeypatch):
+    conn, calls, out = world
+    monkeypatch.setattr(poll.db, "proven_streamers", lambda conn: [("twitch", "s2")])
+    poll.poll(conn, top_n=1, out_root=out)
+    assert calls == ["v5"]
