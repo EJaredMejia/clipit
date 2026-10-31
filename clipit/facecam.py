@@ -10,7 +10,7 @@ from clipit import source
 from clipit.util import ClipitError
 
 TOP = (1080, 768)  # facecam panel in the 1080x1920 split layout, gameplay gets the rest
-MIN_SHOT_FACE = 70  # px wide in a 960 px frame: smaller is someone far off or in a game, not a person filling the shot
+MIN_SHOT_FACE = 0.15 * 960  # px wide in a 960 px frame: smaller is an overlay webcam, or someone far off or in a game
 
 
 def edge(profile: np.ndarray, lo: int, hi: int, fallback: int) -> int:
@@ -38,7 +38,7 @@ def cam_faces(boxes: list, n_frames: int, width: int = 960) -> list[tuple[np.nda
         if len(frames) < max(3, n_frames // 8):  # game faces move; a layout used <1/8 of the stream isn't worth it
             break
         face = np.median([b[1:] for b in group], 0)
-        if face[2] <= 0.15 * width:  # a huge face is a full-screen camera scene, not an overlay
+        if face[2] <= MIN_SHOT_FACE * width / 960:  # a huge face is a full-screen camera scene, not an overlay
             found.append((face, frames))
         left = [b for b in left if b not in group]
     return found

@@ -1,5 +1,6 @@
 """Talking to the video site through yt-dlp: metadata, audio-only download, stream URLs to seek into."""
 
+import functools
 import json
 import re
 import shutil
@@ -86,7 +87,10 @@ def fragments(playlist: str, base: str, start: float, end: float) -> tuple[list[
     at, length, parts, first = 0.0, 0.0, [], 0.0
     for line in playlist.splitlines():
         if line.startswith("#EXTINF:"):
-            length = float(line[8:].split(",")[0])
+            try:
+                length = float(line[8:].split(",")[0])
+            except ValueError:
+                return None
         elif line and not line.startswith("#"):
             if at < end and at + length > start:
                 first = first if parts else at
@@ -98,6 +102,11 @@ def fragments(playlist: str, base: str, start: float, end: float) -> tuple[list[
     return urls, max(start - first, 0.0)
 
 
+@functools.lru_cache(maxsize=8)  # a VOD's playlist doesn't change, and every frame and render starts from it
+def playlist(url: str) -> str:
+    return fetch(url)
+
+
 @contextmanager
 def inputs(urls: list[str], start: float, length: float) -> Iterator[list[str]]:
     """ffmpeg's input arguments for length seconds at start of each stream. ffmpeg can't seek into fragmented-MP4 HLS
@@ -105,8 +114,8 @@ def inputs(urls: list[str], start: float, length: float) -> Iterator[list[str]]:
     args = []
     with tempfile.TemporaryDirectory(prefix="clipit-") as tmp:
         for i, url in enumerate(urls):
-            playlist = fetch(url) if ".m3u8" in url else ""
-            found = fragments(playlist, url.rsplit("/", 1)[0] + "/", start, start + length)
+            text = playlist(url) if ".m3u8" in url else ""
+            found = fragments(text, url.rsplit("/", 1)[0] + "/", start, start + length)
             if not found:
                 args += [*REMOTE, "-ss", f"{start:.2f}", "-t", f"{length:.2f}", "-i", url]
                 continue

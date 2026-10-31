@@ -185,4 +185,6 @@ def poll(
                 p.unlink()
     if top_n > 0 and not good and not dry_run:
         logger.warning("no clip scored %d+ this pass: nothing from it is good enough to post", db.AUTO_SCORE)
+    if failed:
+        logger.warning("%d of %d VODs failed to clip this pass (see above)", failed, tried)
     return failed if failed == tried else 0

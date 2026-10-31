@@ -61,3 +61,8 @@ def test_inputs_joins_a_fragmented_clip_into_one_local_file(monkeypatch):
     with source.inputs(["https://cdn/v/index.m3u8"], 12.5, 5) as args:
         assert args[:4] == ["-ss", "2.50", "-t", "5.00"]
         assert Path(args[-1]).read_bytes() == b"init-0.mp41.mp4"
+
+
+def test_a_garbled_playlist_is_not_split():
+    playlist = '#EXT-X-MAP:URI="init.mp4"\n#EXTINF:oops,\na.mp4\n'
+    assert source.fragments(playlist, "https://x/", 0, 10) is None

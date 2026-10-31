@@ -181,6 +181,9 @@ def process_vod(
             except subprocess.CalledProcessError as e:
                 logger.error("render failed for %s: %s", out.name, e.stderr[-800:])
                 continue
+            except ClipitError as e:  # the stream couldn't be read: the other clips may still work
+                logger.error("render failed for %s: %s", out.name, e)
+                continue
             except subprocess.TimeoutExpired:
                 logger.error("render timed out for %s", out.name)
                 continue
@@ -188,7 +191,8 @@ def process_vod(
     if not rendered:
         raise ClipitError("every clip failed to render, see the log")
 
-    for c in rendered:
+    for i, c in enumerate(rendered, 1):
+        progress("A reviewer is watching the clips", i - 1, len(rendered))
         review(ai_cmd, info, c, words, work)
 
     # dropped picks stay in the file: an old clip of one, kept by the user, is found there to re-edit it (made_as)
@@ -200,13 +204,15 @@ def process_vod(
 
 def review(cmd: str | None, info: dict, clip: dict, words: list, work: Path) -> None:
     """A separate reviewer watches a clip good enough to post by itself. If it fails any check, its score drops under
-    db.AUTO_SCORE and the reasons go in "why", so it stays for the user to judge but never posts alone."""
-    if clip["score"] < db.AUTO_SCORE or clip.get("reviewed"):
+    db.AUTO_SCORE and the reasons go in "why", so it stays for the user to judge but never posts alone. A review that
+    never happened (the AI failed) stops the clip too, and is asked again if the VOD is run again."""
+    clip.setdefault("picked_score", clip["score"])
+    if clip["picked_score"] < db.AUTO_SCORE or clip.get("reviewed"):
         return
     spoken = " ".join(
         w for _, w in sorted({(w[0], w[2]) for w in words if clip["start"] <= w[0] < clip["end"]})
     )  # windows overlap
-    length = clip["end"] - clip["start"]
+    length = sum(b - a for a, b in edit.kept(clip))  # the edit's cuts make the video shorter than its time range
     with tempfile.TemporaryDirectory(prefix="clipit-") as tmp:
         try:
             stills = render.frames(
@@ -214,11 +220,11 @@ def review(cmd: str | None, info: dict, clip: dict, words: list, work: Path) -> 
             )
         except (ClipitError, subprocess.SubprocessError):
             stills = []  # veto stops a clip it can't see
-        failed = ai.veto(cmd, clip, clip.get("streamer") or info.get("uploader"), spoken, stills)
-    clip["reviewed"] = True
+        failed = ai.veto(cmd, clip, clip.get("streamer") or info.get("uploader"), spoken, stills, length)
+    clip["reviewed"] = not any(f.startswith("review:") for f in failed)
+    clip["score"] = db.AUTO_SCORE - 1.0 if failed else clip["picked_score"]
     if failed:
         log(f"review stopped {clip['file']}: " + "; ".join(failed))
-        clip["score"] = min(clip["score"], db.AUTO_SCORE - 1.0)
         clip["why"] = ("Review failed: " + "; ".join(failed))[: ai.TEXT_FIELDS["why"]]
 
 
@@ -282,7 +288,7 @@ def preview(url: str, layouts: list, words: list) -> Callable[[dict, Path], list
             # ffmpeg can succeed without writing a picture (frames() checks its own too)
             first = [("the stream", stream)] if stream.exists() else []
             return [*first, *((f"{t:.1f} s", f) for t, f in frames)]
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ClipitError) as e:
             logger.warning("couldn't render frames for the review: %s", str(getattr(e, "stderr", "") or e)[-500:])
             return []
         finally:
@@ -325,7 +331,7 @@ def reedit(url: str, clip: dict, request: str, at: float | None, ai_cmd: str | N
     progress("Rendering the clip")
     try:
         render_clip(urls, layouts, c, words, work / c["file"])
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError as e:  # a ClipitError from reading the stream already says what failed
         raise ClipitError(f"rendering the re-edit failed: {str(e.stderr)[-500:]}") from e
     except subprocess.TimeoutExpired as e:
         raise ClipitError("rendering the re-edit timed out") from e

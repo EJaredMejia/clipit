@@ -59,14 +59,15 @@ def signals(duration: float, loud: np.ndarray, chat: list) -> tuple[np.ndarray, 
     return score, db, c
 
 
-def peaks(score: np.ndarray, k: int, gap: int) -> list[int]:
-    picked = []
+def peaks(score: np.ndarray, k: int, gap: int, taken: Sequence[int] = ()) -> list[int]:
+    """The highest seconds at least gap apart, in time order, that fill up to k slots around the ones already taken."""
+    picked = list(taken)
     for t in np.argsort(score)[::-1]:
+        if len(picked) >= k:
+            break
         if all(abs(t - p) >= gap for p in picked):
             picked.append(int(t))
-            if len(picked) == k:
-                break
-    return sorted(picked)
+    return sorted(picked[len(taken) :])
 
 
 def windows(score: np.ndarray, k: int, duration: float, clipped: Sequence[tuple[int, int]] = ()) -> list[tuple[int, int]]:
@@ -74,7 +75,7 @@ def windows(score: np.ndarray, k: int, duration: float, clipped: Sequence[tuple[
     starts just before its moment), then the peaks."""
     gap = sum(WINDOW) + 30
     points: list[int] = []
-    for t in (*(t + WINDOW[0] // 2 for t, _ in clipped), *peaks(score, k, gap=gap)):
-        if 0 <= t < duration and all(abs(t - p) >= gap for p in points):
+    for t in (t + WINDOW[0] // 2 for t, _ in clipped):
+        if 0 <= t < duration and len(points) < k and all(abs(t - p) >= gap for p in points):
             points.append(int(t))
-    return [(max(0, t - WINDOW[0]), min(int(duration), t + WINDOW[1])) for t in points[:k]]
+    return [(max(0, t - WINDOW[0]), min(int(duration), t + WINDOW[1])) for t in (*points, *peaks(score, k, gap, points))]

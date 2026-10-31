@@ -56,7 +56,7 @@ VODs to process; `cli.py` is the only place that parses flags, sets up logging, 
 | `twitch.py` | Twitch's public API: chat replay, live streams, today's most-viewed clips, latest VODs |
 | `kick.py` | the same for Kick, through the JSON API its website uses, throttled to stay under its rate limit |
 | `poll.py` | picks which streamers to clip, from the AI's web search first, and runs the pipeline on each, never the same VOD twice |
-| `moments.py` | loudness + chat scoring, picks candidate windows |
+| `moments.py` | loudness + chat scoring, picks candidate windows, the moments people clipped first |
 | `transcribe.py` | Whisper on the candidate windows |
 | `ai.py` | prompts, calling the AI CLI, the web search for who's popping off, validating its picks |
 | `edit.py` | `--high-effort`: the AI edits each pick (cuts, zooms, sound effects, pop-up text, layout and crop) and reviews it in a loop until a review passes it, checked in code; an AI that sees pictures reviews frames of each version rendered; `--reedit` uses the same loop with the user's request |
@@ -134,6 +134,9 @@ recorded by hand from the dashboard until then.
   to, everyone it finds with a fresh VOD gets clipped however many that is, and a pass goes past its top_n, up to
   `poll.EXTRA` more VODs, until it has a good clip. Never keep that search in a file or reuse it across passes, and
   never rank by a streamer's past clips: both turn into the same names every day.
+  A trending clip or post only says where to look: `twitch.clip_moments` reads which seconds of a VOD people clipped,
+  those come first among the moments, and we cut our own clip from the VOD and write our own text. Never download or
+  repost someone's clip, or reuse its title or wording: the user wants clips we make, and reposts lose reach on YouTube.
   The score alone proves nothing: the picker grades its own pick from a transcript. So a separate reviewer watches
   stills of each finished clip that reached `db.AUTO_SCORE`, answers `ai.CHECKS`, and code decides: any failed check,
   a clip over `ai.MAX_POST_LEN`, or a reviewer that couldn't see it drops the score below the bar (`pipeline.review`).

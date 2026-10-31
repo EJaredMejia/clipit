@@ -45,3 +45,11 @@ def test_clipped_moments_come_first_and_peaks_dont_overlap_them():
 
 def test_a_clip_outside_the_vod_is_ignored():
     assert all(e <= 100 for _, e in moments.windows(np.zeros(100), 3, 100.0, [(5000, 9), (-200, 9)]))
+
+
+def test_clipped_moments_push_out_the_weakest_peak_not_the_latest():
+    score = np.zeros(4000)
+    score[[500, 1500]] = 1.0
+    score[3500] = 9.0
+    found = moments.windows(score, 3, 4000.0, [(2500, 5)])
+    assert (3440, 3530) in found and len(found) == 3

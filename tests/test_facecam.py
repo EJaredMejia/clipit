@@ -100,8 +100,13 @@ def test_no_border_falls_back_to_a_box_around_the_face():
 
 def test_clip_face_crops_on_a_person_in_two_frames_and_ignores_small_faces(monkeypatch):
     monkeypatch.setattr(facecam, "grab_frames", lambda url, times: [])
-    boxes = [(0, 480, 100, 100, 100), (1, 500, 100, 100, 100), (0, 10, 10, 30, 30), (2, 10, 10, 30, 30)]
+    boxes = [
+        (0, 480, 100, 200, 200),
+        (1, 500, 100, 200, 200),
+        (0, 10, 10, 90, 90),
+        (2, 10, 10, 90, 90),
+    ]  # the small ones: overlays
     monkeypatch.setattr(facecam, "detect_faces", lambda frames: boxes)
-    assert facecam.clip_face("u", 0, 30) == pytest.approx(0.5625, abs=0.02)
+    assert facecam.clip_face("u", 0, 30) == pytest.approx(0.615, abs=0.02)
     monkeypatch.setattr(facecam, "detect_faces", lambda frames: boxes[1:])  # one big face, once: a passing cutscene
     assert facecam.clip_face("u", 0, 30) is None

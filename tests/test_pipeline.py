@@ -231,3 +231,42 @@ def test_no_webcam_but_a_person_in_shot_crops_on_them_unless_the_edit_chose(monk
     pipeline.render_clip(["u"], [], {"start": 0.0, "end": 20.0}, [], tmp_path / "a.mp4")
     pipeline.render_clip(["u"], [], {"start": 0.0, "end": 20.0, "edit": {"layout": "fill"}}, [], tmp_path / "b.mp4")
     assert seen == [{"layout": "crop", "focus": 0.3}, {"layout": "fill"}]
+
+
+def test_one_clip_whose_stream_cant_be_read_doesnt_lose_the_vod(stages, monkeypatch):
+    _, tmp_path = stages
+
+    def broken(urls, clip, words, out, cam):
+        if clip["hook"] == "h":
+            raise pipeline.ClipitError("couldn't read the stream")
+        out.write_bytes(b"mp4")
+
+    def two(cmd, info, cands, n, work):
+        base = {"title": "t", "description": "d", "hashtags": ["a"], "trend": "", "sound": "", "score": 6.0, "why": ""}
+        s = cands[0]["start"]
+        return [{**base, "start": s, "end": s + 20.0, "hook": "h"}, {**base, "start": s + 1, "end": s + 21.0, "hook": "ok"}]
+
+    monkeypatch.setattr(pipeline.ai, "pick_clips", two)
+    monkeypatch.setattr(pipeline.render, "render", broken)
+    _, clips = pipeline.process_vod("https://example/vod", n_clips=2, ai_cmd="ai", out_root=tmp_path)
+    assert [c["hook"] for c in clips] == ["ok"]
+
+
+def test_a_review_that_never_happened_is_asked_again(monkeypatch, tmp_path):
+    answers = [["review: failed"], []]
+    monkeypatch.setattr(pipeline.render, "frames", lambda *a: [])
+    monkeypatch.setattr(pipeline.ai, "veto", lambda *a: answers.pop(0))
+    clip = {"score": 9.0, "start": 0.0, "end": 20.0, "file": "c.mp4", "why": ""}
+    pipeline.review("x", {}, clip, [], tmp_path)
+    assert clip["score"] < pipeline.db.AUTO_SCORE
+    pipeline.review("x", {}, clip, [], tmp_path)
+    assert clip["score"] == 9.0 and clip["reviewed"]
+
+
+def test_cuts_count_against_the_review_length(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(pipeline.render, "frames", lambda *a: [])
+    monkeypatch.setattr(pipeline.ai, "veto", lambda *a: seen.append(a[-1]) or [])
+    edit = {"cuts": [{"start": 10.0, "end": 30.0}]}
+    pipeline.review("x", {}, {"score": 9.0, "start": 0.0, "end": 50.0, "file": "c.mp4", "edit": edit}, [], tmp_path)
+    assert seen == [30.0]
