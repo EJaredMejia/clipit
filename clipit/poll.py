@@ -19,6 +19,8 @@ MIN_VIEWERS = 2000  # smaller streamers' clips don't get views
 MAX_AGE = datetime.timedelta(days=2)  # older VODs aren't worth clipping anymore
 # Never clipped, on any site, even when most clipped or prioritized: known to copyright-strike clip channels until banned.
 BLOCKED = frozenset({"pokimane"})
+# Tournament and company channels: famous and clipped, but no streamer to name. shortcut: the ones seen, add more as they show up.
+NOT_STREAMERS = frozenset({"pgl", "riotgames"})
 
 
 Stream = tuple[str, int, str, ModuleType]  # (login, viewers, language, site module: twitch or kick)
@@ -68,7 +70,7 @@ def candidates(
                 if s[1] >= least
                 and (not lang or s[2] == lang)
                 and (s[0].lower(), s[3]) not in picked
-                and s[0].lower() not in BLOCKED
+                and s[0].lower() not in BLOCKED | NOT_STREAMERS
             ]
         )
     return out

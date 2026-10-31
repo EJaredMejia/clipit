@@ -97,9 +97,9 @@ def test_latest_vod_skips_live_and_sub_only(monkeypatch):
             "language": "en",
         },
     ]
-    monkeypatch.setattr(kick, "get", lambda url: {"id": 668} if "/v2/" in url else {"data": vods})
+    monkeypatch.setattr(kick, "get", lambda url: {"id": 668, "followers_count": "7"} if "/v2/" in url else {"data": vods})
     vod = kick.latest_vod("xqc")
-    assert vod == {"id": "ok", "publishedAt": "2026-10-24T20:50:47Z", "lengthSeconds": 3600, "language": "EN"}
+    assert vod == {"id": "ok", "publishedAt": "2026-10-24T20:50:47Z", "lengthSeconds": 3600, "language": "EN", "followers": 7}
     assert vod and kick.vod_ref("xqc", vod) == ("ok", "https://kick.com/xqc/videos/ok")
     with pytest.raises(ClipitError):
         kick.latest_vod("../../evil")
@@ -120,6 +120,7 @@ def test_top_clipped_adds_up_views_and_reads_languages_off_vods(monkeypatch):
             "clips": [
                 {"channel": {"slug": "a"}, "views": 5},
                 {"channel": {"slug": "b"}, "views": 7},
+                {"channel": {"slug": "nobody"}, "views": 50},
                 {"channel": {"slug": "../evil"}, "views": 99},
             ],
             "nextCursor": "c 1",
@@ -137,7 +138,8 @@ def test_top_clipped_adds_up_views_and_reads_languages_off_vods(monkeypatch):
     def vod(slug):
         if slug == "banned":
             raise OSError("404")
-        return {"a": {"language": "EN"}, "b": {"language": "ES"}, "tiny": {"language": "EN"}}.get(slug)
+        known = {"a": ("EN", 100_000), "b": ("ES", 500_000), "tiny": ("EN", 900_000), "nobody": ("EN", 99_999)}
+        return {"language": known[slug][0], "followers": known[slug][1]} if slug in known else None
 
     monkeypatch.setattr(kick, "MIN_CLIP_VIEWS", 2)
     monkeypatch.setattr(kick, "get", pages.__getitem__)

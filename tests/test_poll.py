@@ -44,6 +44,7 @@ def test_most_clipped_come_first_on_both_sites_live_or_not_and_only_once():
         ("clavicular", 5000, "EN", poll.kick),
         ("spanish", 70000, "ES", poll.kick),
         ("few", 999, "EN", poll.kick),
+        ("riotgames", 60000, "EN", poll.twitch),
     ]
     got = [(s[0], s[3]) for s in poll.candidates(streams, "EN", clipped)]
     assert got == [("clavicular", poll.kick), ("t1", poll.twitch), ("t2", poll.twitch), ("big1", poll.twitch)]

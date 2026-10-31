@@ -20,11 +20,12 @@ GQL_HASH = "b70a3591ff0f4e0313d126c6a1502d79a1c02baebb288227c582044aa76adf6a"
 LIVE = """query { streams(first: 30) { edges { node { viewersCount language broadcaster { login } } } }
   games(first: 30) { edges { node { streams(first: 30) { edges { node { viewersCount language broadcaster { login } } } } } } } }"""
 CLIPS = """query { games(first: 30) { edges { node {
-  clips(first: 30, criteria: {period: LAST_DAY, sort: VIEWS_DESC}) { edges { node { viewCount language broadcaster { login } } } } } } } }"""
+  clips(first: 30, criteria: {period: LAST_DAY, sort: VIEWS_DESC}) { edges { node { viewCount language broadcaster { login followers { totalCount } } } } } } } } }"""
 VODS = """query($login: String!) {
   user(login: $login) { videos(first: 3, type: ARCHIVE, sort: TIME) { edges { node { id publishedAt lengthSeconds status } } } } }"""
 
 
+MIN_FOLLOWERS = 1_000_000  # a clip can blow up on a nobody: seen 11,000 views for a channel of 4,851 followers
 RETRY_WAITS = (2, 4, 8, 16, 30, 30)  # seconds between attempts: rides out ~90 s of network trouble (seen: DNS failures)
 
 
@@ -77,13 +78,15 @@ def live_streams() -> list[tuple[str, int, str]]:
 
 
 def top_clipped() -> list[tuple[str, int, str]]:
-    """Streamers by views on their clips of the last day, across the 30 biggest categories, as (login, views, language)."""
+    """Streamers with MIN_FOLLOWERS by views on their clips of the last day, across the 30 biggest categories, as
+    (login, views, language)."""
     views: dict[str, int] = {}
     langs: dict[str, str] = {}
     for game in gql(CLIPS)["games"]["edges"]:
         for e in (game["node"]["clips"] or {}).get("edges") or []:
-            if e["node"]["broadcaster"]:
-                login = e["node"]["broadcaster"]["login"]
+            who = e["node"]["broadcaster"]
+            if who and who["followers"]["totalCount"] >= MIN_FOLLOWERS:
+                login = who["login"]
                 views[login] = views.get(login, 0) + e["node"]["viewCount"]
                 langs[login] = e["node"]["language"]
     return sorted(((login, v, langs[login]) for login, v in views.items()), key=lambda s: -s[1])

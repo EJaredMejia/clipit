@@ -107,7 +107,8 @@ Each pass:
 
 1. Ranks streamers by the views on their clips of the last day: Twitch's top 30 clips of each of the 30 biggest
    categories, and Kick's 100 most-viewed clips. Each site's ranking is kept apart and they alternate, so Twitch's bigger
-   numbers don't take every slot. At least 1,000 views counts. If a site's clips can't be read, it goes by live viewers.
+   numbers don't take every slot. It takes at least 1,000 views, and 1,000,000 followers on Twitch or 100,000 on Kick, since
+   a clip can blow up on a nobody. If a site's clips can't be read, it goes by live viewers.
 2. Reads Twitch's live streams (the top 30 overall plus the top 30 of each of the 30 biggest categories, about 800
    streams) and Kick's top 500. A name live on both sites is clipped on both, since the same name can belong to two
    different people: skip a simulcast's repeats in the dashboard. If one site's API is down, the pass goes on with the
