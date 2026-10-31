@@ -1,5 +1,4 @@
 import datetime
-from types import SimpleNamespace
 
 import pytest
 
@@ -238,11 +237,12 @@ def test_a_failed_search_still_clips_by_the_ranking(world, monkeypatch):
     assert calls == ["v1"]
 
 
-def test_a_failed_clip_lookup_only_loses_the_hint():
+def test_a_failed_clip_lookup_only_loses_the_hint(monkeypatch):
     def broken(login, vod):
         raise OSError("down")
 
-    assert poll.moments_of(SimpleNamespace(clip_moments=broken), "a", {}) == []
+    monkeypatch.setattr(poll.twitch, "clip_moments", broken)
+    assert poll.moments_of(poll.twitch, "a", {}) == []
 
 
 def test_a_pass_where_every_vod_failed_says_so(world):
