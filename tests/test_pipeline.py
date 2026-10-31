@@ -36,6 +36,7 @@ def stages(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline.ai, "veto", lambda *a: [])
     monkeypatch.setattr(pipeline.render, "frames", lambda *a: [])
     monkeypatch.setattr(pipeline.facecam, "clip_cam", lambda *a: None)
+    monkeypatch.setattr(pipeline.facecam, "clip_face", lambda *a: None)
     monkeypatch.setattr(pipeline.render, "render", lambda urls, clip, words, out, cam: out.write_bytes(b"mp4"))
     return downloads, tmp_path
 
@@ -220,3 +221,13 @@ def test_a_rerun_doesnt_review_a_reviewed_clip_or_look_at_weak_ones(monkeypatch,
     monkeypatch.setattr(pipeline.ai, "veto", lambda *a: pytest.fail("reviewed again"))
     for clip in ({"score": 9.0, "reviewed": True}, {"score": 7.0}):
         pipeline.review("x", {}, clip, [], tmp_path)
+
+
+def test_no_webcam_but_a_person_in_shot_crops_on_them_unless_the_edit_chose(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(pipeline.facecam, "clip_cam", lambda *a: None)
+    monkeypatch.setattr(pipeline.facecam, "clip_face", lambda *a: 0.3)
+    monkeypatch.setattr(pipeline.render, "render", lambda urls, clip, words, out, cam: seen.append(clip.get("edit")))
+    pipeline.render_clip(["u"], [], {"start": 0.0, "end": 20.0}, [], tmp_path / "a.mp4")
+    pipeline.render_clip(["u"], [], {"start": 0.0, "end": 20.0, "edit": {"layout": "fill"}}, [], tmp_path / "b.mp4")
+    assert seen == [{"layout": "crop", "focus": 0.3}, {"layout": "fill"}]

@@ -258,7 +258,11 @@ def webcam_layouts(work: Path, urls: list[str], dur: float) -> list:
 def render_clip(urls: list[str], layouts: list, c: dict, words: list, out: Path) -> None:
     """Render one clip, captioned with the words said in it."""
     cam = facecam.clip_cam(urls[0], layouts, c["start"], c["end"])  # streamers switch scene layouts mid-stream
-    log(f"rendering {out.name} ({c['end'] - c['start']:.0f}s, {'facecam on top' if cam else 'blurred fill'})")
+    edit = c.get("edit") or {}
+    if not cam and "layout" not in edit and (face := facecam.clip_face(urls[0], c["start"], c["end"])) is not None:
+        c = {**c, "edit": {**edit, "layout": "crop", "focus": face}}  # a person filling the shot fills the phone too
+    how = "facecam on top" if cam else "cropped on the face" if (c.get("edit") or {}).get("layout") == "crop" else "blurred fill"
+    log(f"rendering {out.name} ({c['end'] - c['start']:.0f}s, {how})")
     render.render(urls, c, [w for w in words if c["start"] - 0.05 <= w[0] and w[1] <= c["end"] + 0.3], out, cam)
 
 

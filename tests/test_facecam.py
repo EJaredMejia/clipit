@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from clipit import facecam
 
@@ -95,3 +96,12 @@ def test_webcam_flush_with_the_frame_edge_is_kept(monkeypatch):
 def test_no_border_falls_back_to_a_box_around_the_face():
     x, y, w, h = facecam.cam_box([np.full((540, 960), 100, np.uint8)] * 3, (400, 200, 60, 60))
     assert 0.1 < x < 0.5 and 0.2 < y < 0.5 and w < 0.3
+
+
+def test_clip_face_crops_on_a_person_in_two_frames_and_ignores_small_faces(monkeypatch):
+    monkeypatch.setattr(facecam, "grab_frames", lambda url, times: [])
+    boxes = [(0, 480, 100, 100, 100), (1, 500, 100, 100, 100), (0, 10, 10, 30, 30), (2, 10, 10, 30, 30)]
+    monkeypatch.setattr(facecam, "detect_faces", lambda frames: boxes)
+    assert facecam.clip_face("u", 0, 30) == pytest.approx(0.5625, abs=0.02)
+    monkeypatch.setattr(facecam, "detect_faces", lambda frames: boxes[1:])  # one big face, once: a passing cutscene
+    assert facecam.clip_face("u", 0, 30) is None

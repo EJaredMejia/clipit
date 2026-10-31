@@ -174,7 +174,8 @@ def centered(at: str, lo: str, hi: str) -> str:
 
 def render(urls: list[str], clip: dict, words: list, out: Path, cam: list[float] | None = None) -> None:
     """Seek straight into the remote stream and render 1080x1920 with captions, in the edit's layout (LAYOUTS), by
-    default facecam on top + gameplay below, or blurred fill + full frame when there's no facecam. The edit's focus
+    default facecam on top + gameplay below, or blurred fill + full frame when there's no facecam (pipeline.render_clip
+    crops on a person filling the shot instead). The edit's focus
     (0-1, default the middle) is the middle of what to keep across the stream (across the webcam box for cam): the
     gameplay panel or the full-screen crop is centered on it, as far as the frame allows."""
     s, d = clip["start"], clip["end"] - clip["start"]
@@ -205,7 +206,7 @@ def render(urls: list[str], clip: dict, words: list, out: Path, cam: list[float]
             "scale=1080:1920,eq=brightness=-0.12[bg];[b]scale=1080:-2[fg];[bg][fg]overlay=0:(H-h)/2"
         )
         hook_y, cap_y = 540, 1400
-    pops, emphasis = (edit["texts"], edit["emphasis"]) if edit else ([], [])
+    pops, emphasis = (edit or {}).get("texts", []), (edit or {}).get("emphasis", [])
     ass.write_text(make_ass(clip.get("hook", ""), words, s, d, hook_y, cap_y, pops, emphasis), encoding="utf-8")
     subs = f"subtitles={ass.name}"  # relative name: avoids Windows path escaping
     if edit:  # a high-effort clip: its edit mixes the sound in the graph too

@@ -153,3 +153,13 @@ def test_render_without_video_is_a_failure_not_a_clip(monkeypatch, tmp_path):
     with pytest.raises(subprocess.CalledProcessError):
         render.render(["https://v"], {"start": 10.0, "end": 30.0, "hook": "hi"}, [], tmp_path / "c.mp4")
     assert not (tmp_path / "c.mp4").exists()
+
+
+def test_a_layout_chosen_without_an_edit_renders(monkeypatch, tmp_path):
+    def fake_sh(cmd, timeout, cwd):
+        (cwd / cmd[-1]).write_bytes(b"mp4" * 400)
+
+    monkeypatch.setattr(render, "sh", fake_sh)
+    clip = {"start": 10.0, "end": 30.0, "hook": "hi", "edit": {"layout": "crop", "focus": 0.3}}
+    render.render(["https://v"], clip, [], tmp_path / "c.mp4", None)
+    assert (tmp_path / "c.mp4").exists()

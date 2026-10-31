@@ -10,6 +10,7 @@ from clipit import source
 from clipit.util import ClipitError
 
 TOP = (1080, 768)  # facecam panel in the 1080x1920 split layout, gameplay gets the rest
+MIN_SHOT_FACE = 70  # px wide in a 960 px frame: smaller is someone far off or in a game, not a person filling the shot
 
 
 def edge(profile: np.ndarray, lo: int, hi: int, fallback: int) -> int:
@@ -143,6 +144,14 @@ def pick_layout(layouts: list[dict], boxes: list[tuple]) -> list[float] | None:
 
     best = max(layouts, key=hits, default=None)
     return best["box"] if best and hits(best) >= 2 else None  # 0 frames (all grabs failed) must not pick a layout blind
+
+
+def clip_face(url: str, start: float, end: float, n: int = 5) -> float | None:
+    """Where across the frame (0-1) a clip with no webcam overlay should be cropped: on the person filling the shot, or
+    None when no big face shows in at least 2 frames (gameplay, screens: the whole frame must stay readable)."""
+    frames = grab_frames(url, np.linspace(start, end, n + 2)[1:-1])
+    big = [b for b in detect_faces(frames) if b[3] >= MIN_SHOT_FACE]
+    return float(np.median([b[1] + b[3] / 2 for b in big]) / 960) if len({b[0] for b in big}) >= 2 else None
 
 
 def clip_cam(url: str, layouts: list[dict], start: float, end: float, n: int = 5) -> list[float] | None:
