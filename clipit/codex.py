@@ -74,6 +74,14 @@ HOT_SCHEMA = _strict(
         }
     }
 )
+VETO_SCHEMA = _strict(
+    {
+        "checks": {
+            "type": "array",
+            "items": _strict({"name": {"type": "string"}, "passed": {"type": "boolean"}, "evidence": {"type": "string"}}),
+        }
+    }
+)
 EDIT_PROPERTIES = {
     "cuts": {"type": "array", "items": _strict(SPAN)},
     "zooms": {"type": "array", "items": _strict({**SPAN, "zoom": {"type": "number"}})},

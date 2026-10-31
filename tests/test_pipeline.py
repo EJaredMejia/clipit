@@ -33,6 +33,8 @@ def stages(tmp_path, monkeypatch):
     monkeypatch.setattr(pipeline.transcribe, "transcribe", transcribe)
     monkeypatch.setattr(pipeline.ai, "pick_clips", pick)
     monkeypatch.setattr(pipeline.facecam, "find_layouts", lambda url, dur: [])
+    monkeypatch.setattr(pipeline.ai, "veto", lambda *a: [])
+    monkeypatch.setattr(pipeline.render, "frames", lambda *a: [])
     monkeypatch.setattr(pipeline.facecam, "clip_cam", lambda *a: None)
     monkeypatch.setattr(pipeline.render, "render", lambda urls, clip, words, out, cam: out.write_bytes(b"mp4"))
     return downloads, tmp_path
@@ -204,3 +206,17 @@ def test_preview_fetches_fresh_links_and_skips_a_stream_picture_ffmpeg_didnt_wri
     assert look(clip, tmp_path / "r1") == [("0.0 s", shot)]
     look(clip, tmp_path / "r2")
     assert len(fetched) == 2  # every round renders from links fetched for it
+
+
+def test_a_clip_the_review_stops_never_reaches_the_auto_post_score(stages, monkeypatch):
+    _, tmp_path = stages
+    monkeypatch.setattr(pipeline.ai, "veto", lambda *a: ["visible: static screen"])
+    _, clips = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=tmp_path)
+    assert clips[0]["score"] < pipeline.db.AUTO_SCORE
+    assert "static screen" in clips[0]["why"]
+
+
+def test_a_rerun_doesnt_review_a_reviewed_clip_or_look_at_weak_ones(monkeypatch, tmp_path):
+    monkeypatch.setattr(pipeline.ai, "veto", lambda *a: pytest.fail("reviewed again"))
+    for clip in ({"score": 9.0, "reviewed": True}, {"score": 7.0}):
+        pipeline.review("x", {}, clip, [], tmp_path)

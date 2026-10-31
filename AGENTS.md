@@ -134,6 +134,9 @@ recorded by hand from the dashboard until then.
   to, everyone it finds with a fresh VOD gets clipped however many that is, and a pass goes past its top_n, up to
   `poll.EXTRA` more VODs, until it has a good clip. Never keep that search in a file or reuse it across passes, and
   never rank by a streamer's past clips: both turn into the same names every day.
+  The score alone proves nothing: the picker grades its own pick from a transcript. So a separate reviewer watches
+  stills of each finished clip that reached `db.AUTO_SCORE`, answers `ai.CHECKS`, and code decides: any failed check,
+  a clip over `ai.MAX_POST_LEN`, or a reviewer that couldn't see it drops the score below the bar (`pipeline.review`).
   The dashboard's "Post to YouTube now" is the user posting by hand, like uploading in YouTube Studio: any clip, no
   pacing, but it counts toward the pace of the automatic posts.
 - Each upload is claimed in `uploads` before it's sent (`db.claim_upload`, `db.claim_clip_upload`), so a clip is never

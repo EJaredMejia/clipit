@@ -8,6 +8,7 @@ import functools
 import json
 import re
 import subprocess
+import tempfile
 import threading
 import time
 from collections.abc import Callable
@@ -185,11 +186,38 @@ def process_vod(
     if not rendered:
         raise ClipitError("every clip failed to render, see the log")
 
+    for c in rendered:
+        review(ai_cmd, info, c, words, work)
+
     # dropped picks stay in the file: an old clip of one, kept by the user, is found there to re-edit it (made_as)
     write_atomic(work / picks_file, json.dumps([*picks, *dropped], indent=2))
     render.write_posts(work / posts_file, info, url, rendered)
     log(f"done: {len(rendered)} clips in {work / 'clips'} (captions + titles in {work / posts_file})")
     return work, rendered
+
+
+def review(cmd: str | None, info: dict, clip: dict, words: list, work: Path) -> None:
+    """A separate reviewer watches a clip good enough to post by itself. If it fails any check, its score drops under
+    db.AUTO_SCORE and the reasons go in "why", so it stays for the user to judge but never posts alone."""
+    if clip["score"] < db.AUTO_SCORE or clip.get("reviewed"):
+        return
+    spoken = " ".join(
+        w for _, w in sorted({(w[0], w[2]) for w in words if clip["start"] <= w[0] < clip["end"]})
+    )  # windows overlap
+    length = clip["end"] - clip["start"]
+    with tempfile.TemporaryDirectory(prefix="clipit-") as tmp:
+        try:
+            stills = render.frames(
+                work / clip["file"], [0.5, 2, length * 0.3, length * 0.55, length * 0.8, length - 1], Path(tmp)
+            )
+        except (ClipitError, subprocess.SubprocessError):
+            stills = []  # veto stops a clip it can't see
+        failed = ai.veto(cmd, clip, clip.get("streamer") or info.get("uploader"), spoken, stills)
+    clip["reviewed"] = True
+    if failed:
+        log(f"review stopped {clip['file']}: " + "; ".join(failed))
+        clip["score"] = min(clip["score"], db.AUTO_SCORE - 1.0)
+        clip["why"] = ("Review failed: " + "; ".join(failed))[: ai.TEXT_FIELDS["why"]]
 
 
 def candidates(windows: list[tuple[int, int]], tr: dict, msgs: list, loud: np.ndarray, rate: np.ndarray) -> list[dict]:
