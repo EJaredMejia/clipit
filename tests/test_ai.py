@@ -211,3 +211,26 @@ def test_ask_ai_shows_pictures_to_claude_code_and_reads_its_stream_json_answer(t
         ai.ask_ai(f'"{sys.executable}" -c "{failed}"', "prompt", images=[pic])
     assert ai.sees_images('"C:/x/claude.CMD" -p --tools ""') and ai.sees_images("codex")
     assert not ai.sees_images("ollama run qwen3:30b")
+
+
+def test_clean_hot_lets_only_real_channel_names_through():
+    reply = {
+        "streamers": [
+            {"site": "Twitch", "login": "Jynxzi", "why": "banned\nagain"},
+            {"site": "twitch", "login": "jynxzi", "why": "listed twice"},
+            {"site": "kick", "login": "../../etc", "why": "a path"},
+            {"site": "youtube", "login": "someone", "why": "another site"},
+            {"site": "kick", "login": "x y", "why": "a space"},
+            "not an entry",
+        ]
+    }
+    assert ai.clean_hot(reply) == [("twitch", "jynxzi", "banned again")]
+    assert ai.clean_hot({"streamers": "none"}) == [] and ai.clean_hot([]) == []
+
+
+def test_find_hot_searches_again_every_time(monkeypatch):
+    asked = []
+    reply = '{"streamers": [{"site": "kick", "login": "adin"}]}'
+    monkeypatch.setattr(ai, "ask_ai", lambda cmd, prompt: asked.append(cmd) or reply)
+    assert ai.find_hot("search") == [("kick", "adin", "")]
+    assert ai.find_hot("search") and len(asked) == 2  # never cached: yesterday's answer is the same names again

@@ -203,7 +203,7 @@ def weak_unless(monkeypatch, good_url_end):
 
 def test_a_pass_goes_on_past_top_n_until_it_has_a_good_clip_and_then_stops(world, monkeypatch):
     conn, calls, out = world
-    monkeypatch.setattr(poll.db, "proven_streamers", lambda conn: [("twitch", "big1"), ("twitch", "s1"), ("twitch", "s2")])
+    monkeypatch.setattr(poll.twitch, "live_streams", lambda: [("big1", 30000, "EN"), ("s1", 3000, "EN"), ("s2", 3000, "EN")])
     weak_unless(monkeypatch, "/4")
     poll.poll(conn, top_n=1, out_root=out)
     assert calls == ["v1", "v4"]  # s2 comes next, but the pass has its good clip
@@ -217,8 +217,21 @@ def test_a_pass_with_no_good_clip_gives_up_after_extra_vods(world, monkeypatch):
     assert len(calls) == 2
 
 
-def test_streamers_with_a_good_clip_before_are_tried_first(world, monkeypatch):
+def test_everyone_the_search_finds_is_clipped_whatever_top_n_says(world, monkeypatch):
     conn, calls, out = world
-    monkeypatch.setattr(poll.db, "proven_streamers", lambda conn: [("twitch", "s2")])
-    poll.poll(conn, top_n=1, out_root=out)
-    assert calls == ["v5"]
+    found = [("twitch", "s2", "banned"), ("twitch", "s1", "a fight"), ("twitch", "pgl", "a final"), ("kick", "nobody", "x")]
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: found)
+    monkeypatch.setattr(poll.kick, "latest_vod", lambda login: None)
+    poll.poll(conn, top_n=1, out_root=out, search_ai="search")
+    assert calls == ["v5", "v4"]  # both found, with a slot for one; big1 waits as the pass has its good clip
+
+
+def test_a_failed_search_still_clips_by_the_ranking(world, monkeypatch):
+    conn, calls, out = world
+
+    def broken(cmd):
+        raise ClipitError("no web")
+
+    monkeypatch.setattr(poll.ai, "find_hot", broken)
+    poll.poll(conn, top_n=1, out_root=out, search_ai="search")
+    assert calls == ["v1"]

@@ -398,13 +398,3 @@ def test_a_reedit_never_replaces_an_edited_clip_that_is_on_youtube(conn):
     db.fail_reedit(conn, "the AI gave up", reedit_id=reedit)
     db.fail_reedit(conn, "killed", run_id=None)  # no run: closes nothing else
     assert conn.execute("SELECT error FROM reedits").fetchone()[0] == "the AI gave up"
-
-
-def test_proven_streamers_are_the_ones_with_good_clips_on_their_own_site(conn):
-    for vod, url, login, score in (
-        ("k", "https://kick.com/Bob/videos/1", "Bob", db.AUTO_SCORE),
-        ("t", "https://www.twitch.tv/videos/2", "weak", 5.0),
-    ):
-        db.claim(conn, vod, url, login, "top", now=T0)
-        db.save_clips(conn, vod, [{**CLIP, "score": score}])
-    assert db.proven_streamers(conn) == [("kick", "bob")]

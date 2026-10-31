@@ -1,7 +1,8 @@
 """Decide which streams to clip and run the pipeline on each one's latest finished VOD, on Twitch and Kick.
 
-Streamers who already gave a good clip first, then the ones getting the most clip views today, alternating between
-sites, then big live streamers. A pass goes on past its top_n until it has a good clip, up to EXTRA more VODs. Each VOD is claimed in the
+An AI searches the web first for who something just happened to, and everyone it finds with a fresh VOD gets clipped,
+however many that is. Then the streamers getting the most clip views today, alternating between sites, then big live
+streamers, up to top_n, and past it until the pass has a good clip, at most EXTRA more VODs. Each VOD is claimed in the
 SQLite catalog before processing, so overlapping runs never double-process and finished VODs are never redone.
 """
 
@@ -12,7 +13,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
 
-from clipit import db, kick, runs, twitch
+from clipit import ai, db, kick, runs, twitch
 from clipit.pipeline import process_vod
 from clipit.util import ROOT, ClipitError, log, logger, utcnow
 
@@ -82,6 +83,22 @@ def ended(vod: dict) -> datetime.datetime:
     return datetime.datetime.fromisoformat(vod["publishedAt"]) + datetime.timedelta(seconds=vod["lengthSeconds"])
 
 
+def find_hot(search_ai: str | None) -> list[tuple[str, str]]:
+    """(site, login) of who to clip today, best first. A failed search still leaves the pass the clip-view ranking."""
+    if not search_ai:
+        logger.warning("no AI with web search: going by clip views only")
+        return []
+    try:
+        found = ai.find_hot(search_ai)
+    except Exception:
+        logger.exception("the search for who's popping off failed: going by clip views only")
+        return []
+    log(f"the search found {len(found)} streamer(s) with something happening")
+    for site, login, why in found:
+        log(f"  {site}:{login}: {why}")
+    return [(site, login) for site, login, _ in found if login not in BLOCKED | NOT_STREAMERS]
+
+
 def poll(
     conn: sqlite3.Connection,
     top_n: int = 6,
@@ -89,16 +106,20 @@ def poll(
     dry_run: bool = False,
     out_root: Path = ROOT / "out",
     prioritize: Iterable[tuple[str, str]] = (),
+    search_ai: str | None = None,
     **pipeline_opts,
 ) -> int:
     """One polling pass. Safe to run on a timer, and even twice at once. prioritize: (site, name) clipped first.
+    search_ai: the AI command with web search that finds who's popping off (ai.find_hot).
     Returns how many VODs failed: the rest are still tried, but the caller can tell the pass didn't go well."""
     now = utcnow()
     failed = 0
     top_left = top_n
-    extra_left, good = EXTRA, False
+    extra_left, good, tried = EXTRA, False, 0
+    runs.progress(what="Searching what's popping off today")
+    hot = find_hot(search_ai)
     runs.progress(what="Finding streamers to clip")
-    first = list(dict.fromkeys([*prioritize, *db.proven_streamers(conn)]))
+    first = list(dict.fromkeys([*prioritize, *hot]))
     clipped = everywhere("top_clipped")
     try:
         live = live_streams()
@@ -111,7 +132,8 @@ def poll(
     if not clipped:
         logger.warning("no clip ranking from any site, going by live viewers")
     for login, _, _, site in picks:
-        if top_left <= 0 and (good or dry_run or extra_left <= 0):
+        is_hot = (site.__name__.rsplit(".", 1)[1], login.lower()) in hot
+        if top_left <= 0 and not is_hot and (good or dry_run or extra_left <= 0):
             break
         try:
             vod = site.latest_vod(login)
@@ -130,11 +152,13 @@ def poll(
             continue  # already clipped: the next streamer takes the slot, so a repeat pass finds someone new
         if top_left > 0:
             top_left -= 1
-        else:
+        elif not is_hot:
             extra_left -= 1
-        tried = top_n - top_left + EXTRA - extra_left
+        tried += 1
         log(f"clipping {login}: {url}")
-        runs.progress(what=f"Clipping {login}", vod=[tried, max(tried, top_n)], stage="Getting the VOD's details", count=None)
+        runs.progress(
+            what=f"Clipping {login}", vod=[tried, max(tried, top_n, len(hot))], stage="Getting the VOD's details", count=None
+        )
         try:
             with db.heartbeat(conn, vod_id):
                 _, clips = process_vod(url, out_root=out_root, **pipeline_opts)

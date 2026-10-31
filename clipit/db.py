@@ -539,18 +539,6 @@ def set_upload(conn: sqlite3.Connection, clip_id: int, platform: str, url: str |
     return True
 
 
-def proven_streamers(conn: sqlite3.Connection) -> list[tuple[str, str]]:
-    """(site, login) of the streamers who gave a clip scoring AUTO_SCORE+, most such clips first: what polling tries first."""
-    rows = conn.execute(
-        """SELECT IIF(v.url LIKE '%kick.com/%', 'kick', 'twitch') AS site, lower(v.login) AS name FROM clips c
-           JOIN vods v ON v.id = c.vod_id
-           WHERE c.score >= ? AND v.login IS NOT NULL AND c.verdict IS NOT 'skip'
-           GROUP BY site, name ORDER BY count(*) DESC, name""",
-        (AUTO_SCORE,),
-    ).fetchall()
-    return [(r["site"], r["name"]) for r in rows]
-
-
 def claim_upload(
     conn: sqlite3.Connection,
     platform: str,
