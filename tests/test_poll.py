@@ -32,26 +32,28 @@ def test_candidates_alternate_sites():
 
 def test_blocked_streamers_are_never_candidates():
     streams = [("Pokimane", 30000, "EN", poll.twitch), ("big1", 20000, "EN", poll.twitch)]
-    got = [s[0] for s in poll.candidates(streams, "EN", trending=[("kick", "POKIMANE"), ("twitch", "pokimane")])]
+    got = [s[0] for s in poll.candidates(streams, "EN", first=[("kick", "POKIMANE"), ("twitch", "pokimane")])]
     assert got == ["big1"]
 
 
-def test_trending_streamers_come_first_live_or_not_and_only_once():
+def test_most_clipped_come_first_on_both_sites_live_or_not_and_only_once():
     streams = [("big1", 30000, "EN", poll.twitch), ("Clavicular", 9000, "EN", poll.kick), ("s1", 1500, "EN", poll.twitch)]
-    trending = [("kick", "stableronaldo"), ("kick", "clavicular")]
-    got = [(s[0], s[3]) for s in poll.candidates(streams, "EN", trending=trending)]
-    assert got == [
-        ("stableronaldo", poll.kick),  # offline is fine: we clip the latest finished VOD
-        ("clavicular", poll.kick),
-        ("big1", poll.twitch),
+    clipped = [
+        ("t1", 90000, "EN", poll.twitch),  # offline is fine: we clip the latest finished VOD
+        ("t2", 80000, "EN", poll.twitch),
+        ("clavicular", 5000, "EN", poll.kick),
+        ("spanish", 70000, "ES", poll.kick),
+        ("few", 999, "EN", poll.kick),
     ]
+    got = [(s[0], s[3]) for s in poll.candidates(streams, "EN", clipped)]
+    assert got == [("clavicular", poll.kick), ("t1", poll.twitch), ("t2", poll.twitch), ("big1", poll.twitch)]
 
 
 def test_prioritized_streamers_are_clipped_first(world, monkeypatch):
     conn, calls, out = world
-    monkeypatch.setattr(poll.ai, "trending_streamers", lambda: [("twitch", "big1")])
+    monkeypatch.setattr(poll.twitch, "top_clipped", lambda: [("big1", 50000, "EN")])
     poll.poll(conn, top_n=1, lang="EN", out_root=out, prioritize=[("twitch", "mid")])
-    assert calls == ["v3"]  # mid's VOD takes the only slot, ahead of trending big1
+    assert calls == ["v3"]  # mid's VOD takes the only slot, ahead of the most clipped big1
 
 
 def test_live_streams_keep_both_sites_and_survive_one_being_down(monkeypatch):
@@ -82,7 +84,8 @@ def world(tmp_path, monkeypatch):
     vods = {"big1": "1", "mid": "3", "s1": "4", "s2": "5"}
     monkeypatch.setattr(poll.twitch, "live_streams", lambda: STREAMS)
     monkeypatch.setattr(poll.kick, "live_streams", lambda: [])
-    monkeypatch.setattr(poll.ai, "trending_streamers", lambda: [])
+    monkeypatch.setattr(poll.twitch, "top_clipped", lambda: [])
+    monkeypatch.setattr(poll.kick, "top_clipped", lambda: [])
     monkeypatch.setattr(
         poll.twitch,
         "latest_vod",
@@ -148,7 +151,7 @@ def test_one_streamers_vod_lookup_failing_does_not_end_the_pass(world, monkeypat
     assert calls == ["v3"]  # big1 skipped, big2 has no VOD, mid still processed
 
 
-def test_trending_streamers_still_clipped_when_both_live_lists_are_down(world, monkeypatch):
+def test_most_clipped_still_clipped_when_both_live_lists_are_down(world, monkeypatch):
     conn, calls, tmp_path = world
 
     def down():
@@ -156,11 +159,23 @@ def test_trending_streamers_still_clipped_when_both_live_lists_are_down(world, m
 
     monkeypatch.setattr(poll.twitch, "live_streams", down)
     monkeypatch.setattr(poll.kick, "live_streams", down)
-    with pytest.raises(ClipitError, match="any site"):  # nothing trending either: the pass fails loudly
+    with pytest.raises(ClipitError, match="any site"):  # no clip ranking either: the pass fails loudly
         poll.poll(conn, out_root=tmp_path)
-    monkeypatch.setattr(poll.ai, "trending_streamers", lambda: [("twitch", "big1")])
+    monkeypatch.setattr(poll.twitch, "top_clipped", lambda: [("big1", 50000, "EN")])
     poll.poll(conn, out_root=tmp_path)
     assert calls == ["v1"]
+
+
+def test_a_failing_clip_ranking_falls_back_to_live_viewers(world, monkeypatch):
+    conn, calls, out = world
+
+    def down():
+        raise ClipitError("Twitch API: clips went away")
+
+    monkeypatch.setattr(poll.twitch, "top_clipped", down)
+    monkeypatch.setattr(poll.kick, "top_clipped", down)
+    poll.poll(conn, top_n=1, lang="EN", out_root=out)
+    assert calls == ["v1"]  # big1, the biggest live
 
 
 def test_dry_run_touches_nothing(world):

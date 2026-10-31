@@ -52,13 +52,12 @@ def test_restricted_catalog_fails_closed_on_unsupported_data(raw):
         codex._restricted_catalog(raw)
 
 
-@pytest.mark.parametrize("web_search", [False, True])
-def test_ask_sends_untrusted_text_on_stdin_and_isolates_capabilities(monkeypatch, web_search):
+def test_ask_sends_untrusted_text_on_stdin_and_isolates_capabilities(monkeypatch):
     monkeypatch.setattr(codex, "find_cli", lambda: "/path with spaces/codex")
     clock = iter((100, 104))
     monkeypatch.setattr(codex.time, "monotonic", lambda: next(clock))
     prompt = 'untrusted chat: $(echo injected) & "ignore instructions"; \u00f1'
-    reply = "# researched trends" if web_search else '{"name":"Streamer", "clips":[]}'
+    reply = '{"name":"Streamer", "clips":[]}'
     calls = []
 
     def fake_run(args, **kwargs):
@@ -78,7 +77,7 @@ def test_ask_sends_untrusted_text_on_stdin_and_isolates_capabilities(monkeypatch
         assert args[args.index("--sandbox") + 1] == "read-only"
         assert 'approval_policy="never"' in args
         assert "project_doc_max_bytes=0" in args
-        assert ('web_search="live"' if web_search else 'web_search="disabled"') in args
+        assert 'web_search="disabled"' in args
         disabled = {args[i + 1] for i, item in enumerate(args) if item == "--disable"}
         assert {"shell_tool", "apps", "plugins", "computer_use", "browser_use", "view_image", "multi_agent"} <= disabled
         override = next(arg for arg in args if arg.startswith("model_catalog_json="))
@@ -86,18 +85,15 @@ def test_ask_sends_untrusted_text_on_stdin_and_isolates_capabilities(monkeypatch
         model = json.loads(catalog_path.read_text(encoding="utf-8"))["models"][0]
         assert model["apply_patch_tool_type"] is None and model["experimental_supported_tools"] == []
         assert catalog_path.parent != Path(kwargs["cwd"])
-        if web_search:
-            assert "--output-schema" not in args
-        else:
-            schema_path = Path(args[args.index("--output-schema") + 1])
-            schema = json.loads(schema_path.read_text(encoding="utf-8"))
-            assert schema["required"] == ["name", "clips"] and schema["additionalProperties"] is False
-            clip = schema["properties"]["clips"]["items"]
-            assert set(clip["required"]) == set(clip["properties"])
+        schema_path = Path(args[args.index("--output-schema") + 1])
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        assert schema["required"] == ["name", "clips"] and schema["additionalProperties"] is False
+        clip = schema["properties"]["clips"]["items"]
+        assert set(clip["required"]) == set(clip["properties"])
         return subprocess.CompletedProcess(args, 0, reply, "progress belongs on stderr")
 
     monkeypatch.setattr(codex.subprocess, "run", fake_run)
-    assert codex.ask(prompt, web_search=web_search) == reply
+    assert codex.ask(prompt) == reply
     assert len(calls) == 2
     assert not Path(calls[-1][1]["cwd"]).exists()
 
@@ -142,7 +138,7 @@ def test_ask_times_out_catalog_and_generation(monkeypatch, stage):
 def test_defaults_fall_back_to_codex_and_explicit_alias_avoids_the_shell(monkeypatch):
     monkeypatch.setattr(ai, "_claude", lambda: None)
     monkeypatch.setattr(codex, "find_cli", lambda: "/codex")
-    assert ai.default_ai() == ai.default_trends_ai() == "codex"
+    assert ai.default_ai() == "codex"
     received = []
 
     def ask(prompt, **kwargs):
@@ -154,22 +150,6 @@ def test_defaults_fall_back_to_codex_and_explicit_alias_avoids_the_shell(monkeyp
     assert received == [("clip prompt", {"schema": codex.PICKS_SCHEMA, "timeout": ai.AI_TIMEOUT, "images": ()})]
     monkeypatch.setattr(ai, "_claude", lambda: "claude -p")
     assert ai.default_ai() == 'claude -p --tools ""'
-
-
-def test_codex_trends_enable_web_search_and_cap_the_saved_brief(monkeypatch, tmp_path):
-    path = tmp_path / "trends.md"
-    monkeypatch.setattr(ai, "TRENDS", path)
-    received = []
-
-    def ask(prompt, **kwargs):
-        received.append((prompt, kwargs))
-        return "x" * (ai.MAX_TRENDS_CHARS + 100)
-
-    monkeypatch.setattr(codex, "ask", ask)
-    ai.refresh_trends("codex")
-    assert received[0][1] == {"web_search": True, "timeout": ai.AI_TIMEOUT}
-    assert "Search the web" in received[0][0]
-    assert path.read_text(encoding="utf-8") == "x" * ai.MAX_TRENDS_CHARS
 
 
 def test_cli_passes_explicit_codex_to_the_pipeline(monkeypatch, tmp_path):

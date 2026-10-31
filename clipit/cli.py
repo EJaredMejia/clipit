@@ -2,10 +2,9 @@
 
 clipit https://www.twitch.tv/videos/2906456464
 clipit URL --clips 10 --ai "ollama run qwen3:30b"
-clipit --refresh-trends
 clipit URL --high-effort   (the AI edits every strong clip, then reviews and improves it until it's really good)
 clipit --reedit 42 --request "a boom when he slams the desk" --at 12.5   (the AI edits clip 42 again, as asked)
-clipit --poll              (clip the latest VODs of trending and big streamers; run it on a timer)
+clipit --poll              (clip the streamers getting the most clip views today, on Twitch and Kick; run it on a timer)
 clipit --poll --dry-run    (only show which VODs it would clip)
 clipit --dashboard         (browse every VOD and clip, mark clips keep/skip and posted)
 clipit --youtube-login     (once: sign in to the YouTube channel to post to)
@@ -42,18 +41,6 @@ def setup_logging(out: Path) -> None:
     logger.addHandler(console)
 
 
-def refresh_stale_trends(trends_ai: str | None) -> None:
-    """Redo trend research older than ai.TRENDS_MAX_AGE, so polling clips who everyone is talking about now."""
-    age = ai.trends_age()
-    if not trends_ai or (age is not None and age <= ai.TRENDS_MAX_AGE):
-        return
-    log("trend research is stale, redoing it so polling clips who everyone is talking about...")
-    try:
-        ai.refresh_trends(trends_ai)
-    except Exception:  # polling still runs, on the older list or by viewers
-        logger.exception("trend research failed")
-
-
 def main() -> None:
     ap = argparse.ArgumentParser(prog="clipit", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("url", nargs="?", help="Twitch or Kick VOD link (other yt-dlp sites work too, without chat)")
@@ -65,11 +52,6 @@ def main() -> None:
         default=ai.default_ai(),
         help="'codex' or a command that reads a prompt on stdin and prints the answer, used to pick clips. "
         "Give custom commands no tools: prompts contain text from strangers. Default: Claude Code, then Codex if installed.",
-    )
-    ap.add_argument(
-        "--trends-ai",
-        default=ai.default_trends_ai(),
-        help="'codex' or a command for --refresh-trends; needs web search (default: Claude Code, then Codex)",
     )
     ap.add_argument(
         "--high-effort",
@@ -87,12 +69,12 @@ def main() -> None:
     ap.add_argument("--at", type=float, metavar="SECONDS", help="--reedit: the second of the clip's video you mean")
     ap.add_argument("--whisper", default="turbo", help="faster-whisper model: tiny, base, small, medium, turbo (default)")
     ap.add_argument("--out", type=Path, default=ROOT / "out", help="working files, clips, logs and the database")
-    ap.add_argument(
-        "--refresh-trends", action="store_true", help="have the AI research current TikTok/Shorts trends into trends.md"
-    )
     ap.add_argument("--poll", action="store_true", help="pick live streamers automatically and clip their latest finished VOD")
     ap.add_argument(
-        "--top", type=int, default=6, help="--poll: how many trending, then biggest live, streamers to clip (default 6)"
+        "--top",
+        type=int,
+        default=6,
+        help="--poll: how many streamers to clip: most clip views today, then biggest live (default 6)",
     )
     ap.add_argument("--lang", default="EN", help='--poll: only streams in this language (default EN, "" for any)')
     ap.add_argument("--dry-run", action="store_true", help="--poll: only print which VODs would be clipped")
@@ -121,21 +103,21 @@ def main() -> None:
     )
     ap.add_argument("--run-steps", type=int, help=argparse.SUPPRESS)  # the runner of a run started in the dashboard
     a = ap.parse_args()
-    if bad := [p for p in a.prioritize if not ai.TRENDING.fullmatch(f"- {p}")]:
+    if bad := [p for p in a.prioritize if not ai.CHANNEL.fullmatch(f"- {p}")]:
         ap.error(f"--prioritize needs twitch:name or kick:name, not {bad[0]!r}")
-    found = [ai.TRENDING.fullmatch(f"- {p}") for p in a.prioritize]
+    found = [ai.CHANNEL.fullmatch(f"- {p}") for p in a.prioritize]
     a.prioritize = [f"{m[1]}:{m[2]}".lower() for m in found if m]  # just the parts, as `- ` and backticks match too
     if a.every is not None:
         if not 0 < a.every < math.inf:  # also false for nan
             ap.error("--every needs a positive number of minutes")
-        if not (a.poll or a.upload) or any((a.url, a.dashboard, a.youtube_login, a.refresh_trends)):
+        if not (a.poll or a.upload) or any((a.url, a.dashboard, a.youtube_login)):
             ap.error("--every only repeats --poll and --upload")
     if a.reedit is not None and not runs.reedit_job(a.reedit, a.request, a.at):
         ap.error(f"--reedit needs a --request of up to {runs.REQUEST_MAX} characters, and --at from 0 to 600 seconds")
     if isinstance(sys.stdout, io.TextIOWrapper):  # not when stdout was swapped (tests, some service wrappers)
         sys.stdout.reconfigure(errors="replace")  # emoji in stream titles crash cp1252 consoles
-    if not any((a.url, a.refresh_trends, a.poll, a.dashboard, a.youtube_login, a.upload, a.run_steps, a.reedit is not None)):
-        ap.error("pass a VOD url (or --poll / --upload / --youtube-login / --refresh-trends / --dashboard)")
+    if not any((a.url, a.poll, a.dashboard, a.youtube_login, a.upload, a.run_steps, a.reedit is not None)):
+        ap.error("pass a VOD url (or --poll / --upload / --youtube-login / --dashboard)")
     if (a.url or a.poll or a.reedit is not None) and not shutil.which("ffmpeg"):
         sys.exit("ffmpeg not found on PATH")
     setup_logging(a.out)
@@ -162,14 +144,6 @@ def main() -> None:
 
 def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
     """One run of everything the flags ask for."""
-    if a.poll and not a.dry_run and not a.refresh_trends:  # --refresh-trends does it below, a dry run touches nothing
-        refresh_stale_trends(a.trends_ai)
-    if a.refresh_trends:
-        if not a.trends_ai:
-            raise ClipitError('No AI for trend research. Install Claude Code or Codex CLI, or pass --trends-ai "<command>"')
-        log("researching current trends (web search)...")
-        ai.refresh_trends(a.trends_ai)
-        log(f"wrote {ai.TRENDS}")
     if a.youtube_login:
         youtube.login()
     upload_failed = False

@@ -88,11 +88,18 @@ def test_latest_vod_skips_live_and_sub_only(monkeypatch):
     vods = [
         {"id": "live", "is_live": True, "status": "public", "duration": 0, "start_time": "x"},
         {"id": "sub", "is_live": False, "status": "subscriber_only", "duration": 9, "start_time": "x"},
-        {"id": "ok", "is_live": False, "status": "public", "duration": 3600, "start_time": "2026-10-24T20:50:47Z"},
+        {
+            "id": "ok",
+            "is_live": False,
+            "status": "public",
+            "duration": 3600,
+            "start_time": "2026-10-24T20:50:47Z",
+            "language": "en",
+        },
     ]
     monkeypatch.setattr(kick, "get", lambda url: {"id": 668} if "/v2/" in url else {"data": vods})
     vod = kick.latest_vod("xqc")
-    assert vod == {"id": "ok", "publishedAt": "2026-10-24T20:50:47Z", "lengthSeconds": 3600}
+    assert vod == {"id": "ok", "publishedAt": "2026-10-24T20:50:47Z", "lengthSeconds": 3600, "language": "EN"}
     assert vod and kick.vod_ref("xqc", vod) == ("ok", "https://kick.com/xqc/videos/ok")
     with pytest.raises(ClipitError):
         kick.latest_vod("../../evil")
@@ -105,3 +112,32 @@ def test_kick_chat_failure_fails_the_vod(monkeypatch):
     monkeypatch.setattr(kick, "fetch_chat", broken)
     with pytest.raises(ClipitError, match="retry later"):
         pipeline.get_chat({"extractor": "kick:vod", "id": "x", "channel_id": "668", "timestamp": START, "duration": 60})
+
+
+def test_top_clipped_adds_up_views_and_reads_languages_off_vods(monkeypatch):
+    pages = {
+        "https://kick.com/api/v2/clips?sort=view&time=day": {
+            "clips": [
+                {"channel": {"slug": "a"}, "views": 5},
+                {"channel": {"slug": "b"}, "views": 7},
+                {"channel": {"slug": "../evil"}, "views": 99},
+            ],
+            "nextCursor": "c 1",
+        },
+        "https://kick.com/api/v2/clips?sort=view&time=day&cursor=c%201": {
+            "clips": [
+                {"channel": {"slug": "a"}, "views": 4},
+                {"channel": {"slug": "banned"}, "views": 3},
+                {"channel": {"slug": "novods"}, "views": 2},
+            ]
+        },
+    }
+
+    def vod(slug):
+        if slug == "banned":
+            raise OSError("404")
+        return {"a": {"language": "EN"}, "b": {"language": "ES"}}.get(slug)
+
+    monkeypatch.setattr(kick, "get", pages.__getitem__)
+    monkeypatch.setattr(kick, "latest_vod", vod)
+    assert kick.top_clipped() == [("a", 9, "EN"), ("b", 7, "ES")]

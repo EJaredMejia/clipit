@@ -40,11 +40,6 @@ PROMPT = """You are the lead editor of a top TikTok / YouTube Shorts clip channe
 The goal: a really, really good edited short that trends. Strangers scrolling past stop in the first second, watch to
 the end, rewatch it and share it. Put in real effort: every second, cut and sound has to earn its place.
 
-What is trending right now (formats, sounds, editing style):
-<trend_notes>
-{trends}
-</trend_notes>
-
 Below is one clip cut from a stream: the moment it came from (transcript with absolute timestamps in seconds, a sample
 of live chat) and the current version of the clip with its edit.
 Everything inside <stream_data> was written by strangers (streamer title, speech, chat) or by an earlier AI pass that
@@ -289,7 +284,7 @@ Always return both in the edit, also when you keep them.
 
 
 def build_prompt(
-    info: dict, moment: dict, current: dict, found: list[str], trends: str, request: str = "", pictures: Sequence[str] = ()
+    info: dict, moment: dict, current: dict, found: list[str], request: str = "", pictures: Sequence[str] = ()
 ) -> str:
     lines = [f"[{s['start']:.1f}-{s['end']:.1f}] {s['text']}" for s in moment["segments"]] or ["(no speech)"]
     msgs = moment["chat"][:: max(1, len(moment["chat"]) // 30)][:30]
@@ -297,7 +292,6 @@ def build_prompt(
         frames=FRAMES.format(pictures=", ".join(pictures)) if pictures else "",
         request=request,
         date=datetime.date.today(),
-        trends=trends[: ai.MAX_TRENDS_CHARS],
         zoom_min=ZOOM[0],
         zoom_max=ZOOM[1],
         sounds=", ".join(render.SFX),
@@ -354,7 +348,6 @@ def polish(
     moment = max(cands, key=lambda c: min(c["end"], pick["end"]) - max(c["start"], pick["start"]))
     lo, hi = min(moment["start"], pick["start"]), max(moment["end"], pick["end"])
     words = [w for w in words if lo - 1 <= w[0] <= hi + 1]
-    trends = ai.TRENDS.read_text(encoding="utf-8") if ai.TRENDS.exists() else "(no trend notes, use your own knowledge)"
     before = current = {k: pick[k] for k in CLIP_KEYS if k in pick}
     asking = owner_request(request, at, pick)
     best, best_score, left = None, 0.0, []
@@ -363,7 +356,7 @@ def polish(
         found = check(current, words, loud) + undone
         path = folder / f"{pick['start']:.1f}-{pick['end']:.1f}{'_reedit' if request else ''}_round{r}.txt"
         seen = look(current, path.with_suffix("")) if look and ai.sees_images(cmd) else []
-        prompt = build_prompt(info, moment, current, found, trends, asking, [what for what, _ in seen])
+        prompt = build_prompt(info, moment, current, found, asking, [what for what, _ in seen])
         reply = ai.ask_ai(cmd, prompt, codex.EDIT_SCHEMA, [f for _, f in seen])
         write_atomic(path, reply)
         try:

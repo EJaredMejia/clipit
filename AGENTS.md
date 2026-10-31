@@ -53,12 +53,12 @@ VODs to process; `cli.py` is the only place that parses flags, sets up logging, 
 | `pipeline.py` | `process_vod(url, ...)`: runs every stage with caching and returns `(folder, rendered clips)` |
 | `db.py` | the SQLite catalog: schema migrations, claiming VODs, recording clips |
 | `source.py` | yt-dlp: VOD info, audio download, stream URLs |
-| `twitch.py` | Twitch's public API: chat replay, live streams, latest VODs |
+| `twitch.py` | Twitch's public API: chat replay, live streams, today's most-viewed clips, latest VODs |
 | `kick.py` | the same for Kick, through the JSON API its website uses, throttled to stay under its rate limit |
 | `poll.py` | picks which streamers to clip and runs the pipeline on each, never the same VOD twice |
 | `moments.py` | loudness + chat scoring, picks candidate windows |
 | `transcribe.py` | Whisper on the candidate windows |
-| `ai.py` | prompts, calling the AI CLI, validating its picks, trend research |
+| `ai.py` | prompts, calling the AI CLI, validating its picks |
 | `edit.py` | `--high-effort`: the AI edits each pick (cuts, zooms, sound effects, pop-up text, layout and crop) and reviews it in a loop until a review passes it, checked in code; an AI that sees pictures reviews frames of each version rendered; `--reedit` uses the same loop with the user's request |
 | `codex.py` | isolated Codex CLI provider, restricted model catalog and structured clip output |
 | `facecam.py` | webcam overlay detection |
@@ -141,8 +141,8 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
   close it. The clip-picking AI runs in an empty temp folder with **no tools that access files, run commands, or
   reach the network**. Claude Code uses `--tools ""`; the built-in Codex provider disables shell, file editing,
   apps, plugins and browser tools, ignores user configuration and uses a read-only sandbox. Its temporary model
-  catalog must remove `apply_patch_tool_type` and model-specific extra tools. Only trend research gets web search,
-  and its prompt contains no untrusted text. Never enable external tools for clip picking.
+  catalog must remove `apply_patch_tool_type` and model-specific extra tools. Never enable external tools for clip
+  picking.
 - AI output is validated before use (`ai.clean`): numbers parsed and clamped, text fields forced to capped strings.
 - Untrusted text never reaches a shell. File names go through `util.slug`, folder names are checked against a strict
   pattern, subtitle text goes through `render.make_ass`'s escaping (strips `\ { }` and newlines).

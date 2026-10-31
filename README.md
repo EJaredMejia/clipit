@@ -9,8 +9,7 @@ Codex CLI, a local model through Ollama, or any other AI CLI.
 ## Features
 
 - **Clip one stream.** Give it a Twitch or Kick VOD link and get 1080x1920 clips with a hook, word-by-word captions, a title, and ready-to-paste TikTok and YouTube text that credits the streamer and adds hashtags.
-- **Clip live streamers automatically.** Checks who's live on Twitch and Kick, picks the biggest streamers, and clips each one's latest finished stream. Built to run unattended on a timer.
-- **Follow trends.** The AI researches what's working on TikTok and Shorts this week, and the clip picks and captions follow it.
+- **Clip who's getting views today.** Ranks Twitch and Kick streamers by the views on their clips of the last day, then the biggest live ones, and clips each one's latest finished stream. Built to run unattended on a timer.
 - **Facecam layout.** Finds the streamer's webcam overlay and stacks it above the gameplay.
 - **Light on bandwidth.** Downloads only the audio to find moments (about 360 MB for 4 hours instead of 12 GB of video), then only the seconds of video it renders.
 - **Dashboard.** Watch every clip in your browser, mark it keep or skip, record where you posted it, and see which VODs failed and why.
@@ -50,9 +49,8 @@ Skip `uv sync` and `uv run`: they resolve their own versions into a `uv.lock` in
 - **Codex CLI**: install [Codex](https://learn.chatgpt.com/docs/codex/cli) and run `codex login` once, or use the CLI bundled with the Windows Codex desktop app. Select it explicitly with:
   ```bash
   clipit <vod-url> --ai codex
-  clipit --refresh-trends --trends-ai codex
   ```
-  Clipit selects Codex automatically when Claude Code is not installed. It uses your existing Codex login and the CLI's default model. A request runs in an empty temporary workspace with user configuration, shell commands, file-editing tools, apps, plugins and browser controls disabled; only trend research enables web search. Clip selection uses a JSON output schema. The CLI must support `exec --ignore-user-config` and `debug models --bundled`; unsupported versions stop with an update message instead of falling back to broader permissions.
+  Clipit selects Codex automatically when Claude Code is not installed. It uses your existing Codex login and the CLI's default model. A request runs in an empty temporary workspace with user configuration, shell commands, file-editing tools, apps, plugins and browser controls disabled. Clip selection uses a JSON output schema. The CLI must support `exec --ignore-user-config` and `debug models --bundled`; unsupported versions stop with an update message instead of falling back to broader permissions.
 - **A local model with [Ollama](https://ollama.com)**:
   ```bash
   ollama pull qwen3:8b
@@ -107,27 +105,21 @@ clipit --poll
 
 Each pass:
 
-1. Reads Twitch's live streams (the top 30 overall plus the top 30 of each of the 30 biggest categories, about 800
+1. Ranks streamers by the views on their clips of the last day: Twitch's top 30 clips of each of the 30 biggest
+   categories, and Kick's 100 most-viewed clips. Each site's ranking is kept apart and they alternate, so Twitch's bigger
+   numbers don't take every slot. At least 1,000 views counts. If a site's clips can't be read, it goes by live viewers.
+2. Reads Twitch's live streams (the top 30 overall plus the top 30 of each of the 30 biggest categories, about 800
    streams) and Kick's top 500. A name live on both sites is clipped on both, since the same name can belong to two
    different people: skip a simulcast's repeats in the dashboard. If one site's API is down, the pass goes on with the
    other.
-2. **Big streamers:** the 6 biggest with at least 2,000 viewers (`--top`), after any trending ones. For each, it clips their latest *finished* VOD, ignoring a stream that's still live. A channel with no usable VOD gives its slot to the next one.
-3. Skips VODs that ended more than 2 days ago and anything already done. Only English streams by default (`--lang ""` for any).
-4. Each VOD is claimed in the database before processing, so two overlapping passes never do the same one. Finished VODs are never redone. Failed ones retry up to 3 times, at least an hour apart, and a pass that crashed mid-VOD is taken over 30 minutes after it stopped refreshing its claim. Downloaded audio is deleted after each VOD to save disk.
+3. **Who to clip:** 6 streamers (`--top`): the most clipped first, live or not, then the biggest live with at least 2,000 viewers. For each, it clips their latest *finished* VOD, ignoring a stream that's still live. A channel with no usable VOD gives its slot to the next one.
+4. Skips VODs that ended more than 2 days ago and anything already done. Only English streams by default (`--lang ""` for any).
+5. Each VOD is claimed in the database before processing, so two overlapping passes never do the same one. Finished VODs are never redone. Failed ones retry up to 3 times, at least an hour apart, and a pass that crashed mid-VOD is taken over 30 minutes after it stopped refreshing its claim. Downloaded audio is deleted after each VOD to save disk.
 
 Run it every 30-60 minutes: either leave `clipit --poll --every 45` running (one pass, then waits 45 minutes, forever;
 a failed pass is logged and the next still runs), or put `clipit --poll` on a timer (launchd on macOS, Task Scheduler
 on Windows), which also survives reboots. A pass with new VODs takes about 10 minutes per VOD. Logs go to
 `out/logs/clipit.log`.
-
-### Refresh trends
-
-```bash
-clipit --refresh-trends
-```
-
-Has the AI search the web for this week's TikTok and Shorts trends and rewrites `trends.md`. Run it weekly, or edit
-`trends.md` by hand.
 
 ### Dashboard
 
@@ -203,12 +195,10 @@ have the rights to: three copyright strikes delete a channel.
 | `-n`, `--clips N` | `6` | Most clips per VOD: the AI picks fewer, or none, when the VOD is weak. |
 | `--high-effort` | | Edit every clip (cuts, zooms, sound effects, pop-up text) and have the AI review and improve it until it's done. See [High-effort clips](#high-effort-clips). |
 | `--ai CMD` | Claude Code, then Codex | The AI that picks clips: `codex` uses the isolated built-in provider; other values are commands that read a prompt on stdin and print the answer. **Don't give custom commands tools**: prompts contain Twitch chat written by strangers. |
-| `--trends-ai CMD` | Claude Code, then Codex | The AI for `--refresh-trends`, which needs web search. Use `codex` for Codex with web search only. |
 | `--whisper MODEL` | `turbo` | Transcription model: `tiny`, `base`, `small`, `medium` or `turbo`. Bigger is more accurate but slower. |
 | `--out DIR` | `out` | Where working files, clips, logs and the database go. |
-| `--refresh-trends` | | Research current trends into `trends.md`. |
-| `--poll` | | Pick live streamers and clip their latest finished VOD. |
-| `--top N` | `6` | With `--poll`: how many of the biggest live streamers to clip. |
+| `--poll` | | Pick the most clipped, then biggest live, streamers and clip their latest finished VOD. |
+| `--top N` | `6` | With `--poll`: how many streamers to clip. |
 | `--lang CODE` | `EN` | With `--poll`: only streams in this language, `""` for any. |
 | `--dry-run` | | With `--poll`: only print which VODs would be clipped. |
 | `--dashboard` | | Open the dashboard in your browser. |
@@ -241,7 +231,7 @@ each clip was posted.
 1. Downloads the **audio only**.
 2. Pulls the **chat replay** and scores every second by chat speed (hype emotes like KEKW, LUL and "clip" count double), shifted 8 s earlier because chat reacts late, plus **loudness** peaks.
 3. Takes the top `3 x clips` peaks and transcribes 90 s around each one with Whisper, locally.
-4. Sends the transcripts, chat samples and `trends.md` to the AI. It returns exact cut points, a cold-open hook and the post text.
+4. Sends the transcripts and chat samples to the AI. It returns exact cut points, a cold-open hook and the post text.
 5. **Finds the facecam layouts** in 40 frames spread over the whole VOD. A webcam face recurs in the same spot for long stretches while game faces move, so each recurring spot against a frame edge is a webcam layout (streamers often have several, one per scene). Each crop snaps to that overlay's border, the one edge that stays put while the gameplay changes. Then, for every clip, a few frames from the clip itself decide which layout is on screen, or the blurred layout if none is.
 6. ffmpeg **seeks straight into the stream** and downloads only those seconds of 1080p video while rendering.
 
