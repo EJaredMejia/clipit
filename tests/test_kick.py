@@ -88,11 +88,18 @@ def test_latest_vod_skips_live_and_sub_only(monkeypatch):
     vods = [
         {"id": "live", "is_live": True, "status": "public", "duration": 0, "start_time": "x"},
         {"id": "sub", "is_live": False, "status": "subscriber_only", "duration": 9, "start_time": "x"},
-        {"id": "ok", "is_live": False, "status": "public", "duration": 3600, "start_time": "2026-10-24T20:50:47Z"},
+        {
+            "id": "ok",
+            "is_live": False,
+            "status": "public",
+            "duration": 3600,
+            "start_time": "2026-10-24T20:50:47Z",
+            "language": "en-IN",
+        },
     ]
-    monkeypatch.setattr(kick, "get", lambda url: {"id": 668} if "/v2/" in url else {"data": vods})
+    monkeypatch.setattr(kick, "get", lambda url: {"id": 668, "followers_count": "7"} if "/v2/" in url else {"data": vods})
     vod = kick.latest_vod("xqc")
-    assert vod == {"id": "ok", "publishedAt": "2026-10-24T20:50:47Z", "lengthSeconds": 3600}
+    assert vod == {"id": "ok", "publishedAt": "2026-10-24T20:50:47Z", "lengthSeconds": 3600, "language": "EN", "followers": 7}
     assert vod and kick.vod_ref("xqc", vod) == ("ok", "https://kick.com/xqc/videos/ok")
     with pytest.raises(ClipitError):
         kick.latest_vod("../../evil")
@@ -105,3 +112,42 @@ def test_kick_chat_failure_fails_the_vod(monkeypatch):
     monkeypatch.setattr(kick, "fetch_chat", broken)
     with pytest.raises(ClipitError, match="retry later"):
         pipeline.get_chat({"extractor": "kick:vod", "id": "x", "channel_id": "668", "timestamp": START, "duration": 60})
+
+
+def test_followers_survive_a_format_change():
+    assert kick.followers({"followers_count": "144296"}) == 144296
+    assert kick.followers({"followers_count": "1.2K"}) == 0 == kick.followers({})
+
+
+def test_top_clipped_adds_up_views_and_reads_languages_off_vods(monkeypatch):
+    pages = {
+        "https://kick.com/api/v2/clips?sort=view&time=day": {
+            "clips": [
+                {"channel": {"slug": "a"}, "views": 5},
+                {"channel": {"slug": "b"}, "views": 7},
+                {"channel": None, "views": 99},
+                {"channel": {"slug": "nobody"}, "views": 50},
+                {"channel": {"slug": "../evil"}, "views": 99},
+            ],
+            "nextCursor": "c 1",
+        },
+        "https://kick.com/api/v2/clips?sort=view&time=day&cursor=c%201": {
+            "clips": [
+                {"channel": {"slug": "a"}, "views": 4},
+                {"channel": {"slug": "banned"}, "views": 3},
+                {"channel": {"slug": "novods"}, "views": 2},
+                {"channel": {"slug": "tiny"}, "views": 1},
+            ]
+        },
+    }
+
+    def vod(slug):
+        if slug == "banned":
+            raise OSError("404")
+        known = {"a": ("EN", 100_000), "b": ("ES", 500_000), "tiny": ("EN", 900_000), "nobody": ("EN", 99_999)}
+        return {"language": known[slug][0], "followers": known[slug][1]} if slug in known else None
+
+    monkeypatch.setattr(kick, "MIN_CLIP_VIEWS", 2)
+    monkeypatch.setattr(kick, "get", pages.__getitem__)
+    monkeypatch.setattr(kick, "latest_vod", vod)
+    assert kick.top_clipped() == [("a", 9, "EN"), ("b", 7, "ES")]

@@ -6,6 +6,7 @@ Unofficial: Twitch can change it without notice. Failures surface as ClipitError
 import json
 import time
 import urllib.request
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -19,10 +20,14 @@ GQL_HASH = "b70a3591ff0f4e0313d126c6a1502d79a1c02baebb288227c582044aa76adf6a"
 # categories are how we reach smaller streamers (~800 streams in one call).
 LIVE = """query { streams(first: 30) { edges { node { viewersCount language broadcaster { login } } } }
   games(first: 30) { edges { node { streams(first: 30) { edges { node { viewersCount language broadcaster { login } } } } } } } }"""
+CLIPS = """query { games(first: 30) { edges { node {
+  clips(first: 30, criteria: {period: LAST_DAY, sort: VIEWS_DESC}) { edges { node { viewCount language broadcaster { login followers { totalCount } } } } } } } } }"""
 VODS = """query($login: String!) {
   user(login: $login) { videos(first: 3, type: ARCHIVE, sort: TIME) { edges { node { id publishedAt lengthSeconds status } } } } }"""
 
 
+MIN_CLIP_VIEWS = 1000  # views on a streamer's clips of the last day: less is no sign people want their clips
+MIN_FOLLOWERS = 1_000_000  # a clip can blow up on a nobody: seen 11,000 views for a channel of 4,851 followers
 RETRY_WAITS = (2, 4, 8, 16, 30, 30)  # seconds between attempts: rides out ~90 s of network trouble (seen: DNS failures)
 
 
@@ -72,6 +77,19 @@ def live_streams() -> list[tuple[str, int, str]]:
         if e["node"]["broadcaster"]
     }
     return sorted(((login, v, lang) for login, (v, lang) in found.items()), key=lambda s: -s[1])
+
+
+def top_clipped() -> list[tuple[str, int, str]]:
+    """Streamers with MIN_FOLLOWERS and MIN_CLIP_VIEWS on their clips of the last day, across the 30 biggest categories,
+    as (login, views, the language with most of those views)."""
+    views: dict[str, Counter[str]] = {}
+    for game in gql(CLIPS)["games"]["edges"]:
+        for e in (game["node"]["clips"] or {}).get("edges") or []:
+            who = e["node"]["broadcaster"]
+            if who and ((who.get("followers") or {}).get("totalCount") or 0) >= MIN_FOLLOWERS:
+                views.setdefault(who["login"], Counter())[e["node"]["language"]] += e["node"]["viewCount"]
+    found = ((login, v.total(), v.most_common(1)[0][0]) for login, v in views.items())
+    return sorted((s for s in found if s[1] >= MIN_CLIP_VIEWS), key=lambda s: -s[1])
 
 
 def latest_vod(login: str) -> dict | None:

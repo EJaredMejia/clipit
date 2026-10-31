@@ -117,11 +117,9 @@ def _restricted_catalog(raw: str) -> str:
         raise ClipitError("Codex returned an unsupported model catalog; update the Codex CLI") from exc
 
 
-def ask(
-    prompt: str, *, web_search: bool = False, schema: dict = PICKS_SCHEMA, timeout: float = 900, images: Sequence[Path] = ()
-) -> str:
-    """Run a fresh Codex request with only the supplied prompt and optional trend web search.
-    Without web search the reply must match schema: the clip picks, or a high-effort review.
+def ask(prompt: str, *, schema: dict = PICKS_SCHEMA, timeout: float = 900, images: Sequence[Path] = ()) -> str:
+    """Run a fresh Codex request with only the supplied prompt.
+    The reply must match schema: the clip picks, or a high-effort review.
     images: pictures attached to the prompt (no tool reads them: view_image stays disabled)."""
     executable = find_cli()
     if not executable:
@@ -160,16 +158,15 @@ def ask(
                 "-c",
                 "project_doc_max_bytes=0",
                 "-c",
-                'web_search="live"' if web_search else 'web_search="disabled"',
+                'web_search="disabled"',
                 "-c",
                 "model_catalog_json=" + json.dumps(catalog_path.as_posix()),
             ]
             for feature in DISABLED_FEATURES:
                 args += ["--disable", feature]
-            if not web_search:
-                schema_path = root / "picks.schema.json"
-                schema_path.write_text(json.dumps(schema), encoding="utf-8")
-                args += ["--output-schema", str(schema_path)]
+            schema_path = root / "picks.schema.json"
+            schema_path.write_text(json.dumps(schema), encoding="utf-8")
+            args += ["--output-schema", str(schema_path)]
             for image in images:
                 args += ["--image", str(Path(image).resolve())]
             args.append("-")
@@ -196,10 +193,9 @@ def ask(
             f"Codex command failed:\n{(result.stdout + result.stderr)[-2000:]}\n"
             "If not logged in, run `codex login` once and retry."
         )
-    if not web_search:
-        try:
-            if not isinstance(json.loads(reply), dict):
-                raise ValueError("not a JSON object")
-        except ValueError as exc:
-            raise ClipitError("Codex did not return the requested clip JSON") from exc
+    try:
+        if not isinstance(json.loads(reply), dict):
+            raise ValueError("not a JSON object")
+    except ValueError as exc:
+        raise ClipitError("Codex did not return the requested clip JSON") from exc
     return reply

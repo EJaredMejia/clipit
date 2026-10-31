@@ -92,3 +92,24 @@ def test_fetch_chat_stops_at_the_vods_end(monkeypatch):
     monkeypatch.setattr(twitch, "gql_comments", comments)
     got = twitch.fetch_chat("1", 99.5, slice_len=300)
     assert got and all(t <= 101.5 for t, _ in got)
+
+
+def test_top_clipped_adds_up_a_streamers_clips_across_games(monkeypatch):
+    def clip(login, views, followers: int | None = twitch.MIN_FOLLOWERS, language="EN"):
+        who = login and {"login": login, "followers": followers and {"totalCount": followers}}
+        return {"node": {"viewCount": views, "language": language, "broadcaster": who}}
+
+    games = [
+        {
+            "node": {
+                "clips": {
+                    "edges": [clip("a", 5), clip("b", 7), clip(None, 99), clip("nobody", 99, 4851), clip("hidden", 99, None)]
+                }
+            }
+        },
+        {"node": {"clips": None}},
+    ]
+    games.append({"node": {"clips": {"edges": [clip("a", 4), clip("a", 1, language="ES"), clip("few", 1)]}}})
+    monkeypatch.setattr(twitch, "MIN_CLIP_VIEWS", 2)
+    monkeypatch.setattr(twitch, "gql", lambda query: {"games": {"edges": games}})
+    assert twitch.top_clipped() == [("a", 10, "EN"), ("b", 7, "EN")]

@@ -1,7 +1,7 @@
-"""The AI step: any CLI that reads a prompt on stdin and prints the answer. Picks clips, and researches trends.
+"""The AI step: any CLI that reads a prompt on stdin and prints the answer. Picks clips.
 
 Security: prompts contain text from strangers (stream titles, chat, speech), so clip picking runs with no tools
-and in an empty folder. Only trend research gets web tools, and its prompt contains no untrusted input.
+and in an empty folder.
 """
 
 import base64
@@ -17,11 +17,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from clipit import codex, db
-from clipit.util import ROOT, ClipitError, logger, write_atomic
+from clipit.util import ClipitError, logger, write_atomic
 
-TRENDS = ROOT / "trends.md"
 AI_TIMEOUT = 900
-MAX_TRENDS_CHARS = 8000  # trends.md comes from the open web; cap what it can add to every prompt
 # Field caps match what the platforms accept (Shorts titles: 100). The description leaves room in TikTok's 2,200-char
 # caption for the streamer credit and hashtags that render.post_texts adds.
 TEXT_FIELDS = {"title": 100, "hook": 80, "description": 1000, "trend": 200, "sound": 200, "why": 300}
@@ -33,11 +31,6 @@ ANSI = re.compile(r"\x1b(\[[0-?]*[ -/]*[@-~]|\][^\x07]*\x07|[@-Z\\-_])")  # term
 CLAUDE_CLI = re.compile(r"claude(\.exe|\.cmd)?\"?\s+-p\b", re.I)  # Claude Code in print mode, as _claude() writes it
 
 PROMPT = """You are the editor behind a top TikTok / YouTube Shorts clip channel. Today is {date}.
-
-What is trending right now (use it to pick, frame and title the clips):
-<trend_notes>
-{trends}
-</trend_notes>
 
 Below are candidate moments auto-detected from chat spikes and audio peaks. Each has the transcript
 with absolute timestamps in seconds and a sample of live chat.
@@ -72,12 +65,12 @@ Pick up to {n} clips most likely to go viral, or none if nothing here would stop
   A small streamer nobody outside their chat knows rarely earns more than 6: the moment itself has to carry it.
   Only clips scored {auto_score}+ are posted, and most streams have none: then score every clip low and none is posted. That
   is the right result, never a reason to round up.
-  Riding a trend from the notes above earns points only when the clip is actually about it.
+  Riding a trend earns points only when the clip is actually about it.
 - No links, @mentions of other accounts, or slurs in any text you write.
 - Hashtags: 3-5, mixing broad ones (gaming, twitch) with specific ones (the game, the meme). A credit line for the
   streamer and their hashtag are added for you.
 Answer with ONLY this JSON (no commentary). No emoji in "hook".
-{{"name": "the name fans call the streamer", "clips": [{{"start": 1234.5, "end": 1262.0, "title": "YouTube Shorts title naming the streamer, under 70 chars", "hook": "on-screen text naming the streamer, max 8 words", "description": "post text for TikTok and YouTube naming the streamer: 1-2 sentences that make people watch, no hashtags", "hashtags": ["3 to 5 hashtags, no # sign"], "trend": "trend or format this fits", "sound": "trending sound to add in-app, or empty", "score": 3, "why": "one line: what makes it work or holds it back"}}]}}
+{{"name": "the name fans call the streamer", "clips": [{{"start": 1234.5, "end": 1262.0, "title": "YouTube Shorts title naming the streamer, under 70 chars", "hook": "on-screen text naming the streamer, max 8 words", "description": "post text for TikTok and YouTube naming the streamer: 1-2 sentences that make people watch, no hashtags", "hashtags": ["3 to 5 hashtags, no # sign"], "trend": "format this fits, or empty", "sound": "sound that fits to add in-app, or empty", "score": 3, "why": "one line: what makes it work or holds it back"}}]}}
 
 <stream_data>
 Stream title: {title}
@@ -87,17 +80,8 @@ Streamer: {streamer}
 </stream_data>
 """
 
-TRENDS_PROMPT = """Today is {date}. Search the web for what is working RIGHT NOW on TikTok and YouTube Shorts for
-Twitch / streamer / gaming clip accounts. Write a concise markdown brief (max ~40 bullets).
-Start with a line "_Updated {date}_", then a section "Streamers everyone is talking about": up to 10 Twitch or Kick
-streamers whose clips are blowing up on TikTok, Shorts and X this week, most talked-about first, one per line written
-exactly as `- twitch:<login>` or `- kick:<slug>` (the channel name from their twitch.tv or kick.com URL, on the site
-they stream on), nothing else on the line. Then sections: Formats & hooks trending now, Trending sounds/memes that fit
-stream clips, Hashtags that work now, Events/seasonal moments in the next 2 weeks, Editing style (length, captions,
-pacing). Output only the markdown."""
-TRENDING = re.compile(r"^\s*[-*]\s*`?(twitch|kick):([A-Za-z0-9_-]{2,40})`?\s*$", re.M | re.I)
-TRENDS_MAX_AGE = datetime.timedelta(hours=12)  # --poll redoes the research when it's older than this
-MAX_TRENDING = 10
+# a streamer named by the user, as `twitch:<login>` or `kick:<slug>`
+CHANNEL = re.compile(r"^\s*[-*]\s*`?(twitch|kick):([A-Za-z0-9_-]{2,40})`?\s*$", re.M | re.I)
 
 
 def _claude() -> str | None:
@@ -113,14 +97,6 @@ def default_ai() -> str | None:
     claude = _claude()
     if claude:
         return f'{claude} --tools ""'
-    return "codex" if codex.find_cli() else None
-
-
-def default_trends_ai() -> str | None:
-    """Trend research: Claude Code or Codex with web search only."""
-    claude = _claude()
-    if claude:
-        return f"{claude} --tools WebSearch WebFetch --allowedTools WebSearch WebFetch"
     return "codex" if codex.find_cli() else None
 
 
@@ -185,36 +161,12 @@ def ask_ai(cmd: str, prompt: str, schema: dict = codex.PICKS_SCHEMA, images: Seq
     return claude_result(out) if images else out
 
 
-def refresh_trends(cmd: str) -> None:
-    prompt = TRENDS_PROMPT.format(date=datetime.date.today())
-    reply = codex.ask(prompt, web_search=True, timeout=AI_TIMEOUT) if cmd == "codex" else ask_ai(cmd, prompt)
-    write_atomic(TRENDS, reply[:MAX_TRENDS_CHARS])
-
-
-def trends_age() -> datetime.timedelta | None:
-    """How long ago trends.md was researched, or None if it never was."""
-    if not TRENDS.exists():
-        return None
-    return datetime.datetime.now() - datetime.datetime.fromtimestamp(TRENDS.stat().st_mtime)
-
-
-def trending_streamers(max_age: datetime.timedelta = datetime.timedelta(days=2)) -> list[tuple[str, str]]:
-    """(site, channel) of the streamers trends.md says everyone is talking about, most talked-about first.
-
-    From the open web, so only well-formed channel names pass; an old brief gives none (last week's buzz is gone)."""
-    age = trends_age()
-    if age is None or age > max_age:
-        return []
-    found = [(site.lower(), name.lower()) for site, name in TRENDING.findall(TRENDS.read_text(encoding="utf-8"))]
-    return list(dict.fromkeys(found))[:MAX_TRENDING]
-
-
 def fenced(s: object) -> str:
     """Untrusted text, made unable to close the <stream_data> block early."""
     return str(s).replace("stream_data", "stream-data")
 
 
-def build_prompt(info: dict, cands: list[dict], n: int, trends: str) -> str:
+def build_prompt(info: dict, cands: list[dict], n: int) -> str:
     blocks = []
     for i, c in enumerate(cands, 1):
         lines = [f"[{s['start']:.1f}] {s['text']}" for s in c["segments"]] or ["(no speech)"]
@@ -226,7 +178,6 @@ def build_prompt(info: dict, cands: list[dict], n: int, trends: str) -> str:
         date=datetime.date.today(),
         title=fenced(info.get("title"))[:200],
         streamer=fenced(info.get("uploader")),
-        trends=trends[:MAX_TRENDS_CHARS],
         n=n,
         auto_score=db.AUTO_SCORE,
         candidates=fenced("\n\n".join(blocks)),
@@ -296,8 +247,7 @@ def pick_clips(cmd: str | None, info: dict, cands: list[dict], n: int, work: Pat
     """Ask the AI and validate its picks. The raw reply is kept in work/ai_reply.txt for debugging."""
     if not cmd:
         raise ClipitError('No AI command. Install Claude Code or Codex CLI, or pass --ai "<command>"')
-    trends = TRENDS.read_text(encoding="utf-8") if TRENDS.exists() else "(no trend notes, use your own knowledge)"
-    reply = ask_ai(cmd, build_prompt(info, cands, n, trends))
+    reply = ask_ai(cmd, build_prompt(info, cands, n))
     write_atomic(work / "ai_reply.txt", reply)
     try:
         reply_json = extract_json(reply)

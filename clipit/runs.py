@@ -56,10 +56,10 @@ def clean_settings(raw: object) -> dict | None:
         and re.fullmatch(r"[A-Za-z]{0,3}", lang)  # "" is any language
         and isinstance(first, list)
         and len(first) <= 20
-        and all(isinstance(p, str) and ai.TRENDING.fullmatch(f"- {p}") for p in first)
+        and all(isinstance(p, str) and ai.CHANNEL.fullmatch(f"- {p}") for p in first)
     ):
         return None
-    found = [ai.TRENDING.fullmatch(f"- {p}") for p in first]
+    found = [ai.CHANNEL.fullmatch(f"- {p}") for p in first]
     return {**raw, "lang": lang.upper(), "prioritize": [f"{m[1]}:{m[2]}".lower() for m in found if m]}  # like cli.py
 
 
