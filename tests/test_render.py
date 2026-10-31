@@ -172,3 +172,9 @@ def test_sheets_say_which_second_each_starts_at(monkeypatch, tmp_path):
 
     monkeypatch.setattr(render, "sh", fake_sh)
     assert render.sheets(tmp_path / "c.mp4", tmp_path) == [(0.0, tmp_path / "sheet01.jpg"), (9.0, tmp_path / "sheet02.jpg")]
+
+
+def test_captions_and_the_hook_star_out_slurs_but_keep_ordinary_words():
+    ass = render.make_ass("what a faggot", [(0.0, 0.5, "niggas"), (0.5, 1.0, "bigger")], 0.0, 2.0, 100, 900)
+    assert "F*****" in ass and "N*****" in ass and "BIGGER" in ass
+    assert "NIGGAS" not in ass.upper().replace("N*****", "")

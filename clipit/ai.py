@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from clipit import codex, db
-from clipit.util import ClipitError, logger, write_atomic
+from clipit.util import ClipitError, logger, no_slurs, write_atomic
 
 AI_TIMEOUT = 900
 # Field caps match what the platforms accept (Shorts titles: 100). The description leaves room in TikTok's 2,200-char
@@ -370,7 +370,7 @@ def clean(clips: object, duration: float, n: int) -> list[dict]:
             logger.warning("AI picked a %.0f s clip at %.0f s, trimming to %d s", e - s, s, CLIP_LEN[1])
             e = s + CLIP_LEN[1]
         if e - s >= CLIP_LEN[0]:
-            text = {k: str(c.get(k) or "").strip()[:cap] for k, cap in TEXT_FIELDS.items()}
+            text = {k: no_slurs(str(c.get(k) or "")).strip()[:cap] for k, cap in TEXT_FIELDS.items()}
             out.append({**text, "hashtags": hashtags(c.get("hashtags")), "start": s, "end": e, "score": score})
             if isinstance(c.get("peak"), int | float):
                 out[-1]["peak"] = float(c["peak"])

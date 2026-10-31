@@ -40,6 +40,14 @@ def write_atomic(path: Path, data: str | bytes) -> None:
     os.replace(tmp, path)
 
 
+SLURS = re.compile(r"\b(?:n[i1]gg\w*|f[a4]gg?\w*|retard\w*|k[iy]ke\w*|chink\w*|spics?|tranny|trannies)\b", re.IGNORECASE)
+
+
+def no_slurs(s: str) -> str:
+    """Text for the screen or a post with slurs starred out. The clip's audio keeps them: the user chose text only."""
+    return SLURS.sub(lambda m: m[0][0] + "*" * (len(m[0]) - 1), s)
+
+
 def slug(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", s.lower()).strip("-")[:40] or "clip"
 
