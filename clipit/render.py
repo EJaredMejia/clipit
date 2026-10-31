@@ -2,13 +2,16 @@
 
 import os
 import re
+import subprocess
 from collections.abc import Collection
 from pathlib import Path
 
+from clipit import source
 from clipit.facecam import TOP
-from clipit.util import REMOTE, mmss, sh, write_atomic
+from clipit.util import mmss, sh, write_atomic
 
 RENDER_TIMEOUT = 1800
+MIN_RENDER = 1024  # bytes: an mp4 with no frames is about 260
 # Posting policy includes the creators historically associated with FaZe, regardless of later roster changes.
 FAZE_STREAMERS = frozenset(
     {
@@ -160,7 +163,8 @@ def source_frame(url: str, t: float, path: Path) -> None:
     """The stream itself at VOD second t, before any layout, with a line every 10% of its width: what the edit's
     focus is measured on."""
     vf = "scale=960:-2,drawgrid=w=iw/10:h=ih:t=2:c=yellow@0.8"
-    sh(["ffmpeg", "-v", "error", "-y", *REMOTE, "-ss", f"{t:.2f}", "-i", url, "-frames:v", "1", "-vf", vf, str(path)], 120)
+    with source.inputs([url], t, 1) as stream:
+        sh(["ffmpeg", "-v", "error", "-y", *stream, "-frames:v", "1", "-vf", vf, str(path)], 120)
 
 
 def centered(at: str, lo: str, hi: str) -> str:
@@ -210,38 +214,40 @@ def render(urls: list[str], clip: dict, words: list, out: Path, cam: list[float]
     else:
         graph += f",{subs}[v]"
         audio = ["-map", f"{len(urls) - 1}:a", "-af", LOUDNORM]
-    inputs = [arg for u in urls for arg in (*REMOTE, "-ss", f"{s:.2f}", "-t", f"{d:.2f}", "-i", u)]
     tmp = out.with_name(out.stem + ".tmp.mp4")
     try:
-        sh(
-            [
-                "ffmpeg",
-                "-v",
-                "error",
-                "-y",
-                *inputs,
-                "-filter_complex",
-                graph,
-                "-map",
-                "[v]",
-                *audio,
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-crf",
-                "20",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "160k",
-                "-movflags",
-                "+faststart",
-                tmp.name,
-            ],
-            timeout=RENDER_TIMEOUT,
-            cwd=out.parent,
-        )
+        with source.inputs(urls, s, d) as inputs:
+            sh(
+                [
+                    "ffmpeg",
+                    "-v",
+                    "error",
+                    "-y",
+                    *inputs,
+                    "-filter_complex",
+                    graph,
+                    "-map",
+                    "[v]",
+                    *audio,
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "20",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "160k",
+                    "-movflags",
+                    "+faststart",
+                    tmp.name,
+                ],
+                timeout=RENDER_TIMEOUT,
+                cwd=out.parent,
+            )
+        if tmp.stat().st_size < MIN_RENDER:  # a stream that gives no frames still exits 0
+            raise subprocess.CalledProcessError(1, "ffmpeg", stderr=f"{tmp.name} has no video")
         os.replace(tmp, out)
     finally:
         ass.unlink(missing_ok=True)

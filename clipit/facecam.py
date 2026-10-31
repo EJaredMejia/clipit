@@ -6,7 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from clipit.util import REMOTE
+from clipit import source
+from clipit.util import ClipitError
 
 TOP = (1080, 768)  # facecam panel in the 1080x1920 split layout, gameplay gets the rest
 
@@ -85,28 +86,14 @@ def grab_frames(url: str, times: Iterable[float]) -> list[np.ndarray]:
 
     def grab(t):
         try:
-            raw = subprocess.run(
-                [
-                    "ffmpeg",
-                    "-v",
-                    "error",
-                    *REMOTE,
-                    "-ss",
-                    f"{t:.2f}",
-                    "-i",
-                    url,
-                    "-frames:v",
-                    "1",
-                    "-vf",
-                    "scale=960:540,format=gray",
-                    "-f",
-                    "rawvideo",
-                    "-",
-                ],
-                capture_output=True,
-                timeout=120,
-            ).stdout
-        except subprocess.TimeoutExpired:
+            with source.inputs([url], float(t), 1) as stream:
+                raw = subprocess.run(
+                    ["ffmpeg", "-v", "error", *stream, "-frames:v", "1", "-vf", "scale=960:540,format=gray"]
+                    + ["-f", "rawvideo", "-"],
+                    capture_output=True,
+                    timeout=120,
+                ).stdout
+        except (subprocess.TimeoutExpired, ClipitError):
             return None
         return np.frombuffer(raw, np.uint8).reshape(540, 960) if len(raw) == 960 * 540 else None
 

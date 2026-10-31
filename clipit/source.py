@@ -1,14 +1,22 @@
 """Talking to the video site through yt-dlp: metadata, audio-only download, stream URLs to seek into."""
 
 import json
+import re
+import shutil
 import subprocess
+import tempfile
 import threading
 import time
+import urllib.parse
+import urllib.request
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
-from clipit.util import ClipitError, log, sh, ytdlp
+from clipit.util import REMOTE, ClipitError, log, sh, ytdlp
 
 DOWNLOAD_TIMEOUT = 3 * 3600  # a 48 h VOD's audio is ~2.5 GB
+SEGMENT_TIMEOUT = 30  # a stalled read of one playlist or stream segment
 
 
 def fetch_info(url: str) -> dict:
@@ -54,3 +62,60 @@ def download_audio(url: str, work: Path, stop: threading.Event | None = None) ->
 def stream_urls(url: str) -> list[str]:
     """Direct 1080p URL(s), video first. Signed by Twitch for hours, so fetch fresh per run."""
     return sh(ytdlp("-g", "-f", "bv*[height<=1080]+ba/b[height<=1080]/b", url), timeout=120).stdout.split()
+
+
+def fetch(url: str, path: Path | None = None) -> str:
+    """One playlist (returned) or stream segment (saved to path)."""
+    try:
+        with urllib.request.urlopen(url, timeout=SEGMENT_TIMEOUT) as r:
+            if not path:
+                return r.read().decode("utf-8")
+            with path.open("wb") as f:
+                shutil.copyfileobj(r, f)
+            return ""
+    except (OSError, UnicodeDecodeError) as e:  # URLError and timeouts are OSErrors
+        raise ClipitError(f"couldn't read the stream: {e}") from e
+
+
+def fragments(playlist: str, base: str, start: float, end: float) -> tuple[list[str], float] | None:
+    """A fragmented-MP4 playlist's URLs for start-end, init segment first, and how far into them start is. None for any
+    other playlist. Segment names come from the playlist, so only ones under base are followed."""
+    init = re.search(r'#EXT-X-MAP:URI="([^"]+)"', playlist)
+    if not init:
+        return None
+    at, length, parts, first = 0.0, 0.0, [], 0.0
+    for line in playlist.splitlines():
+        if line.startswith("#EXTINF:"):
+            length = float(line[8:].split(",")[0])
+        elif line and not line.startswith("#"):
+            if at < end and at + length > start:
+                first = first if parts else at
+                parts.append(line)
+            at += length
+    urls = [urllib.parse.urljoin(base, name) for name in (init[1], *parts)]
+    if not parts or not all(u.startswith(base) for u in urls):
+        return None
+    return urls, max(start - first, 0.0)
+
+
+@contextmanager
+def inputs(urls: list[str], start: float, length: float) -> Iterator[list[str]]:
+    """ffmpeg's input arguments for length seconds at start of each stream. ffmpeg can't seek into fragmented-MP4 HLS
+    (Twitch's newer VODs): -ss there gives no frames and exit 0, so those parts are fetched to a temp file first."""
+    args = []
+    with tempfile.TemporaryDirectory(prefix="clipit-") as tmp:
+        for i, url in enumerate(urls):
+            playlist = fetch(url) if ".m3u8" in url else ""
+            found = fragments(playlist, url.rsplit("/", 1)[0] + "/", start, start + length)
+            if not found:
+                args += [*REMOTE, "-ss", f"{start:.2f}", "-t", f"{length:.2f}", "-i", url]
+                continue
+            part = Path(tmp) / f"{i}.mp4"
+            with part.open("wb") as out:
+                for n, segment in enumerate(found[0]):
+                    piece = Path(tmp) / f"{i}-{n}"
+                    fetch(segment, piece)
+                    out.write(piece.read_bytes())
+                    piece.unlink()
+            args += ["-ss", f"{found[1]:.2f}", "-t", f"{length:.2f}", "-i", str(part)]
+        yield args

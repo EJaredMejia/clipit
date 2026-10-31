@@ -113,7 +113,7 @@ def test_render_lays_out_the_stream_as_the_edit_chose(monkeypatch, tmp_path, edi
 
     def fake_sh(cmd, timeout, cwd):
         graphs.append(cmd[cmd.index("-filter_complex") + 1])
-        (cwd / cmd[-1]).write_bytes(b"mp4")
+        (cwd / cmd[-1]).write_bytes(b"mp4" * 400)
 
     monkeypatch.setattr(render, "sh", fake_sh)
     full = {"cuts": [], "zooms": [], "sfx": [], "texts": [], "emphasis": [], **edit} if edit else None
@@ -134,7 +134,7 @@ def test_every_layout_is_a_filter_graph_ffmpeg_runs(monkeypatch, tmp_path, layou
             cwd=cwd,
             timeout=60,
         )
-        (cwd / cmd[-1]).write_bytes(b"mp4")
+        (cwd / cmd[-1]).write_bytes(b"mp4" * 400)
 
     monkeypatch.setattr(render, "sh", real_ffmpeg)
     edit = {"layout": layout, "focus": 0.7, "zooms": [{"start": 10.1, "end": 10.3, "zoom": 1.3}]}
@@ -146,3 +146,10 @@ def test_every_layout_is_a_filter_graph_ffmpeg_runs(monkeypatch, tmp_path, layou
         tmp_path / "c.mp4",
         [0.7, 0.0, 0.3, 0.4],
     )
+
+
+def test_render_without_video_is_a_failure_not_a_clip(monkeypatch, tmp_path):
+    monkeypatch.setattr(render, "sh", lambda cmd, timeout, cwd: (cwd / cmd[-1]).write_bytes(b"x" * 261))
+    with pytest.raises(subprocess.CalledProcessError):
+        render.render(["https://v"], {"start": 10.0, "end": 30.0, "hook": "hi"}, [], tmp_path / "c.mp4")
+    assert not (tmp_path / "c.mp4").exists()
