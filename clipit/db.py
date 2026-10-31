@@ -552,6 +552,8 @@ def claim_upload(
     (and in a dashboard run, run_id: one its own polling took)
     (a hand rerun doesn't renew it; clips from old or hand-run VODs are posted only by hand), not on platform yet, kept by the user or unreviewed with
     an AI score of AUTO_SCORE+ (never skipped): clips of the `first` streamers ("site:login") first, then kept, then newest. At most per_day posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
+    A dashboard run always posts something: when nothing clears that bar it takes the best clip left, its own VODs' first,
+    then any fresh polled clip, whatever the score, because the user wants every run to publish. Skipped clips still never go up.
     The upload then ends with set_upload (posted) or fail_upload (retried later, up to MAX_ATTEMPTS)."""
     now = now or utcnow()
     conn.execute("BEGIN IMMEDIATE")  # two overlapping runs must not both post, nor both see room in the pacing
@@ -562,24 +564,24 @@ def claim_upload(
         ).fetchone()
         clip = None
         if n < per_day and (last is None or now - _ts(last) >= gap):
-            clip = conn.execute(
-                """SELECT c.id, c.file, c.title, c.youtube, c.caption, c.edited FROM clips c
+            ready = """SELECT c.id, c.file, c.title, c.youtube, c.caption, c.edited FROM clips c
                    JOIN vods v ON v.id = c.vod_id
                    LEFT JOIN uploads u ON u.clip_id = c.id AND u.platform = ?
-                   WHERE (c.verdict = 'keep' OR c.verdict IS NULL AND c.score >= ?) AND v.tier != 'manual' AND v.claimed_at >= ? AND (? IS NULL OR v.run_id = ?)
-                     AND (u.clip_id IS NULL OR (u.status = 'failed' AND u.attempts < ? AND u.uploaded_at < ?))
-                   ORDER BY IIF(v.url LIKE '%kick.com/%', 'kick:', 'twitch:') || lower(v.login) NOT IN (SELECT value FROM json_each(?)), c.verdict IS NULL, c.created_at DESC, c.idx LIMIT 1""",
-                (
-                    platform,
-                    AUTO_SCORE,
-                    (now - FRESH).isoformat(),
-                    run_id,
-                    run_id,
-                    MAX_ATTEMPTS,
-                    (now - RETRY_AFTER).isoformat(),
-                    json.dumps(first or []),
-                ),
+                   WHERE v.tier != 'manual' AND v.claimed_at >= ?
+                     AND (u.clip_id IS NULL OR (u.status = 'failed' AND u.attempts < ? AND u.uploaded_at < ?))"""
+            args = (platform, (now - FRESH).isoformat(), MAX_ATTEMPTS, (now - RETRY_AFTER).isoformat())
+            wanted = "IIF(v.url LIKE '%kick.com/%', 'kick:', 'twitch:') || lower(v.login) NOT IN (SELECT value FROM json_each(?))"
+            clip = conn.execute(
+                f"""{ready} AND (c.verdict = 'keep' OR c.verdict IS NULL AND c.score >= ?) AND (? IS NULL OR v.run_id = ?)
+                   ORDER BY {wanted}, c.verdict IS NULL, c.created_at DESC, c.idx LIMIT 1""",
+                (*args, AUTO_SCORE, run_id, run_id, json.dumps(first or [])),
             ).fetchone()
+            if not clip and run_id is not None:
+                clip = conn.execute(
+                    f"""{ready} AND (c.verdict = 'keep' OR c.verdict IS NULL)
+                       ORDER BY v.run_id IS NOT ?, {wanted}, c.verdict IS NULL, c.score DESC, c.created_at DESC, c.idx LIMIT 1""",
+                    (*args, run_id, json.dumps(first or [])),
+                ).fetchone()
         if clip:
             _take_upload(conn, clip["id"], platform, now)
         conn.execute("COMMIT")

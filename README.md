@@ -158,6 +158,8 @@ It only listens on your own machine (127.0.0.1) and refuses requests from other 
 Clipit posts clips from VODs polled in the last 2 days (older trends have passed) to your channel, through YouTube's
 official API: the ones you marked **Keep** first, then ones you haven't reviewed that the AI scored 8/10 or more,
 newest first, public, at most 10 in any 24-hour period and at least 1 hour apart. Clips you skipped are never posted.
+A run from the dashboard always posts something: if nothing clears that bar, it posts its best clip anyway, and if it
+made none, the best other clip from those 2 days.
 YouTube's default API quota covers about 6 uploads a day. Past that, a post waits for the quota to reset, without
 using up the clip's tries. For all 10, ask for more quota in Google Cloud (APIs & Services, YouTube Data API v3, Quotas).
 
