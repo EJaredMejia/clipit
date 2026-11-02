@@ -2,8 +2,8 @@
 
 import functools
 import json
+import math
 import re
-import shutil
 import subprocess
 import tempfile
 import threading
@@ -19,6 +19,7 @@ from clipit.util import REMOTE, ClipitError, log, sh, ytdlp
 
 DOWNLOAD_TIMEOUT = 3 * 3600  # a 48 h VOD's audio is ~2.5 GB
 SEGMENT_TIMEOUT = 30  # a stalled read of one playlist or stream segment
+FETCH_TIMEOUT = 90  # all of one clip's segments: a stream trickling in never trips SEGMENT_TIMEOUT
 
 
 def fetch_info(url: str) -> dict:
@@ -66,13 +67,16 @@ def stream_urls(url: str) -> list[str]:
     return sh(ytdlp("-g", "-f", "bv*[height<=1080]+ba/b[height<=1080]/b", url), timeout=120).stdout.split()
 
 
-def fetch(url: str, to: BinaryIO | None = None) -> str:
-    """One playlist (returned) or stream segment (written to the open file to)."""
+def fetch(url: str, to: BinaryIO | None = None, deadline: float = math.inf) -> str:
+    """One playlist (returned) or stream segment (written to the open file to, by the time.monotonic() deadline)."""
     try:
         with urllib.request.urlopen(url, timeout=SEGMENT_TIMEOUT) as r:
             if not to:
                 return r.read().decode("utf-8")
-            shutil.copyfileobj(r, to)
+            while chunk := r.read1(64 * 1024):
+                if time.monotonic() > deadline:
+                    raise ClipitError("couldn't read the stream: it stalled")
+                to.write(chunk)
             return ""
     except (OSError, UnicodeDecodeError) as e:  # URLError and timeouts are OSErrors
         raise ClipitError(f"couldn't read the stream: {e}") from e
@@ -120,8 +124,9 @@ def inputs(urls: list[str], start: float, length: float) -> Iterator[list[str]]:
                 args += [*REMOTE, "-ss", f"{start:.2f}", "-t", f"{length:.2f}", "-i", url]
                 continue
             part = Path(tmp) / f"{i}.mp4"
+            deadline = time.monotonic() + FETCH_TIMEOUT
             with part.open("wb") as out:
                 for segment in found[0]:
-                    fetch(segment, out)
+                    fetch(segment, out, deadline)
             args += ["-ss", f"{found[1]:.2f}", "-t", f"{length:.2f}", "-i", str(part)]
         yield args

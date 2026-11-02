@@ -80,7 +80,7 @@ def main() -> None:
         "--top",
         type=int,
         default=6,
-        help="--poll: how many streamers to clip: most clip views today, then biggest live (default 6)",
+        help="--poll: how many streamers to try, stopping at the first good clip: most clip views today, then biggest live (default 6)",
     )
     ap.add_argument("--lang", default="EN", help='--poll: only streams in this language (default EN, "" for any)')
     ap.add_argument("--dry-run", action="store_true", help="--poll: only print which VODs would be clipped")

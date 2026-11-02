@@ -252,7 +252,7 @@ def test_one_clip_whose_stream_cant_be_read_doesnt_lose_the_vod(stages, monkeypa
     assert [c["hook"] for c in clips] == ["ok"]
 
 
-def test_a_stalled_render_stops_the_vod_and_keeps_finished_clips_for_the_retry(stages, monkeypatch):
+def test_a_stalled_render_keeps_the_clips_made_and_skips_the_rest(stages, monkeypatch):
     _, tmp_path = stages
     tried = []
 
@@ -269,14 +269,8 @@ def test_a_stalled_render_stops_the_vod_and_keeps_finished_clips_for_the_retry(s
 
     monkeypatch.setattr(pipeline.ai, "pick_clips", three)
     monkeypatch.setattr(pipeline.render, "render", stalled)
-    with pytest.raises(pipeline.ClipitError, match="stalled"):
-        pipeline.process_vod("https://example/vod", n_clips=3, ai_cmd="ai", out_root=tmp_path)
-    assert tried == ["a", "b"]  # c would have stalled for as long
-    monkeypatch.setattr(
-        pipeline.render, "render", lambda urls, clip, words, out, cam: tried.append(clip["hook"]) or out.write_bytes(b"m")
-    )
     _, clips = pipeline.process_vod("https://example/vod", n_clips=3, ai_cmd="ai", out_root=tmp_path)
-    assert len(clips) == 3 and tried == ["a", "b", "b", "c"]  # a's video wasn't made again
+    assert [c["hook"] for c in clips] == ["a"] and tried == ["a", "b"]  # c would have stalled for as long
 
 
 def test_kick_chat_is_read_closer_at_the_loud_moments_once(stages, monkeypatch):
@@ -296,6 +290,17 @@ def test_kick_chat_is_read_closer_at_the_loud_moments_once(stages, monkeypatch):
     assert json.loads((work / "chat.json").read_text())[-1][1] == "close"  # the file a re-edit reads has the detail
     pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=tmp_path)
     assert len(closer) == 1
+
+
+def test_a_first_render_that_stalls_fails_the_vod_for_a_retry(stages, monkeypatch):
+    _, tmp_path = stages
+
+    def stalled(*a):
+        raise pipeline.subprocess.TimeoutExpired("ffmpeg", 300)
+
+    monkeypatch.setattr(pipeline.render, "render", stalled)
+    with pytest.raises(pipeline.ClipitError, match="every clip failed"):
+        pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=tmp_path)
 
 
 def test_a_review_that_never_happened_is_asked_again(monkeypatch, tmp_path):

@@ -131,6 +131,7 @@ def process_vod(
         tmp.replace(loud_file)
     if sampled:
         msgs = cached_json(chat_file, lambda: closer_chat(info, msgs, np.load(loud_file), dur))
+        sampled.unlink()
     score, loud, rate = moments.signals(dur, np.load(loud_file), msgs)
     windows = moments.windows(score, max(10, n_clips * 3), dur, clipped)
 
@@ -199,8 +200,9 @@ def process_vod(
             except ClipitError as e:  # the stream couldn't be read: the other clips may still work
                 logger.error("render failed for %s: %s", out.name, e)
                 continue
-            except subprocess.TimeoutExpired:  # the rest would stall too: the finished ones are kept for the retry
-                raise ClipitError(f"the stream is stalled: rendering {out.name} timed out, will retry later") from None
+            except subprocess.TimeoutExpired:  # the stream stalled, and the rest would too: keep the clips made so far
+                logger.error("render timed out for %s: skipping the VOD's other clips", out.name)
+                break
         rendered.append(c)
     if not rendered:
         raise ClipitError("every clip failed to render, see the log")
