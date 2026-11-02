@@ -1,9 +1,10 @@
 """Decide which streams to clip and run the pipeline on each one's latest finished VOD, on Twitch and Kick.
 
-An AI searches the web first for who something just happened to, and everyone it finds with a fresh VOD gets clipped,
-however many that is. Then the streamers getting the most clip views today, alternating between sites, then big live
-streamers, up to top_n, and past it until the pass has a good clip, at most EXTRA more VODs. Each VOD is claimed in the
-SQLite catalog before processing, so overlapping runs never double-process and finished VODs are never redone.
+An AI searches the web first for who something just happened to. Then the streamers getting the most clip views today,
+alternating between sites, then big live streamers. A pass goes down that list until it has a clip good enough to post
+and stops there, since a run posts one clip: the ones asked for by name are all clipped, everyone the search found is
+tried whatever top_n says, and past top_n at most EXTRA more VODs. Each VOD is claimed in the SQLite catalog before
+processing, so overlapping runs never double-process and finished VODs are never redone.
 """
 
 import datetime
@@ -130,6 +131,7 @@ def poll(
     runs.progress(what="Searching what's popping off today")
     hot = find_hot(search_ai)
     runs.progress(what="Finding streamers to clip")
+    prioritize = list(prioritize)
     first = list(dict.fromkeys([*prioritize, *hot]))
     clipped = everywhere("top_clipped")
     try:
@@ -143,8 +145,11 @@ def poll(
     if not clipped:
         logger.warning("no clip ranking from any site, going by live viewers")
     for login, _, _, site in picks:
-        is_hot = (site.__name__.rsplit(".", 1)[1], login.lower()) in hot
-        if top_left <= 0 and not is_hot and (good or dry_run or extra_left <= 0):
+        name = (site.__name__.rsplit(".", 1)[1], login.lower())
+        is_hot = name in hot
+        if good and name not in prioritize:
+            continue
+        if top_left <= 0 and not is_hot and (dry_run or extra_left <= 0):
             continue  # not a break: someone the search found may still be further down the list
         try:
             vod = site.latest_vod(login)

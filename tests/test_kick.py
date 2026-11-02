@@ -60,6 +60,27 @@ def test_steady_sampled_chat_scores_flat(monkeypatch):
     assert smoothed.max() < 1.5 * smoothed.min()  # some ripple: 5 messages a page here, ~25 on Kick
 
 
+def test_read_closer_adds_detail_at_the_spots_only_and_keeps_the_rate(monkeypatch):
+    calls = busy_chat(monkeypatch, 600)
+    monkeypatch.setattr(kick, "MAX_PAGES", 30)  # a page every 20 s
+    monkeypatch.setattr(kick, "CLOSE_STEP", 5)
+    sample = kick.fetch_chat(668, START, 600, slice_len=100)
+    calls.clear()
+    got = kick.read_closer(668, START, sample, 600, [100])
+    assert len(calls) <= 24  # a 106 s stretch at one page per 5 s, not the 2000 pages the whole VOD would take
+    near, far = [m for m in got if 47 <= m[0] < 153], [m for m in got if m[0] >= 153]
+    assert far == sorted(m for m in sample if m[0] >= 153)
+    assert len(near) > 2 * len([m for m in sample if 47 <= m[0] < 153])
+    assert 9 < sum(m[2] for m in near) / 106 < 11  # ~10 messages a second, no double counting of the sample
+
+
+def test_read_closer_leaves_chat_it_read_in_full_alone(monkeypatch):
+    calls = []
+    monkeypatch.setattr(kick, "history", lambda channel_id, before: calls.append(before))
+    quiet = [[100.0, "hello"], [130.0, "hi"]]
+    assert kick.read_closer(668, START, quiet, 600, [100]) == quiet and not calls
+
+
 def test_chat_stops_at_the_end_of_the_vod(monkeypatch):
     calls = busy_chat(monkeypatch, 900)  # chat goes on after the stream ended (the channel's history is channel-wide)
     got = kick.fetch_chat(668, START, 550, slice_len=300)  # the second slice ends early, at 550 s

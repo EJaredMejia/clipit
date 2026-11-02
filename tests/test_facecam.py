@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from clipit import facecam
+from clipit.util import ClipitError
 
 
 def test_face_that_stays_put_wins_over_moving_game_faces():
@@ -46,7 +47,18 @@ def test_no_frames_means_no_layout(monkeypatch):
     layouts = [{"face": [114, 358, 83, 83], "box": [0, 0.62, 0.28, 0.35]}]
     assert facecam.pick_layout(layouts, []) is None
     monkeypatch.setattr(facecam, "grab_frames", lambda url, times: [])
-    assert facecam.clip_cam("https://example/v.m3u8", layouts, 0, 30) is None
+    with pytest.raises(ClipitError, match="stalled"):
+        facecam.clip_cam("https://example/v.m3u8", layouts, 0, 30)
+
+
+def test_a_stalled_stream_never_counts_as_no_webcam(monkeypatch):
+    # "no webcam" is cached for the VOD: a stall must fail it for a retry, not blur all its clips.
+    frames = [np.zeros((540, 960), np.uint8)] * 19
+    monkeypatch.setattr(facecam, "grab_frames", lambda url, times: frames)
+    with pytest.raises(ClipitError, match="stalled"):
+        facecam.find_layouts("https://example/v.m3u8", 3600)
+    monkeypatch.setattr(facecam, "grab_frames", lambda url, times: [*frames, frames[0]])
+    assert facecam.find_layouts("https://example/v.m3u8", 3600) == []  # half the frames is enough to look
 
 
 def test_box_snaps_to_overlay_border_despite_chat_and_room_clutter():
@@ -89,7 +101,7 @@ def test_webcam_flush_with_the_frame_edge_is_kept(monkeypatch):
 
     monkeypatch.setattr(facecam, "grab_frames", lambda url, times: frames)
     monkeypatch.setattr(facecam, "detect_faces", lambda fr: [(i, *face) for i in range(len(fr))])
-    (layout,) = facecam.find_layouts("https://example/v.m3u8", 3600)
+    (layout,) = facecam.find_layouts("https://example/v.m3u8", 3600, n=len(frames))
     assert layout["face"] == list(face) and layout["box"] == list(facecam.cam_box(frames, face))
 
 
@@ -99,7 +111,7 @@ def test_no_border_falls_back_to_a_box_around_the_face():
 
 
 def test_clip_face_crops_on_a_person_in_two_frames_and_ignores_small_faces(monkeypatch):
-    monkeypatch.setattr(facecam, "grab_frames", lambda url, times: [])
+    monkeypatch.setattr(facecam, "grab_frames", lambda url, times: ["a frame"])
     boxes = [
         (0, 480, 100, 200, 200),
         (1, 500, 100, 200, 200),

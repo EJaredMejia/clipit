@@ -67,6 +67,17 @@ def get_chat(info: dict) -> list:
         raise ClipitError(f"couldn't fetch chat replay ({type(e).__name__}: {e}), will retry later") from e
 
 
+def closer_chat(info: dict, msgs: list, loud: np.ndarray, dur: float) -> list:
+    """Kick's sampled chat with the best moments so far read closer: those are where its detail changes what gets picked."""
+    log("reading the chat around the best moments")
+    progress("Reading the chat around the best moments")
+    spots = moments.peaks(moments.signals(dur, loud, msgs)[0], kick.CLOSE_SPOTS, kick.CLOSE_SPAN)
+    try:
+        return kick.read_closer(int(info["channel_id"]), float(info["timestamp"]), msgs, dur, spots)
+    except Exception as e:  # like get_chat: fail the VOD so it's retried, rather than make worse clips
+        raise ClipitError(f"couldn't fetch chat replay ({type(e).__name__}: {e}), will retry later") from e
+
+
 def progress(stage: str, done: int | None = None, of: int | None = None) -> None:
     """The stage this VOD is at, for a dashboard run's Run tab, with how far along it is when it's counted."""
     runs.progress(stage=stage, count=[done, of] if of else None)
@@ -98,12 +109,14 @@ def process_vod(
 
     # Audio is only needed to measure loudness and transcribe: a rerun with those cached skips the big download.
     loud_file = work / "loudness.npy"
+    chat_file = work / "chat.json"
+    sampled = work / "chat_sampled.json" if info.get("extractor") == "kick:vod" and not chat_file.exists() else None
     stop = threading.Event()
     progress("Downloading the audio and chat")
     with ThreadPoolExecutor(1) as pool:  # chat and audio both wait on the network: fetch them at the same time
         dl = None if loud_file.exists() else pool.submit(source.download_audio, url, work, stop)
         try:
-            msgs = cached_json(work / "chat.json", lambda: get_chat(info)) or []
+            msgs = cached_json(sampled or chat_file, lambda: get_chat(info)) or []
         except BaseException:
             stop.set()  # don't sit through a multi-GB download just to report the chat error
             raise
@@ -116,6 +129,8 @@ def process_vod(
         tmp = work / "loudness.tmp.npy"
         np.save(tmp, moments.loudness(audio()))
         tmp.replace(loud_file)
+    if sampled:
+        msgs = cached_json(chat_file, lambda: closer_chat(info, msgs, np.load(loud_file), dur))
     score, loud, rate = moments.signals(dur, np.load(loud_file), msgs)
     windows = moments.windows(score, max(10, n_clips * 3), dur, clipped)
 
@@ -184,9 +199,8 @@ def process_vod(
             except ClipitError as e:  # the stream couldn't be read: the other clips may still work
                 logger.error("render failed for %s: %s", out.name, e)
                 continue
-            except subprocess.TimeoutExpired:
-                logger.error("render timed out for %s", out.name)
-                continue
+            except subprocess.TimeoutExpired:  # the rest would stall too: the finished ones are kept for the retry
+                raise ClipitError(f"the stream is stalled: rendering {out.name} timed out, will retry later") from None
         rendered.append(c)
     if not rendered:
         raise ClipitError("every clip failed to render, see the log")

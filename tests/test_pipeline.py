@@ -252,6 +252,52 @@ def test_one_clip_whose_stream_cant_be_read_doesnt_lose_the_vod(stages, monkeypa
     assert [c["hook"] for c in clips] == ["ok"]
 
 
+def test_a_stalled_render_stops_the_vod_and_keeps_finished_clips_for_the_retry(stages, monkeypatch):
+    _, tmp_path = stages
+    tried = []
+
+    def stalled(urls, clip, words, out, cam):
+        tried.append(clip["hook"])
+        if clip["hook"] == "b":
+            raise pipeline.subprocess.TimeoutExpired("ffmpeg", 300)
+        out.write_bytes(b"mp4")
+
+    def three(cmd, info, cands, n, work):
+        base = {"title": "t", "description": "d", "hashtags": ["a"], "trend": "", "sound": "", "score": 6.0, "why": ""}
+        s = cands[0]["start"]
+        return [{**base, "start": s + i, "end": s + 20.0 + i, "hook": h} for i, h in enumerate("abc")]
+
+    monkeypatch.setattr(pipeline.ai, "pick_clips", three)
+    monkeypatch.setattr(pipeline.render, "render", stalled)
+    with pytest.raises(pipeline.ClipitError, match="stalled"):
+        pipeline.process_vod("https://example/vod", n_clips=3, ai_cmd="ai", out_root=tmp_path)
+    assert tried == ["a", "b"]  # c would have stalled for as long
+    monkeypatch.setattr(
+        pipeline.render, "render", lambda urls, clip, words, out, cam: tried.append(clip["hook"]) or out.write_bytes(b"m")
+    )
+    _, clips = pipeline.process_vod("https://example/vod", n_clips=3, ai_cmd="ai", out_root=tmp_path)
+    assert len(clips) == 3 and tried == ["a", "b", "b", "c"]  # a's video wasn't made again
+
+
+def test_kick_chat_is_read_closer_at_the_loud_moments_once(stages, monkeypatch):
+    _, tmp_path = stages
+    kick_vod = {"id": "k1", "duration": 600.0, "extractor": "kick:vod", "channel_id": "7", "timestamp": 1000.0}
+    closer = []
+
+    def read_closer(channel_id, start, chat, duration, spots):
+        closer.append((channel_id, start, spots))
+        return [*chat, [spots[0], "close", 1.0]]
+
+    monkeypatch.setattr(pipeline.source, "fetch_info", lambda url: kick_vod)
+    monkeypatch.setattr(pipeline.kick, "fetch_chat", lambda *a: [[10.0, "sampled"]])
+    monkeypatch.setattr(pipeline.kick, "read_closer", read_closer)
+    work, _ = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=tmp_path)
+    assert len(closer) == 1 and closer[0][:2] == (7, 1000.0) and any(298 <= t <= 302 for t in closer[0][2])  # the loud second
+    assert json.loads((work / "chat.json").read_text())[-1][1] == "close"  # the file a re-edit reads has the detail
+    pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=tmp_path)
+    assert len(closer) == 1
+
+
 def test_a_review_that_never_happened_is_asked_again(monkeypatch, tmp_path):
     answers = [["review: failed"], []]
     monkeypatch.setattr(pipeline.render, "sheets", lambda *a: [])

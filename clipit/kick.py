@@ -21,7 +21,9 @@ UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"  # Kick answers 403 to urllib's
 PAGES = 5  # 100 live streams a page, most viewers first: 5 pages reach down to the smaller streamers
 CLIP_PAGES = 5  # 20 clips a page, most viewed first: by page 5 they are down to ~80 views
 MIN_FOLLOWERS = 100_000  # a clip can blow up on a nobody: seen 19,000 views for a channel of 1,023 followers
-MAX_PAGES = 1500  # chat pages per VOD: ~19 min at GAP, alongside the audio download
+MAX_PAGES = 300  # chat pages to sample a VOD: ~4 min at GAP, alongside the audio download
+CLOSE_SPOTS, CLOSE_SPAN, CLOSE_STEP = 40, 106, 15  # read_closer: ~280 more pages, ~4 min. Replaying 10 VODs' chat, this
+# found as many of the good clips as 1500 pages spread evenly (20 of 38 against 19), in half the requests
 GAP = 0.75  # seconds between requests: Kick answered 429 after 182 requests at ~2.2/s, and held 400 at 1.3/s
 _turn = threading.Lock()
 _next = 0.0
@@ -138,38 +140,53 @@ def history(channel_id: int, before: int) -> dict:
     return get(f"https://web.kick.com/api/v1/chat/{channel_id}/history?cursor={before}")["data"]
 
 
-def fetch_chat(channel_id: int, start: float, duration: float, slice_len: int = 300) -> list[list]:
-    """Chat for a VOD that started at `start` (epoch seconds) as [offset_seconds, text], in parallel slices.
+def read_chat(channel_id: int, start: float, a: float, end: float, step: float) -> list[list]:
+    """The VOD's chat from second a to end. Where a page covers less than step seconds, the rest of that step is skipped:
+    its messages are spread evenly over the step they stand for (steady chat stays a steady rate, not spikes at each
+    page) and get a third field, the weight that keeps the rate right: [offset, text, weight]."""
+    out, seen = [], set()
+    cursor = int((start + end) * 1e6)
+    while cursor > (start + a) * 1e6:  # pages go back in time: stop once one reaches the start
+        d = history(channel_id, cursor)
+        nxt = int(d.get("cursor") or 0)  # the oldest message's time; 0 at the start of the channel's chat
+        if not d["messages"] or nxt >= cursor:
+            break
+        page = []
+        for m in d["messages"]:
+            t = datetime.datetime.fromisoformat(m["created_at"]).timestamp() - start
+            if m["id"] not in seen and a <= t < end and m.get("content"):
+                seen.add(m["id"])
+                page.append([t, text(m["content"])])
+        hi, covered = cursor / 1e6 - start, (cursor - nxt) / 1e6
+        if covered < step and page:  # sampled: this page stands for [lo, hi)
+            lo = max(a, hi - step)
+            w = (hi - lo) / len(page)
+            page = [[lo + (i + 0.5) * w, msg, (hi - lo) / covered] for i, (_, msg) in enumerate(sorted(page))]
+        out += page
+        cursor = min(nxt, cursor - int(step * 1e6))
+    return out
 
-    A page holds only ~25 messages, about 1 s of a big streamer's chat (Adin Ross: 3.5 h of requests for 5 h of VOD).
-    So at most MAX_PAGES pages are read: where a page covers less than `step` seconds, the rest of that step is skipped.
-    Its messages are then spread evenly over the step they stand for (steady chat stays a steady rate, not spikes at each
-    page) and get a third field, the weight that keeps the rate right: [offset, text, weight].
+
+def fetch_chat(channel_id: int, start: float, duration: float, slice_len: int = 300) -> list[list]:
+    """A sample of a VOD's chat as [offset_seconds, text], in parallel slices, read_chat's weights where it skipped.
+
+    A page holds only ~25 messages, about 1 s of a big streamer's chat (Adin Ross: 3.5 h of requests for 5 h of VOD),
+    and Kick's rate limit makes each cost GAP seconds, so at most MAX_PAGES pages are read. read_closer then adds detail
+    where it counts, once loudness says where to look.
     """
     step = max(1.0, duration / MAX_PAGES)  # seconds of VOD one page may stand for
-
-    def one_slice(a):
-        out, seen, end = [], set(), min(a + slice_len, duration)
-        cursor = int((start + end) * 1e6)
-        while cursor > (start + a) * 1e6:  # pages go back in time: stop once one reaches the slice start
-            d = history(channel_id, cursor)
-            nxt = int(d.get("cursor") or 0)  # the oldest message's time; 0 at the start of the channel's chat
-            if not d["messages"] or nxt >= cursor:
-                break
-            page = []
-            for m in d["messages"]:
-                t = datetime.datetime.fromisoformat(m["created_at"]).timestamp() - start
-                if m["id"] not in seen and a <= t < end and m.get("content"):
-                    seen.add(m["id"])
-                    page.append([t, text(m["content"])])
-            hi, covered = cursor / 1e6 - start, (cursor - nxt) / 1e6
-            if covered < step and page:  # sampled: this page stands for [lo, hi)
-                lo = max(a, hi - step)
-                w = (hi - lo) / len(page)
-                page = [[lo + (i + 0.5) * w, msg, (hi - lo) / covered] for i, (_, msg) in enumerate(sorted(page))]
-            out += page
-            cursor = min(nxt, cursor - int(step * 1e6))
-        return out
-
+    slices = [(a, min(a + slice_len, duration)) for a in range(0, math.ceil(duration), slice_len)]
     with ThreadPoolExecutor(4) as ex:  # wait_turn sets the pace; threads only overlap request latency
-        return [m for part in ex.map(one_slice, range(0, math.ceil(duration), slice_len)) for m in part]
+        return [m for part in ex.map(lambda s: read_chat(channel_id, start, s[0], s[1], step), slices) for m in part]
+
+
+def read_closer(channel_id: int, start: float, chat: list[list], duration: float, spots: list[int]) -> list[list]:
+    """chat (fetch_chat's sample) with the stretches around spots, the seconds moments would be picked at, read closer.
+    A stretch the sample read in full is left alone. Spots must be CLOSE_SPAN apart."""
+    step = min(CLOSE_STEP, max(1.0, duration / MAX_PAGES))
+    spans = [(max(0, t - CLOSE_SPAN / 2), min(duration, t + CLOSE_SPAN / 2)) for t in spots]
+    spans = [(a, b) for a, b in spans if any(len(m) > 2 and a <= m[0] < b for m in chat)]
+    with ThreadPoolExecutor(4) as ex:
+        closer = list(ex.map(lambda s: read_chat(channel_id, start, s[0], s[1], step), spans))
+    kept = [m for m in chat if not any(a <= m[0] < b for a, b in spans)]
+    return sorted([*kept, *(m for part in closer for m in part)], key=lambda m: m[0])
