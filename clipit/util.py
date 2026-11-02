@@ -51,7 +51,7 @@ EXPLICIT = re.compile(
 
 
 def filter_words(s: str) -> str:
-    """Text for the screen or a post with slurs (n****) and explicit words (b**bs) starred out. The clip's audio keeps
+    """Text for the screen or a post with slurs (n****) and explicit words (b***s) starred out. The clip's audio keeps
     them: the user chose text only, and explicit titles risk an age limit on YouTube."""
     s = SLURS.sub(lambda m: m[0][0] + "*" * (len(m[0]) - 1), s)
     return EXPLICIT.sub(lambda m: m[0][0] + "*" * (len(m[0]) - 2) + m[0][-1], s)

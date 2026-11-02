@@ -245,7 +245,7 @@ def review(
 def remade(
     url: str, layouts: list, words: list, cands: list[dict], dur: float, work: Path, clip: dict, peak: float, end: float
 ) -> bool:
-    """Render the clip again around the peak its reviewer saw, in place of the old video. False leaves it as it was."""
+    """Render the clip again around the peak its reviewer saw. False leaves it as it was."""
     cut = ai.recut(clip, peak, end, cands, dur)
     if not cut:
         return False
@@ -257,8 +257,7 @@ def remade(
     except (subprocess.SubprocessError, ClipitError) as e:
         logger.warning("couldn't cut %s again: %s", clip["file"], e)
         return False
-    (work / clip["file"]).unlink(missing_ok=True)
-    clip.update(new)
+    clip.update(new)  # the old video stays: a clip the user kept may still point at it
     return True
 
 
@@ -298,9 +297,9 @@ def webcam_layouts(work: Path, urls: list[str], dur: float) -> list:
 def render_clip(urls: list[str], layouts: list, c: dict, words: list, out: Path) -> None:
     """Render one clip, captioned with the words said in it."""
     cam = facecam.clip_cam(urls[0], layouts, c["start"], c["end"])  # streamers switch scene layouts mid-stream
-    edit = c.get("edit") or {}
-    if not cam and "layout" not in edit and (face := facecam.clip_face(urls[0], c["start"], c["end"])) is not None:
-        c = {**c, "edit": {**edit, "layout": "crop", "focus": face}}  # a person filling the shot fills the phone too
+    edited = c.get("edit") or {}
+    if not cam and "layout" not in edited and (face := facecam.clip_face(urls[0], c["start"], c["end"])) is not None:
+        c = {**c, "edit": {**edited, "layout": "crop", "focus": face}}  # a person filling the shot fills the phone too
     how = "facecam on top" if cam else "cropped on the face" if (c.get("edit") or {}).get("layout") == "crop" else "blurred fill"
     log(f"rendering {out.name} ({c['end'] - c['start']:.0f}s, {how})")
     render.render(urls, c, [w for w in words if c["start"] - 0.05 <= w[0] and w[1] <= c["end"] + 0.3], out, cam)

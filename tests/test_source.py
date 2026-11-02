@@ -51,10 +51,10 @@ def test_fragments_follows_nothing_outside_the_stream():
 
 
 def test_inputs_joins_a_fragmented_clip_into_one_local_file(monkeypatch):
-    def fake_fetch(url, path=None):
-        if path is None:
+    def fake_fetch(url, to=None):
+        if to is None:
             return FRAGMENTED
-        path.write_bytes(url.rsplit("/", 1)[1].encode())
+        to.write(url.rsplit("/", 1)[1].encode())
         return ""
 
     monkeypatch.setattr(source, "fetch", fake_fetch)

@@ -337,3 +337,9 @@ def test_recut_leaves_a_clip_already_cut_there():
 
 def test_a_hashtag_with_a_filtered_word_is_dropped():
     assert ai.hashtags(["cosplay", "boobs"]) == ["cosplay"]
+
+
+def test_recut_stops_where_the_words_stop():
+    said = [{"start": 100, "end": 120, "segments": []}]
+    assert ai.recut({"start": 90.0, "end": 120.0}, 14.0, 15.0, said, 5000.0) == (101.0, 116.0)
+    assert ai.recut({"start": 100.0, "end": 120.0}, 15.0, 18.0, said, 5000.0) is None  # 15 s from 112 would pass 120

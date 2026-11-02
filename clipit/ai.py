@@ -103,6 +103,7 @@ CHECKS = {
     "in-game comedy, roleplay bits, characters joking in a game, and sitting still talking over a screen or a video call.",
     "share": "A 19 year old would comment on it or send it to a friend, even if only to say what the hell is this. "
     "Mildly amusing fails.",
+    "minors": "Nobody who is or might be under 18 is shown in a sexual or body-focused way. Any doubt fails.",
     "honest": "The on-screen hook matches what's going on. The danger it names may stay off camera, but it must be real.",
 }
 VETO_PROMPT = """You watch YouTube Shorts all day: 19 years old, thumb on the screen, a hundred other videos waiting.
@@ -401,7 +402,8 @@ def recut(clip: dict, peak: float, end: float, cands: list[dict], duration: floa
     said = spoken_in(cands, at - OPEN - SNAP, stop + SNAP)
     s = max(0.0, nearest(at - OPEN, [g["start"] for g in said if at - OPEN <= g["start"] <= at]))  # never back into the slow part
     e = nearest(stop, [g["end"] for g in said if g["end"] >= at])
-    s, e = round(s, 1), round(min(duration, max(e, s + CLIP_LEN[0])), 1)
+    words_end = max((c["end"] for c in cands if c["start"] <= at <= c["end"]), default=duration)  # no captions past it
+    s, e = round(s, 1), round(min(duration, words_end, max(e, s + CLIP_LEN[0])), 1)
     return None if abs(s - clip["start"]) < 1 and abs(e - clip["end"]) < 1 or e - s < CLIP_LEN[0] else (s, e)
 
 

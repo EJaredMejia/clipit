@@ -13,6 +13,7 @@ import urllib.request
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import BinaryIO
 
 from clipit.util import REMOTE, ClipitError, log, sh, ytdlp
 
@@ -65,14 +66,13 @@ def stream_urls(url: str) -> list[str]:
     return sh(ytdlp("-g", "-f", "bv*[height<=1080]+ba/b[height<=1080]/b", url), timeout=120).stdout.split()
 
 
-def fetch(url: str, path: Path | None = None) -> str:
-    """One playlist (returned) or stream segment (saved to path)."""
+def fetch(url: str, to: BinaryIO | None = None) -> str:
+    """One playlist (returned) or stream segment (written to the open file to)."""
     try:
         with urllib.request.urlopen(url, timeout=SEGMENT_TIMEOUT) as r:
-            if not path:
+            if not to:
                 return r.read().decode("utf-8")
-            with path.open("wb") as f:
-                shutil.copyfileobj(r, f)
+            shutil.copyfileobj(r, to)
             return ""
     except (OSError, UnicodeDecodeError) as e:  # URLError and timeouts are OSErrors
         raise ClipitError(f"couldn't read the stream: {e}") from e
@@ -121,10 +121,7 @@ def inputs(urls: list[str], start: float, length: float) -> Iterator[list[str]]:
                 continue
             part = Path(tmp) / f"{i}.mp4"
             with part.open("wb") as out:
-                for n, segment in enumerate(found[0]):
-                    piece = Path(tmp) / f"{i}-{n}"
-                    fetch(segment, piece)
-                    out.write(piece.read_bytes())
-                    piece.unlink()
+                for segment in found[0]:
+                    fetch(segment, out)
             args += ["-ss", f"{found[1]:.2f}", "-t", f"{length:.2f}", "-i", str(part)]
         yield args

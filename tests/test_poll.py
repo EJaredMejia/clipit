@@ -226,6 +226,13 @@ def test_everyone_the_search_finds_is_clipped_whatever_top_n_says(world, monkeyp
     assert calls == ["v5", "v4"]  # both found, with a slot for one; big1 waits as the pass has its good clip
 
 
+def test_a_full_pass_still_reaches_someone_the_search_found_further_down(world, monkeypatch):
+    conn, calls, out = world
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned")])
+    poll.poll(conn, top_n=1, out_root=out, search_ai="search", prioritize=[("twitch", "big1"), ("twitch", "s1")])
+    assert calls == ["v1", "v5"]  # s1 is past the quota, but s2 was found by the search
+
+
 def test_a_failed_search_still_clips_by_the_ranking(world, monkeypatch):
     conn, calls, out = world
 

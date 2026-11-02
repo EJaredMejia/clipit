@@ -145,7 +145,7 @@ def poll(
     for login, _, _, site in picks:
         is_hot = (site.__name__.rsplit(".", 1)[1], login.lower()) in hot
         if top_left <= 0 and not is_hot and (good or dry_run or extra_left <= 0):
-            break
+            continue  # not a break: someone the search found may still be further down the list
         try:
             vod = site.latest_vod(login)
             if not vod or now - ended(vod) > MAX_AGE:

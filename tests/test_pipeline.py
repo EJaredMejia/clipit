@@ -309,4 +309,4 @@ def test_remade_swaps_the_video_and_the_times(monkeypatch, tmp_path):
     clip = {"idx": 1, "title": "t", "start": 100.0, "end": 130.0, "file": "old.mp4"}
     assert pipeline.remade("url", [], [], [], 5000.0, tmp_path, clip, 12.0, 28.0)
     assert clip["start"] == 109.0 and clip["file"] != "old.mp4"
-    assert (tmp_path / clip["file"]).exists() and not (tmp_path / "old.mp4").exists()
+    assert (tmp_path / clip["file"]).exists() and (tmp_path / "old.mp4").exists()  # a kept clip may point at the old one
