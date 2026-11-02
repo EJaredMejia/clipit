@@ -179,6 +179,11 @@ MIGRATIONS = [
     """
     ALTER TABLE vods ADD COLUMN run_id INTEGER;
     """,
+    # Clips scored before a reviewer had to watch them (pipeline.review): the bar now means reviewed, so they go to the
+    # user instead of posting alone.
+    """
+    UPDATE clips SET score = 7.0 WHERE score >= 8 AND verdict IS NULL;
+    """,
 ]
 TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")

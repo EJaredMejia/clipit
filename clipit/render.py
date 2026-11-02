@@ -2,13 +2,16 @@
 
 import os
 import re
+import subprocess
 from collections.abc import Collection
 from pathlib import Path
 
+from clipit import source
 from clipit.facecam import TOP
-from clipit.util import REMOTE, mmss, sh, write_atomic
+from clipit.util import filter_words, mmss, sh, write_atomic
 
 RENDER_TIMEOUT = 1800
+MIN_RENDER = 1024  # bytes: an mp4 with no frames is about 260
 # Posting policy includes the creators historically associated with FaZe, regardless of later roster changes.
 FAZE_STREAMERS = frozenset(
     {
@@ -72,7 +75,7 @@ def make_ass(
 
     def esc(s):
         s = re.sub("[\U0001f000-\U0001ffff☀-➿️]", "", s)  # emoji render as boxes in libass
-        s = re.sub(r"\s+", " ", s)[:120]  # a newline would end the Dialogue line and let text forge new ones
+        s = re.sub(r"\s+", " ", filter_words(s))[:120]  # a newline would end the Dialogue line and let text forge new ones
         return s.replace("\\", "/").replace("{", "(").replace("}", ")").upper().strip()
 
     ev = [f"Dialogue: 0,{t(0)},{t(dur)},Hook,,0,0,0,,{{\\pos(540,{hook_y})}}{esc(hook)}"] if hook and esc(hook) else []
@@ -114,6 +117,7 @@ SFX = {
 LOUDNORM = "loudnorm=I=-14:TP=-1.5"
 # webcam over gameplay, the webcam alone, one full-screen 9:16 crop, the whole frame on a blur
 LAYOUTS = ("split", "cam", "crop", "fill")
+SHEET, SHEET_FPS = (6, 3), 2  # a contact sheet's columns and rows, and frames of each second: 9 s a sheet, faces still legible
 STEREO = "aformat=sample_rates=48000:channel_layouts=stereo"
 
 
@@ -156,11 +160,21 @@ def frames(video: Path, times: list[float], folder: Path) -> list[tuple[float, P
     return out
 
 
+def sheets(video: Path, folder: Path) -> list[tuple[float, Path]]:
+    """The whole clip as contact sheets, sheet01.jpg... in folder, with the second each starts at: AI CLIs take pictures,
+    not video, so SHEET_FPS frames of every second is how one watches a clip, motion included."""
+    cols, rows = SHEET
+    vf = f"fps={SHEET_FPS},scale=240:-2,tile={cols}x{rows}"
+    sh(["ffmpeg", "-v", "error", "-y", "-i", str(video), "-vf", vf, "-q:v", "4", str(folder / "sheet%02d.jpg")], timeout=120)
+    return [(i * cols * rows / SHEET_FPS, p) for i, p in enumerate(sorted(folder.glob("sheet*.jpg")))]
+
+
 def source_frame(url: str, t: float, path: Path) -> None:
     """The stream itself at VOD second t, before any layout, with a line every 10% of its width: what the edit's
     focus is measured on."""
     vf = "scale=960:-2,drawgrid=w=iw/10:h=ih:t=2:c=yellow@0.8"
-    sh(["ffmpeg", "-v", "error", "-y", *REMOTE, "-ss", f"{t:.2f}", "-i", url, "-frames:v", "1", "-vf", vf, str(path)], 120)
+    with source.inputs([url], t, 1) as stream:
+        sh(["ffmpeg", "-v", "error", "-y", *stream, "-frames:v", "1", "-vf", vf, str(path)], 120)
 
 
 def centered(at: str, lo: str, hi: str) -> str:
@@ -170,7 +184,8 @@ def centered(at: str, lo: str, hi: str) -> str:
 
 def render(urls: list[str], clip: dict, words: list, out: Path, cam: list[float] | None = None) -> None:
     """Seek straight into the remote stream and render 1080x1920 with captions, in the edit's layout (LAYOUTS), by
-    default facecam on top + gameplay below, or blurred fill + full frame when there's no facecam. The edit's focus
+    default facecam on top + gameplay below, or blurred fill + full frame when there's no facecam (pipeline.render_clip
+    crops on a person filling the shot instead). The edit's focus
     (0-1, default the middle) is the middle of what to keep across the stream (across the webcam box for cam): the
     gameplay panel or the full-screen crop is centered on it, as far as the frame allows."""
     s, d = clip["start"], clip["end"] - clip["start"]
@@ -201,7 +216,7 @@ def render(urls: list[str], clip: dict, words: list, out: Path, cam: list[float]
             "scale=1080:1920,eq=brightness=-0.12[bg];[b]scale=1080:-2[fg];[bg][fg]overlay=0:(H-h)/2"
         )
         hook_y, cap_y = 540, 1400
-    pops, emphasis = (edit["texts"], edit["emphasis"]) if edit else ([], [])
+    pops, emphasis = (edit or {}).get("texts", []), (edit or {}).get("emphasis", [])
     ass.write_text(make_ass(clip.get("hook", ""), words, s, d, hook_y, cap_y, pops, emphasis), encoding="utf-8")
     subs = f"subtitles={ass.name}"  # relative name: avoids Windows path escaping
     if edit:  # a high-effort clip: its edit mixes the sound in the graph too
@@ -210,38 +225,40 @@ def render(urls: list[str], clip: dict, words: list, out: Path, cam: list[float]
     else:
         graph += f",{subs}[v]"
         audio = ["-map", f"{len(urls) - 1}:a", "-af", LOUDNORM]
-    inputs = [arg for u in urls for arg in (*REMOTE, "-ss", f"{s:.2f}", "-t", f"{d:.2f}", "-i", u)]
     tmp = out.with_name(out.stem + ".tmp.mp4")
     try:
-        sh(
-            [
-                "ffmpeg",
-                "-v",
-                "error",
-                "-y",
-                *inputs,
-                "-filter_complex",
-                graph,
-                "-map",
-                "[v]",
-                *audio,
-                "-c:v",
-                "libx264",
-                "-preset",
-                "veryfast",
-                "-crf",
-                "20",
-                "-c:a",
-                "aac",
-                "-b:a",
-                "160k",
-                "-movflags",
-                "+faststart",
-                tmp.name,
-            ],
-            timeout=RENDER_TIMEOUT,
-            cwd=out.parent,
-        )
+        with source.inputs(urls, s, d) as inputs:
+            sh(
+                [
+                    "ffmpeg",
+                    "-v",
+                    "error",
+                    "-y",
+                    *inputs,
+                    "-filter_complex",
+                    graph,
+                    "-map",
+                    "[v]",
+                    *audio,
+                    "-c:v",
+                    "libx264",
+                    "-preset",
+                    "veryfast",
+                    "-crf",
+                    "20",
+                    "-c:a",
+                    "aac",
+                    "-b:a",
+                    "160k",
+                    "-movflags",
+                    "+faststart",
+                    tmp.name,
+                ],
+                timeout=RENDER_TIMEOUT,
+                cwd=out.parent,
+            )
+        if tmp.stat().st_size < MIN_RENDER:  # a stream that gives no frames still exits 0
+            raise subprocess.CalledProcessError(1, "ffmpeg", stderr=f"{tmp.name} has no video")
         os.replace(tmp, out)
     finally:
         ass.unlink(missing_ok=True)

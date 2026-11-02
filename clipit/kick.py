@@ -118,6 +118,12 @@ def latest_vod(slug: str) -> dict | None:
     }
 
 
+def clip_moments(slug: str, vod: dict) -> list[tuple[int, int]]:
+    """Where in this VOD people clipped. shortcut: none yet, Kick's clips give no VOD offset, it has to be worked out from
+    the playlist's timestamps; until then Kick VODs go by chat and loudness only."""
+    return []
+
+
 def vod_ref(slug: str, vod: dict) -> tuple[str, str]:
     """(catalog id, URL): the id is yt-dlp's, so it matches the pipeline's out/<id>/ folder."""
     return vod["id"], f"https://kick.com/{check_slug(slug)}/videos/{vod['id']}"

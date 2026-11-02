@@ -54,6 +54,12 @@ def main() -> None:
         "Give custom commands no tools: prompts contain text from strangers. Default: Claude Code, then Codex if installed.",
     )
     ap.add_argument(
+        "--search-ai",
+        default=ai.default_search_ai(),
+        help="--poll: 'codex' or a command with web search that finds who's popping off today "
+        "(default: Claude Code, then Codex). Give it no tools but web search",
+    )
+    ap.add_argument(
         "--high-effort",
         action="store_true",
         help=f"much more AI effort per clip scored {db.AUTO_SCORE}+: the AI edits it (jump cuts, zooms, sound effects, "
@@ -171,6 +177,7 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
             a.dry_run,
             a.out,
             prioritize=[(site, name) for site, name in (p.split(":", 1) for p in a.prioritize)],
+            search_ai=a.search_ai,
             n_clips=a.clips,
             ai_cmd=a.ai,
             whisper=a.whisper,
