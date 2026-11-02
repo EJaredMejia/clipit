@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from clipit import codex, db
-from clipit.util import ClipitError, logger, no_slurs, write_atomic
+from clipit.util import ClipitError, filter_words, logger, write_atomic
 
 AI_TIMEOUT = 900
 # Field caps match what the platforms accept (Shorts titles: 100). The description leaves room in TikTok's 2,200-char
@@ -61,6 +61,8 @@ Pick up to {n} clips most likely to go viral, or none if nothing here would stop
   the game or place), not a feeling. Lead with the most dramatic true fact; a scare that turns out false is still
   the hook.
   Good: "xQc thinks his PC died mid-tournament". Bad: "he thought it was over" (over how? who?).
+- Text stays suggestive, never explicit, however racy the clip: tease the outfit or the reaction, never name body parts
+  or sex acts. Good: "Divvity's blueberry cosplay goes too far". Bad: anything a parent would call porn in a title.
 - Score each clip 1-10 by how strangers scrolling past would react, not how this streamer's own chat reacted.
   Be harsh: a low score is useful, it is how we learn what works, so give the honest number and say in "why" what
   holds the clip back.
@@ -349,7 +351,8 @@ def hashtags(value: object) -> list[str]:
     tags: list[str] = []
     for w in words:
         tag = str(w).strip().lstrip("#")
-        if re.fullmatch(r"\w{1,30}", tag) and tag.lower() not in {t.lower() for t in tags}:
+        clean = filter_words(tag) == tag  # a star can't go in a hashtag, so a filtered word loses the whole tag
+        if clean and re.fullmatch(r"\w{1,30}", tag) and tag.lower() not in {t.lower() for t in tags}:
             tags.append(tag)
     return tags[:MAX_HASHTAGS]
 
@@ -370,7 +373,7 @@ def clean(clips: object, duration: float, n: int) -> list[dict]:
             logger.warning("AI picked a %.0f s clip at %.0f s, trimming to %d s", e - s, s, CLIP_LEN[1])
             e = s + CLIP_LEN[1]
         if e - s >= CLIP_LEN[0]:
-            text = {k: no_slurs(str(c.get(k) or "")).strip()[:cap] for k, cap in TEXT_FIELDS.items()}
+            text = {k: filter_words(str(c.get(k) or "")).strip()[:cap] for k, cap in TEXT_FIELDS.items()}
             out.append({**text, "hashtags": hashtags(c.get("hashtags")), "start": s, "end": e, "score": score})
             if isinstance(c.get("peak"), int | float):
                 out[-1]["peak"] = float(c["peak"])

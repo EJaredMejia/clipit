@@ -333,3 +333,7 @@ def test_recut_keeps_a_full_clip_and_stays_inside_the_vod():
 
 def test_recut_leaves_a_clip_already_cut_there():
     assert ai.recut({"start": 100.0, "end": 130.0}, 3.0, 30.0, [], 5000.0) is None
+
+
+def test_a_hashtag_with_a_filtered_word_is_dropped():
+    assert ai.hashtags(["cosplay", "boobs"]) == ["cosplay"]

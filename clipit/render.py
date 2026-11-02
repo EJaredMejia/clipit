@@ -8,7 +8,7 @@ from pathlib import Path
 
 from clipit import source
 from clipit.facecam import TOP
-from clipit.util import mmss, no_slurs, sh, write_atomic
+from clipit.util import filter_words, mmss, sh, write_atomic
 
 RENDER_TIMEOUT = 1800
 MIN_RENDER = 1024  # bytes: an mp4 with no frames is about 260
@@ -75,7 +75,7 @@ def make_ass(
 
     def esc(s):
         s = re.sub("[\U0001f000-\U0001ffff☀-➿️]", "", s)  # emoji render as boxes in libass
-        s = re.sub(r"\s+", " ", no_slurs(s))[:120]  # a newline would end the Dialogue line and let text forge new ones
+        s = re.sub(r"\s+", " ", filter_words(s))[:120]  # a newline would end the Dialogue line and let text forge new ones
         return s.replace("\\", "/").replace("{", "(").replace("}", ")").upper().strip()
 
     ev = [f"Dialogue: 0,{t(0)},{t(dur)},Hook,,0,0,0,,{{\\pos(540,{hook_y})}}{esc(hook)}"] if hook and esc(hook) else []

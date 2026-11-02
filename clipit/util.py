@@ -43,9 +43,18 @@ def write_atomic(path: Path, data: str | bytes) -> None:
 SLURS = re.compile(r"\b(?:n[i1]gg\w*|f[a4]gg?\w*|retard\w*|k[iy]ke\w*|chink\w*|spics?|tranny|trannies)\b", re.IGNORECASE)
 
 
-def no_slurs(s: str) -> str:
-    """Text for the screen or a post with slurs starred out. The clip's audio keeps them: the user chose text only."""
-    return SLURS.sub(lambda m: m[0][0] + "*" * (len(m[0]) - 1), s)
+EXPLICIT = re.compile(
+    r"\b(?:boob(?:s|ies)?|tits?|titt(?:y|ies)|nipples?|nips?|penis(?:es)?|dicks?|cocks?|puss(?:y|ies)|vaginas?|cum|porn\w*|"
+    r"nudes?|naked|horny)\b",
+    re.IGNORECASE,
+)
+
+
+def filter_words(s: str) -> str:
+    """Text for the screen or a post with slurs (n****) and explicit words (b**bs) starred out. The clip's audio keeps
+    them: the user chose text only, and explicit titles risk an age limit on YouTube."""
+    s = SLURS.sub(lambda m: m[0][0] + "*" * (len(m[0]) - 1), s)
+    return EXPLICIT.sub(lambda m: m[0][0] + "*" * (len(m[0]) - 2) + m[0][-1], s)
 
 
 def slug(s: str) -> str:

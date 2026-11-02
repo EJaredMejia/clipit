@@ -178,3 +178,8 @@ def test_captions_and_the_hook_star_out_slurs_but_keep_ordinary_words():
     ass = render.make_ass("what a faggot", [(0.0, 0.5, "niggas"), (0.5, 1.0, "bigger")], 0.0, 2.0, 100, 900)
     assert "F*****" in ass and "N*****" in ass and "BIGGER" in ass
     assert "NIGGAS" not in ass.upper().replace("N*****", "")
+
+
+def test_explicit_words_keep_both_ends_and_innocent_words_stay():
+    ass = render.make_ass("giant boobs", [(0.0, 0.5, "nipple"), (0.5, 1.0, "title"), (1.0, 1.5, "scum")], 0.0, 2.0, 100, 900)
+    assert "B***S" in ass and "N****E" in ass and "TITLE" in ass and "SCUM" in ass

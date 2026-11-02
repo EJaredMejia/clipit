@@ -165,7 +165,8 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
   `web/src/safety.test.ts` fails on them), links only http(s) URLs (`safeUrl`), and its server only answers its own
   page (Host and Origin checks, JSON-only writes, no inline scripts under its CSP). The dev server's proxy vouches for
   the dev page's Origin only (`web/vite.config.ts`); never loosen the Origin check in `dashboard.py` for it.
-- Slurs are starred out of captions, the hook and post text (`util.no_slurs`). The clip's audio keeps them: the user's call.
+- Slurs and explicit words are starred out of captions, the hook and post text, and a hashtag with one is dropped
+  (`util.filter_words`): n****, b**bs. The clip's audio keeps them: the user's call. Racy clips are fine, explicit text isn't.
 - Post text credits the streamer from yt-dlp's checked Twitch or Kick login (`pipeline.streamer`), added in code by
   `render.post_texts`: the AI is told not to write links or @mentions.
 
