@@ -6,9 +6,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from clipit.util import REMOTE
+from clipit import source
+from clipit.util import ClipitError
 
 TOP = (1080, 768)  # facecam panel in the 1080x1920 split layout, gameplay gets the rest
+MIN_SHOT_FACE = 0.15 * 960  # px wide in a 960 px frame: smaller is an overlay webcam, or someone far off or in a game
 
 
 def edge(profile: np.ndarray, lo: int, hi: int, fallback: int) -> int:
@@ -36,7 +38,7 @@ def cam_faces(boxes: list, n_frames: int, width: int = 960) -> list[tuple[np.nda
         if len(frames) < max(3, n_frames // 8):  # game faces move; a layout used <1/8 of the stream isn't worth it
             break
         face = np.median([b[1:] for b in group], 0)
-        if face[2] <= 0.15 * width:  # a huge face is a full-screen camera scene, not an overlay
+        if face[2] <= MIN_SHOT_FACE * width / 960:  # a huge face is a full-screen camera scene, not an overlay
             found.append((face, frames))
         left = [b for b in left if b not in group]
     return found
@@ -85,28 +87,14 @@ def grab_frames(url: str, times: Iterable[float]) -> list[np.ndarray]:
 
     def grab(t):
         try:
-            raw = subprocess.run(
-                [
-                    "ffmpeg",
-                    "-v",
-                    "error",
-                    *REMOTE,
-                    "-ss",
-                    f"{t:.2f}",
-                    "-i",
-                    url,
-                    "-frames:v",
-                    "1",
-                    "-vf",
-                    "scale=960:540,format=gray",
-                    "-f",
-                    "rawvideo",
-                    "-",
-                ],
-                capture_output=True,
-                timeout=120,
-            ).stdout
-        except subprocess.TimeoutExpired:
+            with source.inputs([url], float(t), 1) as stream:
+                raw = subprocess.run(
+                    ["ffmpeg", "-v", "error", *stream, "-frames:v", "1", "-vf", "scale=960:540,format=gray"]
+                    + ["-f", "rawvideo", "-"],
+                    capture_output=True,
+                    timeout=120,
+                ).stdout
+        except (subprocess.TimeoutExpired, ClipitError):
             return None
         return np.frombuffer(raw, np.uint8).reshape(540, 960) if len(raw) == 960 * 540 else None
 
@@ -156,6 +144,14 @@ def pick_layout(layouts: list[dict], boxes: list[tuple]) -> list[float] | None:
 
     best = max(layouts, key=hits, default=None)
     return best["box"] if best and hits(best) >= 2 else None  # 0 frames (all grabs failed) must not pick a layout blind
+
+
+def clip_face(url: str, start: float, end: float, n: int = 5) -> float | None:
+    """Where across the frame (0-1) a clip with no webcam overlay should be cropped: on the person filling the shot, or
+    None when no big face shows in at least 2 frames (gameplay, screens: the whole frame must stay readable)."""
+    frames = grab_frames(url, np.linspace(start, end, n + 2)[1:-1])
+    big = [b for b in detect_faces(frames) if b[3] >= MIN_SHOT_FACE]
+    return float(np.median([b[1] + b[3] / 2 for b in big]) / 960) if len({b[0] for b in big}) >= 2 else None
 
 
 def clip_cam(url: str, layouts: list[dict], start: float, end: float, n: int = 5) -> list[float] | None:

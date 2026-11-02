@@ -1,6 +1,8 @@
 """Decide which streams to clip and run the pipeline on each one's latest finished VOD, on Twitch and Kick.
 
-Streamers getting the most clip views today first, alternating between sites, then big live streamers. Each VOD is claimed in the
+An AI searches the web first for who something just happened to, and everyone it finds with a fresh VOD gets clipped,
+however many that is. Then the streamers getting the most clip views today, alternating between sites, then big live
+streamers, up to top_n, and past it until the pass has a good clip, at most EXTRA more VODs. Each VOD is claimed in the
 SQLite catalog before processing, so overlapping runs never double-process and finished VODs are never redone.
 """
 
@@ -11,12 +13,13 @@ from collections.abc import Iterable
 from pathlib import Path
 from types import ModuleType
 
-from clipit import db, kick, runs, twitch
+from clipit import ai, db, kick, runs, twitch
 from clipit.pipeline import process_vod
 from clipit.util import ROOT, ClipitError, log, logger, utcnow
 
 MIN_VIEWERS = 2000  # smaller streamers' clips don't get views
 MAX_AGE = datetime.timedelta(days=2)  # older VODs aren't worth clipping anymore
+EXTRA = 6  # more VODs a pass may try to find a clip good enough to post: bounded, each one takes minutes and AI calls
 # Never clipped, on any site, even when most clipped or prioritized: known to copyright-strike clip channels until banned.
 BLOCKED = frozenset({"pokimane"})
 # Tournament and company channels: famous and clipped, but no streamer to name. shortcut: the ones seen, add more as they show up.
@@ -80,6 +83,33 @@ def ended(vod: dict) -> datetime.datetime:
     return datetime.datetime.fromisoformat(vod["publishedAt"]) + datetime.timedelta(seconds=vod["lengthSeconds"])
 
 
+def find_hot(search_ai: str | None) -> list[tuple[str, str]]:
+    """(site, login) of who to clip today, best first. A failed search still leaves the pass the clip-view ranking."""
+    if not search_ai:
+        logger.warning("no AI with web search: going by clip views only")
+        return []
+    try:
+        found = ai.find_hot(search_ai)
+    except Exception:
+        logger.exception("the search for who's popping off failed: going by clip views only")
+        return []
+    log(f"the search found {len(found)} streamer(s) with something happening")
+    for site, login, why in found:
+        log(f"  {site}:{login}: {why}")
+    return [(site, login) for site, login, _ in found if login not in BLOCKED | NOT_STREAMERS]
+
+
+def moments_of(site: ModuleType, login: str, vod: dict) -> list[tuple[int, int]]:
+    """Where people clipped this VOD. Failing to find out only loses a hint: chat and loudness still pick moments."""
+    try:
+        found = site.clip_moments(login, vod)
+    except Exception:
+        logger.warning("could not get the clips of %s", login, exc_info=True)
+        return []
+    log(f"{len(found)} clipped moment(s) in {login}'s VOD")
+    return found
+
+
 def poll(
     conn: sqlite3.Connection,
     top_n: int = 6,
@@ -87,15 +117,20 @@ def poll(
     dry_run: bool = False,
     out_root: Path = ROOT / "out",
     prioritize: Iterable[tuple[str, str]] = (),
+    search_ai: str | None = None,
     **pipeline_opts,
 ) -> int:
     """One polling pass. Safe to run on a timer, and even twice at once. prioritize: (site, name) clipped first.
-    Returns how many VODs failed: the rest are still tried, but the caller can tell the pass didn't go well."""
+    search_ai: the AI command with web search that finds who's popping off (ai.find_hot).
+    Returns how many VODs failed if none worked: one broken VOD among good ones is logged, not a failed pass."""
     now = utcnow()
     failed = 0
     top_left = top_n
+    extra_left, good, tried = EXTRA, False, 0
+    runs.progress(what="Searching what's popping off today")
+    hot = find_hot(search_ai)
     runs.progress(what="Finding streamers to clip")
-    first = list(dict.fromkeys(prioritize))
+    first = list(dict.fromkeys([*prioritize, *hot]))
     clipped = everywhere("top_clipped")
     try:
         live = live_streams()
@@ -108,7 +143,8 @@ def poll(
     if not clipped:
         logger.warning("no clip ranking from any site, going by live viewers")
     for login, _, _, site in picks:
-        if top_left <= 0:
+        is_hot = (site.__name__.rsplit(".", 1)[1], login.lower()) in hot
+        if top_left <= 0 and not is_hot and (good or dry_run or extra_left <= 0):
             break
         try:
             vod = site.latest_vod(login)
@@ -125,14 +161,21 @@ def poll(
             continue
         if not db.claim(conn, vod_id, url, login, "top", run_id=runs.current()):
             continue  # already clipped: the next streamer takes the slot, so a repeat pass finds someone new
-        top_left -= 1
+        if top_left > 0:
+            top_left -= 1
+        elif not is_hot:
+            extra_left -= 1
+        tried += 1
         log(f"clipping {login}: {url}")
-        runs.progress(what=f"Clipping {login}", vod=[top_n - top_left, top_n], stage="Getting the VOD's details", count=None)
+        runs.progress(
+            what=f"Clipping {login}", vod=[tried, max(tried, top_n, len(hot))], stage="Getting the VOD's details", count=None
+        )
         try:
             with db.heartbeat(conn, vod_id):
-                _, clips = process_vod(url, out_root=out_root, **pipeline_opts)
+                _, clips = process_vod(url, out_root=out_root, clipped=moments_of(site, login, vod), **pipeline_opts)
             db.save_clips(conn, vod_id, [{**c, "file": f"{vod_id}/{c['file']}"} for c in clips])
             db.finish(conn, vod_id)
+            good = good or any(c["score"] >= db.AUTO_SCORE for c in clips)
         except Exception as e:  # one bad VOD (sub-only, deleted...) must not stop the rest
             logger.exception("VOD %s failed", vod_id)
             db.finish(conn, vod_id, error=f"{type(e).__name__}: {e}"[:1000])
@@ -140,4 +183,8 @@ def poll(
         finally:  # the ~300 MB audio is only needed while processing; a later rerun re-downloads it
             for p in (Path(out_root) / vod_id).glob("audio.*"):
                 p.unlink()
-    return failed
+    if top_n > 0 and not good and not dry_run:
+        logger.warning("no clip scored %d+ this pass: nothing from it is good enough to post", db.AUTO_SCORE)
+    if failed:
+        logger.warning("%d of %d VODs failed to clip this pass (see above)", failed, tried)
+    return failed if failed == tried else 0

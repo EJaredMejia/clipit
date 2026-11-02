@@ -113,7 +113,7 @@ def test_render_lays_out_the_stream_as_the_edit_chose(monkeypatch, tmp_path, edi
 
     def fake_sh(cmd, timeout, cwd):
         graphs.append(cmd[cmd.index("-filter_complex") + 1])
-        (cwd / cmd[-1]).write_bytes(b"mp4")
+        (cwd / cmd[-1]).write_bytes(b"mp4" * 400)
 
     monkeypatch.setattr(render, "sh", fake_sh)
     full = {"cuts": [], "zooms": [], "sfx": [], "texts": [], "emphasis": [], **edit} if edit else None
@@ -134,7 +134,7 @@ def test_every_layout_is_a_filter_graph_ffmpeg_runs(monkeypatch, tmp_path, layou
             cwd=cwd,
             timeout=60,
         )
-        (cwd / cmd[-1]).write_bytes(b"mp4")
+        (cwd / cmd[-1]).write_bytes(b"mp4" * 400)
 
     monkeypatch.setattr(render, "sh", real_ffmpeg)
     edit = {"layout": layout, "focus": 0.7, "zooms": [{"start": 10.1, "end": 10.3, "zoom": 1.3}]}
@@ -146,3 +146,40 @@ def test_every_layout_is_a_filter_graph_ffmpeg_runs(monkeypatch, tmp_path, layou
         tmp_path / "c.mp4",
         [0.7, 0.0, 0.3, 0.4],
     )
+
+
+def test_render_without_video_is_a_failure_not_a_clip(monkeypatch, tmp_path):
+    monkeypatch.setattr(render, "sh", lambda cmd, timeout, cwd: (cwd / cmd[-1]).write_bytes(b"x" * 261))
+    with pytest.raises(subprocess.CalledProcessError):
+        render.render(["https://v"], {"start": 10.0, "end": 30.0, "hook": "hi"}, [], tmp_path / "c.mp4")
+    assert not (tmp_path / "c.mp4").exists()
+
+
+def test_a_layout_chosen_without_an_edit_renders(monkeypatch, tmp_path):
+    def fake_sh(cmd, timeout, cwd):
+        (cwd / cmd[-1]).write_bytes(b"mp4" * 400)
+
+    monkeypatch.setattr(render, "sh", fake_sh)
+    clip = {"start": 10.0, "end": 30.0, "hook": "hi", "edit": {"layout": "crop", "focus": 0.3}}
+    render.render(["https://v"], clip, [], tmp_path / "c.mp4", None)
+    assert (tmp_path / "c.mp4").exists()
+
+
+def test_sheets_say_which_second_each_starts_at(monkeypatch, tmp_path):
+    def fake_sh(cmd, timeout):
+        (tmp_path / "sheet02.jpg").write_bytes(b"x")
+        (tmp_path / "sheet01.jpg").write_bytes(b"x")
+
+    monkeypatch.setattr(render, "sh", fake_sh)
+    assert render.sheets(tmp_path / "c.mp4", tmp_path) == [(0.0, tmp_path / "sheet01.jpg"), (9.0, tmp_path / "sheet02.jpg")]
+
+
+def test_captions_and_the_hook_star_out_slurs_but_keep_ordinary_words():
+    ass = render.make_ass("what a faggot", [(0.0, 0.5, "niggas"), (0.5, 1.0, "bigger")], 0.0, 2.0, 100, 900)
+    assert "F*****" in ass and "N*****" in ass and "BIGGER" in ass
+    assert "NIGGAS" not in ass.upper().replace("N*****", "")
+
+
+def test_explicit_words_keep_both_ends_and_innocent_words_stay():
+    ass = render.make_ass("giant boobs", [(0.0, 0.5, "nipple"), (0.5, 1.0, "title"), (1.0, 1.5, "scum")], 0.0, 2.0, 100, 900)
+    assert "B***S" in ass and "N****E" in ass and "TITLE" in ass and "SCUM" in ass

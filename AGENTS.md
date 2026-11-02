@@ -63,10 +63,10 @@ VODs to process; `cli.py` is the only place that parses flags, sets up logging, 
 | `source.py` | yt-dlp: VOD info, audio download, stream URLs |
 | `twitch.py` | Twitch's public API: chat replay, live streams, today's most-viewed clips, latest VODs |
 | `kick.py` | the same for Kick, through the JSON API its website uses, throttled to stay under its rate limit |
-| `poll.py` | picks which streamers to clip and runs the pipeline on each, never the same VOD twice |
-| `moments.py` | loudness + chat scoring, picks candidate windows |
+| `poll.py` | picks which streamers to clip, from the AI's web search first, and runs the pipeline on each, never the same VOD twice |
+| `moments.py` | loudness + chat scoring, picks candidate windows, the moments people clipped first |
 | `transcribe.py` | Whisper on the candidate windows |
-| `ai.py` | prompts, calling the AI CLI, validating its picks |
+| `ai.py` | prompts, calling the AI CLI, the web search for who's popping off, validating its picks |
 | `edit.py` | `--high-effort`: the AI edits each pick (cuts, zooms, sound effects, pop-up text, layout and crop) and reviews it in a loop until a review passes it, checked in code; an AI that sees pictures reviews frames of each version rendered; `--reedit` uses the same loop with the user's request |
 | `codex.py` | isolated Codex CLI provider, restricted model catalog and structured clip output |
 | `facecam.py` | webcam overlay detection |
@@ -137,6 +137,20 @@ recorded by hand from the dashboard until then.
 - Automatic posting takes only clips from polled VODs in the last `db.FRESH` (an old clip rides a trend that has
   passed): ones the user marked Keep first, then unreviewed ones the clip-picking AI scored `db.AUTO_SCORE` or more,
   never one marked Skip, up to 10 a day (`youtube.PER_DAY`, `youtube.GAP`). The user chose this over review-only posting.
+  Every run should end with a good clip posted, but never by lowering that bar or posting weak clips: a run with no
+  good clip means polling chose badly. So `ai.find_hot` searches the web on every pass for who something just happened
+  to, everyone it finds with a fresh VOD gets clipped however many that is, and a pass goes past its top_n, up to
+  `poll.EXTRA` more VODs, until it has a good clip. Never keep that search in a file or reuse it across passes, and
+  never rank by a streamer's past clips: both turn into the same names every day.
+  A trending clip or post only says where to look: `twitch.clip_moments` reads which seconds of a VOD people clipped,
+  those come first among the moments, and we cut our own clip from the VOD and write our own text. Never download or
+  repost someone's clip, or reuse its title or wording: the user wants clips we make, and reposts lose reach on YouTube.
+  The score alone proves nothing: the picker grades its own pick from a transcript. So a separate reviewer watches
+  each finished clip, as contact sheets of its frames (`render.sheets`), that
+  reached `db.AUTO_SCORE`, answers `ai.CHECKS`, and code decides: any failed check,
+  a clip over `ai.MAX_POST_LEN`, or a reviewer that couldn't see it drops the score below the bar (`pipeline.review`).
+  Cuts are made in code too (`ai.cut_to_peak`): a clip keeps `ai.LEAD` s before the peak the picker names and `ai.TAIL` s after.
+  A clip the reviewer stops is cut again once around the peak it saw (`ai.recut`) and watched again: the picker only reads words.
   The dashboard's "Post to YouTube now" is the user posting by hand, like uploading in YouTube Studio: any clip, no
   pacing, but it counts toward the pace of the automatic posts.
 - Each upload is claimed in `uploads` before it's sent (`db.claim_upload`, `db.claim_clip_upload`), so a clip is never
@@ -149,8 +163,9 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
   close it. The clip-picking AI runs in an empty temp folder with **no tools that access files, run commands, or
   reach the network**. Claude Code uses `--tools ""`; the built-in Codex provider disables shell, file editing,
   apps, plugins and browser tools, ignores user configuration and uses a read-only sandbox. Its temporary model
-  catalog must remove `apply_patch_tool_type` and model-specific extra tools. Never enable external tools for clip
-  picking.
+  catalog must remove `apply_patch_tool_type` and model-specific extra tools. Only `ai.find_hot` gets web search, and
+  its prompt contains no untrusted text; what it returns is validated (`ai.clean_hot`) and only looked up as a channel
+  name. Never enable external tools for clip picking.
 - AI output is validated before use (`ai.clean`): numbers parsed and clamped, text fields forced to capped strings.
 - Untrusted text never reaches a shell. File names go through `util.slug`, folder names are checked against a strict
   pattern, subtitle text goes through `render.make_ass`'s escaping (strips `\ { }` and newlines).
@@ -158,6 +173,8 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
   `web/src/safety.test.ts` fails on them), links only http(s) URLs (`safeUrl`), and its server only answers its own
   page (Host and Origin checks, JSON-only writes, no inline scripts under its CSP). The dev server's proxy vouches for
   the dev page's Origin only (`web/vite.config.ts`); never loosen the Origin check in `dashboard.py` for it.
+- Slurs and explicit words are starred out of captions, the hook and post text, and a hashtag with one is dropped
+  (`util.filter_words`): n****, b**bs. The clip's audio keeps them: the user's call. Racy clips are fine, explicit text isn't.
 - Post text credits the streamer from yt-dlp's checked Twitch or Kick login (`pipeline.streamer`), added in code by
   `render.post_texts`: the AI is told not to write links or @mentions.
 

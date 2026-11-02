@@ -32,3 +32,24 @@ def test_windows_never_overlap_and_stay_inside_the_vod():
     wins = moments.windows(score, 3, 1000)
     assert all(0 <= a < b <= 1000 for a, b in wins)
     assert all(b1 <= a2 for (_, b1), (a2, _) in zip(wins, wins[1:], strict=False))
+
+
+def test_clipped_moments_come_first_and_peaks_dont_overlap_them():
+    score = np.zeros(4000)
+    score[1000] = 9.0  # the loudest second, but people clipped elsewhere and right beside it
+    found = moments.windows(score, 3, 4000.0, [(3000, 500), (970, 200)])
+    assert found[0] == (2970, 3060)
+    assert found[1][0] <= 1000 <= found[1][1]
+    assert len(found) == len({w[0] for w in found})
+
+
+def test_a_clip_outside_the_vod_is_ignored():
+    assert all(e <= 100 for _, e in moments.windows(np.zeros(100), 3, 100.0, [(5000, 9), (-200, 9)]))
+
+
+def test_clipped_moments_push_out_the_weakest_peak_not_the_latest():
+    score = np.zeros(4000)
+    score[[500, 1500]] = 1.0
+    score[3500] = 9.0
+    found = moments.windows(score, 3, 4000.0, [(2500, 5)])
+    assert (3440, 3530) in found and len(found) == 3

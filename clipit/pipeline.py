@@ -8,9 +8,10 @@ import functools
 import json
 import re
 import subprocess
+import tempfile
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -79,10 +80,12 @@ def process_vod(
     out_root: Path = ROOT / "out",
     info: dict | None = None,
     high_effort: bool = False,
+    clipped: Sequence[tuple[int, int]] = (),
 ) -> tuple[Path, list[dict]]:
     """Make up to n_clips clips from a VOD, none the AI scored under MIN_SCORE. Returns (work folder, rendered clips). Raises ClipitError when it can't.
     `info` is source.fetch_info(url), when the caller already has it. high_effort: the AI edits each pick scored db.AUTO_SCORE+
-    and reviews it until it's done (clipit.edit), into picks_edited.json and posts_edited.md so the plain clips stay as they are."""
+    and reviews it until it's done (clipit.edit), into picks_edited.json and posts_edited.md so the plain clips stay as they are.
+    clipped: (second, views) of moments people clipped in this VOD (site.clip_moments), looked at first."""
     info = info or source.fetch_info(url)
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(info["id"])):  # it becomes a folder name
         raise ClipitError(f"unexpected video id {info['id']!r}")
@@ -114,7 +117,7 @@ def process_vod(
         np.save(tmp, moments.loudness(audio()))
         tmp.replace(loud_file)
     score, loud, rate = moments.signals(dur, np.load(loud_file), msgs)
-    windows = moments.windows(score, max(10, n_clips * 3), dur)
+    windows = moments.windows(score, max(10, n_clips * 3), dur, clipped)
 
     tr_file = work / "transcripts.json"
     tr = json.loads(tr_file.read_text(encoding="utf-8")) if tr_file.exists() else {}
@@ -128,7 +131,7 @@ def process_vod(
             log(f"  {i}/{len(todo)} @ {mmss(w[0])}")
             progress("Transcribing the best moments", i, len(todo))
 
-    cands = candidates(windows, tr, msgs, loud, rate)
+    cands = candidates(windows, tr, msgs, loud, rate, clipped)
 
     def ask():
         log(f"asking the AI to pick up to {n_clips} clips from {len(cands)} candidates")
@@ -178,12 +181,19 @@ def process_vod(
             except subprocess.CalledProcessError as e:
                 logger.error("render failed for %s: %s", out.name, e.stderr[-800:])
                 continue
+            except ClipitError as e:  # the stream couldn't be read: the other clips may still work
+                logger.error("render failed for %s: %s", out.name, e)
+                continue
             except subprocess.TimeoutExpired:
                 logger.error("render timed out for %s", out.name)
                 continue
         rendered.append(c)
     if not rendered:
         raise ClipitError("every clip failed to render, see the log")
+
+    for i, c in enumerate(rendered, 1):
+        progress("A reviewer is watching the clips", i - 1, len(rendered))
+        review(ai_cmd, info, c, words, work, functools.partial(remade, url, layouts, words, cands, dur, work))
 
     # dropped picks stay in the file: an old clip of one, kept by the user, is found there to re-edit it (made_as)
     write_atomic(work / picks_file, json.dumps([*picks, *dropped], indent=2))
@@ -192,13 +202,82 @@ def process_vod(
     return work, rendered
 
 
-def candidates(windows: list[tuple[int, int]], tr: dict, msgs: list, loud: np.ndarray, rate: np.ndarray) -> list[dict]:
+def watch(cmd: str | None, info: dict, clip: dict, words: list, work: Path) -> list[str]:
+    """What a separate reviewer found wrong with the finished clip, watching all of it (ai.veto)."""
+    said = sorted({(edit.clip_time(clip, w[0]), w[2]) for w in words if clip["start"] <= w[0] < clip["end"]})  # windows overlap
+    spoken = " ".join(f"[{t:.0f}s] {w}" if i % 8 == 0 else w for i, (t, w) in enumerate(said))
+    length = sum(b - a for a, b in edit.kept(clip))  # the edit's cuts make the video shorter than its time range
+    with tempfile.TemporaryDirectory(prefix="clipit-") as tmp:
+        try:
+            sheets = render.sheets(work / clip["file"], Path(tmp))
+        except (ClipitError, subprocess.SubprocessError):
+            sheets = []  # veto stops a clip it can't see
+        return ai.veto(cmd, clip, clip.get("streamer") or info.get("uploader"), spoken, sheets, length)
+
+
+def review(
+    cmd: str | None,
+    info: dict,
+    clip: dict,
+    words: list,
+    work: Path,
+    remake: Callable[[dict, float, float], bool] | None = None,
+) -> None:
+    """A separate reviewer watches a clip good enough to post by itself. If it fails any check, the clip is cut again once
+    around the peak the reviewer saw (remake: the picker only reads words) and watched again. If it still fails, its
+    score drops under db.AUTO_SCORE and the reasons go in "why", so it stays for the user to judge but never posts alone.
+    A review that never happened (the AI failed) stops the clip too, and is asked again if the VOD is run again."""
+    clip.setdefault("picked_score", clip["score"])
+    if clip["picked_score"] < db.AUTO_SCORE or clip.get("reviewed"):
+        return
+    failed = watch(cmd, info, clip, words, work)
+    seen = clip.pop("seen", None)
+    if failed and seen and remake and not clip.get("edit") and remake(clip, *seen):  # an edit's times are tied to its cut
+        failed = watch(cmd, info, clip, words, work)
+        clip.pop("seen", None)
+    clip["reviewed"] = not any(f.startswith("review:") for f in failed)
+    clip["score"] = db.AUTO_SCORE - 1.0 if failed else clip["picked_score"]
+    if failed:
+        log(f"review stopped {clip['file']}: " + "; ".join(failed))
+        clip["why"] = ("Review failed: " + "; ".join(failed))[: ai.TEXT_FIELDS["why"]]
+
+
+def remade(
+    url: str, layouts: list, words: list, cands: list[dict], dur: float, work: Path, clip: dict, peak: float, end: float
+) -> bool:
+    """Render the clip again around the peak its reviewer saw, in place of the old video. False leaves it as it was."""
+    cut = ai.recut(clip, peak, end, cands, dur)
+    if not cut:
+        return False
+    new = {**clip, "start": cut[0], "end": cut[1]}
+    new["file"] = clip_file(clip["idx"], new)
+    log(f"cutting {clip['file']} again: {cut[0]:g}-{cut[1]:g} s, where the reviewer saw the peak")
+    try:
+        render_clip(source.stream_urls(url), layouts, new, words, work / new["file"])
+    except (subprocess.SubprocessError, ClipitError) as e:
+        logger.warning("couldn't cut %s again: %s", clip["file"], e)
+        return False
+    (work / clip["file"]).unlink(missing_ok=True)
+    clip.update(new)
+    return True
+
+
+def candidates(
+    windows: list[tuple[int, int]],
+    tr: dict,
+    msgs: list,
+    loud: np.ndarray,
+    rate: np.ndarray,
+    clipped: Sequence[tuple[int, int]] = (),
+) -> list[dict]:
     """The moments the AI picks from: transcript, chat and how loud and busy each one is."""
     cands = []
     for s, e in windows:
         stats = f"audio peak +{loud[s:e].max() - np.median(loud):.0f} dB"
         if rate.any():
             stats = f"chat {rate[s:e].mean() / rate.mean():.1f}x normal, " + stats
+        if views := sum(v for t, v in clipped if s <= t < e):
+            stats = f"viewers clipped this, {views} views, " + stats
         cands.append(
             {"start": s, "end": e, "segments": tr[f"{s}-{e}"], "stats": stats, "chat": [m for m in msgs if s <= m[0] < e]}
         )
@@ -219,7 +298,11 @@ def webcam_layouts(work: Path, urls: list[str], dur: float) -> list:
 def render_clip(urls: list[str], layouts: list, c: dict, words: list, out: Path) -> None:
     """Render one clip, captioned with the words said in it."""
     cam = facecam.clip_cam(urls[0], layouts, c["start"], c["end"])  # streamers switch scene layouts mid-stream
-    log(f"rendering {out.name} ({c['end'] - c['start']:.0f}s, {'facecam on top' if cam else 'blurred fill'})")
+    edit = c.get("edit") or {}
+    if not cam and "layout" not in edit and (face := facecam.clip_face(urls[0], c["start"], c["end"])) is not None:
+        c = {**c, "edit": {**edit, "layout": "crop", "focus": face}}  # a person filling the shot fills the phone too
+    how = "facecam on top" if cam else "cropped on the face" if (c.get("edit") or {}).get("layout") == "crop" else "blurred fill"
+    log(f"rendering {out.name} ({c['end'] - c['start']:.0f}s, {how})")
     render.render(urls, c, [w for w in words if c["start"] - 0.05 <= w[0] and w[1] <= c["end"] + 0.3], out, cam)
 
 
@@ -239,7 +322,7 @@ def preview(url: str, layouts: list, words: list) -> Callable[[dict, Path], list
             # ffmpeg can succeed without writing a picture (frames() checks its own too)
             first = [("the stream", stream)] if stream.exists() else []
             return [*first, *((f"{t:.1f} s", f) for t, f in frames)]
-        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, ClipitError) as e:
             logger.warning("couldn't render frames for the review: %s", str(getattr(e, "stderr", "") or e)[-500:])
             return []
         finally:
@@ -282,7 +365,7 @@ def reedit(url: str, clip: dict, request: str, at: float | None, ai_cmd: str | N
     progress("Rendering the clip")
     try:
         render_clip(urls, layouts, c, words, work / c["file"])
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError as e:  # a ClipitError from reading the stream already says what failed
         raise ClipitError(f"rendering the re-edit failed: {str(e.stderr)[-500:]}") from e
     except subprocess.TimeoutExpired as e:
         raise ClipitError("rendering the re-edit timed out") from e
