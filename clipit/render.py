@@ -10,7 +10,7 @@ from clipit import source
 from clipit.facecam import TOP
 from clipit.util import filter_words, mmss, sh, write_atomic
 
-RENDER_TIMEOUT = 1800
+RENDER_TIMEOUT = 300  # a render takes 10-30 s: one this slow means the stream stalled
 MIN_RENDER = 1024  # bytes: an mp4 with no frames is about 260
 # Posting policy includes the creators historically associated with FaZe, regardless of later roster changes.
 FAZE_STREAMERS = frozenset(

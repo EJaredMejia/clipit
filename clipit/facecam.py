@@ -10,6 +10,7 @@ from clipit import source
 from clipit.util import ClipitError
 
 TOP = (1080, 768)  # facecam panel in the 1080x1920 split layout, gameplay gets the rest
+FRAME_TIMEOUT = 30  # seconds for one frame: they take 1-8 s, and a stall would otherwise cost 10 min per VOD
 MIN_SHOT_FACE = 0.15 * 960  # px wide in a 960 px frame: smaller is an overlay webcam, or someone far off or in a game
 
 
@@ -92,7 +93,7 @@ def grab_frames(url: str, times: Iterable[float]) -> list[np.ndarray]:
                     ["ffmpeg", "-v", "error", *stream, "-frames:v", "1", "-vf", "scale=960:540,format=gray"]
                     + ["-f", "rawvideo", "-"],
                     capture_output=True,
-                    timeout=120,
+                    timeout=FRAME_TIMEOUT,
                 ).stdout
         except (subprocess.TimeoutExpired, ClipitError):
             return None
@@ -115,6 +116,8 @@ def find_layouts(url: str, duration: float, n: int = 40) -> list[dict]:
     """Every webcam layout of the VOD as {"face": px box, "box": crop as frame fractions}, from n frames spread
     over the whole stream. Each crop is computed only from the frames that show that layout."""
     frames = grab_frames(url, np.linspace(0.05 * duration, 0.95 * duration, n))
+    if len(frames) < n / 2:  # the stream stalled: "no webcam" here would be cached, and every clip would lose its webcam
+        raise ClipitError(f"the stream is stalled: got {len(frames)} of {n} frames, will retry later")
     layouts = []
     for face, idx in cam_faces(detect_faces(frames), len(frames)):
         box = overlay([frames[i] for i in sorted(idx)], face)
@@ -146,10 +149,18 @@ def pick_layout(layouts: list[dict], boxes: list[tuple]) -> list[float] | None:
     return best["box"] if best and hits(best) >= 2 else None  # 0 frames (all grabs failed) must not pick a layout blind
 
 
+def clip_frames(url: str, start: float, end: float, n: int) -> list[np.ndarray]:
+    """n frames of a clip. None at all means the stream stalled: the clip fails, never renders in a layout chosen unseen."""
+    frames = grab_frames(url, np.linspace(start, end, n + 2)[1:-1])
+    if not frames:
+        raise ClipitError("the stream is stalled: got no frames of the clip")
+    return frames
+
+
 def clip_face(url: str, start: float, end: float, n: int = 5) -> float | None:
     """Where across the frame (0-1) a clip with no webcam overlay should be cropped: on the person filling the shot, or
     None when no big face shows in at least 2 frames (gameplay, screens: the whole frame must stay readable)."""
-    frames = grab_frames(url, np.linspace(start, end, n + 2)[1:-1])
+    frames = clip_frames(url, start, end, n)
     big = [b for b in detect_faces(frames) if b[3] >= MIN_SHOT_FACE]
     return float(np.median([b[1] + b[3] / 2 for b in big]) / 960) if len({b[0] for b in big}) >= 2 else None
 
@@ -158,5 +169,5 @@ def clip_cam(url: str, layouts: list[dict], start: float, end: float, n: int = 5
     """Crop for one clip: check which of the VOD's webcam layouts is on screen during this clip."""
     if not layouts:
         return None
-    frames = grab_frames(url, np.linspace(start, end, n + 2)[1:-1])
+    frames = clip_frames(url, start, end, n)
     return pick_layout(layouts, detect_faces(frames))

@@ -189,8 +189,18 @@ def test_fragments_follows_nothing_outside_the_stream():
     assert source.fragments(evil, "https://cdn/v/", 12.5, 25.0) is None
 
 
+def test_a_trickling_segment_stops_at_the_deadline(monkeypatch):
+    class Trickle(io.BytesIO):
+        def read1(self, size: int | None = -1, /) -> bytes:  # never ends, and never trips the socket timeout
+            return b"x"
+
+    monkeypatch.setattr(source.urllib.request, "urlopen", lambda url, timeout: Trickle())
+    with pytest.raises(ClipitError, match="stalled"):
+        source.fetch("https://example/1.mp4", io.BytesIO(), source.time.monotonic() + 0.05)
+
+
 def test_inputs_joins_a_fragmented_clip_into_one_local_file(monkeypatch):
-    def fake_fetch(url, to=None):
+    def fake_fetch(url, to=None, deadline=None):
         if to is None:
             return FRAGMENTED
         to.write(url.rsplit("/", 1)[1].encode())

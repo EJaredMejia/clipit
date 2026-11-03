@@ -139,8 +139,9 @@ recorded by hand from the dashboard until then.
   never one marked Skip, up to 10 a day (`youtube.PER_DAY`, `youtube.GAP`). The user chose this over review-only posting.
   Every run should end with a good clip posted, but never by lowering that bar or posting weak clips: a run with no
   good clip means polling chose badly. So `ai.find_hot` searches the web on every pass for who something just happened
-  to, everyone it finds with a fresh VOD gets clipped however many that is, and a pass goes past its top_n, up to
-  `poll.EXTRA` more VODs, until it has a good clip. Never keep that search in a file or reuse it across passes, and
+  to, and a pass goes down the list until it has a good clip and stops there, as a run posts one (the streamers asked
+  for by name all get clipped): everyone the search found is tried whatever top_n says, and past top_n up to
+  `poll.EXTRA` more VODs. Never keep that search in a file or reuse it across passes, and
   never rank by a streamer's past clips: both turn into the same names every day.
   A trending clip or post only says where to look: `twitch.clip_moments` reads which seconds of a VOD people clipped,
   those come first among the moments, and we cut our own clip from the VOD and write our own text. Never download or

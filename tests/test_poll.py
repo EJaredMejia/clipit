@@ -125,8 +125,9 @@ def world(tmp_path, monkeypatch):
     conn.close()
 
 
-def test_poll_pass(world):
+def test_poll_pass(world, monkeypatch):
     conn, calls, out = world
+    weak_unless(monkeypatch, "/never")
     assert poll.poll(conn, top_n=3, lang="EN", out_root=out) == 0  # v1 worked: a broken VOD among good ones is no failed pass
     assert calls == ["v1", "v3"]  # big2 has no VOD so mid takes its slot; s1 and s2 are too small
     assert db.status(conn, "v1") == "done" and db.status(conn, "v3") == "failed"
@@ -217,17 +218,34 @@ def test_a_pass_with_no_good_clip_gives_up_after_extra_vods(world, monkeypatch):
     assert len(calls) == 2
 
 
-def test_everyone_the_search_finds_is_clipped_whatever_top_n_says(world, monkeypatch):
+def test_a_pass_stops_at_its_first_good_clip(world, monkeypatch):
     conn, calls, out = world
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned"), ("twitch", "s1", "a fight")])
+    poll.poll(conn, top_n=6, out_root=out, search_ai="search")
+    assert calls == ["v5"]  # the rest wait for the next pass: a run only posts one clip
+
+
+def test_the_streamers_asked_for_are_clipped_even_after_a_good_clip(world):
+    conn, calls, out = world
+    poll.poll(conn, top_n=6, out_root=out, prioritize=[("twitch", "big1"), ("twitch", "s1")])
+    assert calls == ["v1", "v4"]  # and mid, next in line, isn't
+
+
+def test_everyone_the_search_finds_is_tried_whatever_top_n_says(world, monkeypatch):
+    conn, calls, out = world
+    weak_unless(monkeypatch, "/never")
+    monkeypatch.setattr(poll, "EXTRA", 0)
     found = [("twitch", "s2", "banned"), ("twitch", "s1", "a fight"), ("twitch", "pgl", "a final"), ("kick", "nobody", "x")]
     monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: found)
     monkeypatch.setattr(poll.kick, "latest_vod", lambda login: None)
     poll.poll(conn, top_n=1, out_root=out, search_ai="search")
-    assert calls == ["v5", "v4"]  # both found, with a slot for one; big1 waits as the pass has its good clip
+    assert calls == ["v5", "v4"]  # both found, with a slot for one
 
 
 def test_a_full_pass_still_reaches_someone_the_search_found_further_down(world, monkeypatch):
     conn, calls, out = world
+    weak_unless(monkeypatch, "/never")
+    monkeypatch.setattr(poll, "EXTRA", 0)
     monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned")])
     poll.poll(conn, top_n=1, out_root=out, search_ai="search", prioritize=[("twitch", "big1"), ("twitch", "s1")])
     assert calls == ["v1", "v5"]  # s1 is past the quota, but s2 was found by the search
