@@ -24,7 +24,7 @@ from clipit import ai, db
 from clipit.util import logger
 
 # What a run does when the user never changed it: the CLI's defaults, then posting.
-SETTINGS = {"top": 6, "lang": "EN", "clips": 6, "high_effort": False, "prioritize": [], "upload": True}
+SETTINGS = {"lang": "EN", "clips": 6, "high_effort": False, "prioritize": [], "upload": True}
 # A hung step is killed. A poll that finds no good clip goes through many VODs; high effort is up to 5 AI reviews per clip.
 POLL_TIMEOUT, HIGH_EFFORT_TIMEOUT, UPLOAD_TIMEOUT, REEDIT_TIMEOUT = 8 * 3600, 24 * 3600, 3600, 2 * 3600
 UPLOAD = "--upload"  # the step Stop never cuts
@@ -51,7 +51,8 @@ def clean_settings(raw: object) -> dict | None:
     lang, first = raw["lang"], raw["prioritize"]
     if not (
         all(isinstance(raw[k], bool) for k in ("high_effort", "upload"))
-        and all(type(raw[k]) is int and 1 <= raw[k] <= 20 for k in ("top", "clips"))
+        and type(raw["clips"]) is int
+        and 1 <= raw["clips"] <= 20
         and isinstance(lang, str)
         and re.fullmatch(r"[A-Za-z]{0,3}", lang)  # "" is any language
         and isinstance(first, list)
@@ -86,7 +87,7 @@ def steps(job: dict) -> list[tuple[str, list[str], float]]:
         # --request=: a request that starts with "-" would be read as a flag
         return [("Re-edit the clip", ["--reedit", str(job["reedit"]), f"--request={job['request']}", *at], REEDIT_TIMEOUT)]
     first = [a for p in job["prioritize"] for a in ("--prioritize", p)]
-    poll = ["--poll", "--top", str(job["top"]), "--lang", job["lang"], "--clips", str(job["clips"]), *first]
+    poll = ["--poll", "--lang", job["lang"], "--clips", str(job["clips"]), *first]
     out: list[tuple[str, list[str], float]] = [
         ("Clip the latest VODs", [*poll, "--high-effort"], HIGH_EFFORT_TIMEOUT)
         if job["high_effort"]
