@@ -51,7 +51,8 @@ def clean_settings(raw: object) -> dict | None:
     lang, first = raw["lang"], raw["prioritize"]
     if not (
         all(isinstance(raw[k], bool) for k in ("high_effort", "upload"))
-        and all(type(raw[k]) is int and 1 <= raw[k] <= 20 for k in ("clips",))
+        and type(raw["clips"]) is int
+        and 1 <= raw["clips"] <= 20
         and isinstance(lang, str)
         and re.fullmatch(r"[A-Za-z]{0,3}", lang)  # "" is any language
         and isinstance(first, list)

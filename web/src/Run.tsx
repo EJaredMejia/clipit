@@ -156,13 +156,6 @@ function RunSettings({ saved, running }: { saved: Settings; running: boolean }) 
     if (await saveSettings(settings)) setForm(null);
     setSaving(false);
   };
-  const number = (key: "clips", name: string, hint: string) => (
-    <label className="flex flex-col gap-1.5">
-      <span className={fieldLabel}>{name}</span>
-      <Input type="number" required min={1} max={20} step={1} className="h-10 bg-card" value={f[key]} onChange={(e) => edit({ [key]: e.target.value })} />
-      <span className="text-xs text-muted-foreground">{hint}</span>
-    </label>
-  );
   const check = (key: "high_effort" | "upload", name: string, hint: string) => (
     <label className="flex items-start gap-3">
       <input type="checkbox" className="mt-1 size-4 accent-primary" checked={f[key]} onChange={(e) => edit({ [key]: e.target.checked })} />
@@ -179,7 +172,11 @@ function RunSettings({ saved, running }: { saved: Settings; running: boolean }) 
         {running ? "The next run uses these. The run going now keeps the ones it started with." : "The next run uses these."}
       </p>
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        {number("clips", "Max clips per VOD", "The AI picks up to this many, fewer or none if the VOD is weak")}
+        <label className="flex flex-col gap-1.5">
+          <span className={fieldLabel}>Max clips per VOD</span>
+          <Input type="number" required min={1} max={20} step={1} className="h-10 bg-card" value={f.clips} onChange={(e) => edit({ clips: e.target.value })} />
+          <span className="text-xs text-muted-foreground">The AI picks up to this many, fewer or none if the VOD is weak</span>
+        </label>
         <label className="flex flex-col gap-1.5">
           <span className={fieldLabel}>Language</span>
           <Input className="h-10 bg-card" maxLength={3} pattern="[A-Za-z]{0,3}" value={f.lang} onChange={(e) => edit({ lang: e.target.value })} />
