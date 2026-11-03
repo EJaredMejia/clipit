@@ -196,11 +196,11 @@ def test_a_run_does_what_its_settings_say(conn, tmp_path, monkeypatch) -> None:
 def test_run_settings_are_checked_before_they_become_flags(conn) -> None:
     ok = {**runs.SETTINGS, "lang": "es", "prioritize": ["Twitch:Caedrel"]}
     assert runs.clean_settings(ok) == {**ok, "lang": "ES", "prioritize": ["twitch:caedrel"]}
-    for bad in ({"top": True}, {"clips": 0}, {"lang": "en --dry-run"}, {"prioritize": ["caedrel"]}, {"extra": 1}):
+    for bad in ({"clips": True}, {"clips": 0}, {"lang": "en --dry-run"}, {"prioritize": ["caedrel"]}, {"extra": 1}):
         assert runs.clean_settings({**runs.SETTINGS, **bad}) is None, bad
     assert runs.settings(conn) == runs.SETTINGS
-    db.save_setting(conn, "run", {"top": 3, "gone": 1})  # saved by an older version: missing keys take the defaults
-    assert runs.settings(conn) == {**runs.SETTINGS, "top": 3}
+    db.save_setting(conn, "run", {"clips": 3, "top": 1})  # saved by an older version: missing keys take the defaults
+    assert runs.settings(conn) == {**runs.SETTINGS, "clips": 3}
 
 
 def test_a_reedit_job_passes_the_request_as_one_argument() -> None:

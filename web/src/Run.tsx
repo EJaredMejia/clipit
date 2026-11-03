@@ -133,8 +133,8 @@ function jobParts(job: RunState["job"]): React.ReactNode[] {
   return [...(job.high_effort ? ["high effort"] : []), ...(job.upload ? [] : ["no posting"])];
 }
 
-type Form = Omit<Settings, "top" | "clips" | "prioritize"> & { top: string; clips: string; prioritize: string };
-const asForm = (s: Settings): Form => ({ ...s, top: String(s.top), clips: String(s.clips), prioritize: s.prioritize.join("\n") });
+type Form = Omit<Settings, "clips" | "prioritize"> & { clips: string; prioritize: string };
+const asForm = (s: Settings): Form => ({ ...s, clips: String(s.clips), prioritize: s.prioritize.join("\n") });
 const fieldLabel = "font-heading text-[0.95rem] font-semibold";
 
 // How the next runs go, saved on the server: the flags of clipit --poll and --upload. The server checks them.
@@ -144,7 +144,6 @@ function RunSettings({ saved, running }: { saved: Settings; running: boolean }) 
   const f = form ?? asForm(saved);
   const settings: Settings = {
     ...f,
-    top: Number(f.top),
     clips: Number(f.clips),
     lang: f.lang.trim(),
     prioritize: f.prioritize.split(/[\s,]+/).filter(Boolean),
@@ -157,7 +156,7 @@ function RunSettings({ saved, running }: { saved: Settings; running: boolean }) 
     if (await saveSettings(settings)) setForm(null);
     setSaving(false);
   };
-  const number = (key: "top" | "clips", name: string, hint: string) => (
+  const number = (key: "clips", name: string, hint: string) => (
     <label className="flex flex-col gap-1.5">
       <span className={fieldLabel}>{name}</span>
       <Input type="number" required min={1} max={20} step={1} className="h-10 bg-card" value={f[key]} onChange={(e) => edit({ [key]: e.target.value })} />
@@ -179,8 +178,7 @@ function RunSettings({ saved, running }: { saved: Settings; running: boolean }) 
       <p className="mt-1 text-sm text-muted-foreground">
         {running ? "The next run uses these. The run going now keeps the ones it started with." : "The next run uses these."}
       </p>
-      <div className="mt-4 grid gap-4 sm:grid-cols-3">
-        {number("top", "Streamers to clip", "Stops at the first good clip, so often fewer")}
+      <div className="mt-4 grid gap-4 sm:grid-cols-2">
         {number("clips", "Max clips per VOD", "The AI picks up to this many, fewer or none if the VOD is weak")}
         <label className="flex flex-col gap-1.5">
           <span className={fieldLabel}>Language</span>

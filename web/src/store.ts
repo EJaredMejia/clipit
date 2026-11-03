@@ -53,7 +53,7 @@ export type Data = { vods: Vod[]; clips: Clip[] };
 // dashboard, so a reopened page picks it up. Lines are clipit's output: untrusted.
 export type Step = { name: string; status: "waiting" | "running" | "done" | "failed" | "stopped" | "interrupted" };
 // How runs go (clipit/runs.py SETTINGS): saved on the server, a run keeps the ones it started with as its job.
-export type Settings = { top: number; lang: string; clips: number; high_effort: boolean; prioritize: string[]; upload: boolean };
+export type Settings = { lang: string; clips: number; high_effort: boolean; prioritize: string[]; upload: boolean };
 export type ReeditJob = { reedit: number; request: string; at: number | null };
 export type Run = {
   id: number;

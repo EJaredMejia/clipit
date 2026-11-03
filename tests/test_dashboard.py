@@ -341,7 +341,7 @@ def test_run_status_and_stop_from_the_page(site: Site, monkeypatch: pytest.Monke
 def test_run_settings_from_the_page_are_what_the_next_run_does(site: Site, monkeypatch: pytest.MonkeyPatch) -> None:
     url, conn, _ = site
     assert json.loads(call(url + "/api/run")[2])["settings"] == runs.SETTINGS
-    assert call(url + "/api/settings", {"settings": {**runs.SETTINGS, "top": "6; rm -rf"}})[0] == 400
+    assert call(url + "/api/settings", {"settings": {**runs.SETTINGS, "clips": "6; rm -rf"}})[0] == 400
     assert call(url + "/api/settings", {"settings": {**runs.SETTINGS, "upload": False, "lang": "es"}})[0] == 200
     started = []
     monkeypatch.setattr(subprocess, "Popen", lambda *a, **kw: started.append(a))

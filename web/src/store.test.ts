@@ -266,7 +266,7 @@ test("Kept shows only kept clips not posted anywhere yet, Posted the rest", () =
 
 const run = (over: Partial<Run>): Run => ({
   id: 1, running: false, stopping: false, started: "2026-10-27T10:00:00+00:00", ended: null, lines: [], doing: {}, job: null,
-  settings: { top: 6, lang: "EN", clips: 6, high_effort: false, prioritize: [], upload: true },
+  settings: { lang: "EN", clips: 6, high_effort: false, prioritize: [], upload: true },
   steps: [{ name: "Clip the latest VODs", status: "done" }, { name: "Post to YouTube", status: "done" }], ...over,
 }); // prettier-ignore
 
