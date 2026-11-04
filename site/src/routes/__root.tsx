@@ -1,6 +1,9 @@
 import { HeadContent, Scripts, createRootRoute } from '@tanstack/react-router'
 import { REPO, SITE_URL, SUMMARY } from '#/content'
 import appCss from '../styles.css?url'
+// The same file styles.css asks for, preloaded so it doesn't wait for the CSS. Only the text font: the first screen
+// on a phone has no monospace, and the timeline's mono labels can't move the layout.
+import bricolage from '@fontsource-variable/bricolage-grotesque/files/bricolage-grotesque-latin-standard-normal.woff2?url'
 
 const TITLE = 'Clipit: turn Twitch and Kick streams into Shorts and TikToks'
 
@@ -42,6 +45,7 @@ export const Route = createRootRoute({
       { name: 'theme-color', content: '#160b2b' },
     ],
     links: [
+      { rel: 'preload', href: bricolage, as: 'font', type: 'font/woff2', crossOrigin: 'anonymous' },
       { rel: 'stylesheet', href: appCss },
       { rel: 'icon', href: '/favicon.svg', type: 'image/svg+xml' },
       ...(SITE_URL ? [{ rel: 'canonical', href: `${SITE_URL}/` }] : []),
