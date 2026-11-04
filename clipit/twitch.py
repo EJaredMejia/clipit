@@ -3,6 +3,7 @@
 Unofficial: Twitch can change it without notice. Failures surface as ClipitError / logged warnings, never silently.
 """
 
+import datetime
 import json
 import time
 import urllib.request
@@ -10,7 +11,7 @@ from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-from clipit.util import ClipitError
+from clipit.util import ClipitError, vod_on
 
 # Twitch's public web client id + persisted chat query. Cursor paging fails Twitch's integrity check; offset paging works.
 GQL_CLIENT = "kimne78kx3ncx6brgo4mv6wki5h1ko"
@@ -26,7 +27,7 @@ CLIPS = """query { games(first: 30) { edges { node {
 MOMENTS = """query($login: String!) { user(login: $login) {
   clips(first: 30, criteria: {period: LAST_WEEK, sort: VIEWS_DESC}) { edges { node { viewCount videoOffsetSeconds video { id } } } } } }"""
 VODS = """query($login: String!) {
-  user(login: $login) { videos(first: 3, type: ARCHIVE, sort: TIME) { edges { node { id publishedAt lengthSeconds status } } } } }"""
+  user(login: $login) { videos(first: 10, type: ARCHIVE, sort: TIME) { edges { node { id publishedAt lengthSeconds status } } } } }"""
 
 
 MIN_CLIP_VIEWS = 1000  # views on a streamer's clips of the last day: less is no sign people want their clips
@@ -95,11 +96,12 @@ def top_clipped() -> list[tuple[str, int, str]]:
     return sorted((s for s in found if s[1] >= MIN_CLIP_VIEWS), key=lambda s: -s[1])
 
 
-def latest_vod(login: str) -> dict | None:
-    """Newest finished past-broadcast VOD as {id, publishedAt, lengthSeconds, status}, or None (VODs off, still recording...)."""
+def latest_vod(login: str, on: datetime.date | None = None) -> dict | None:
+    """Newest finished past-broadcast VOD as {id, publishedAt, lengthSeconds, status}, or None (VODs off, still
+    recording...). on: the newest one streaming that day instead, when there is one (util.vod_on)."""
     user = gql(VODS, {"login": login})["user"]
     vods = [e["node"] for e in ((user or {}).get("videos") or {}).get("edges", [])]
-    return next((v for v in vods if v["status"] == "RECORDED"), None)
+    return vod_on([v for v in vods if v["status"] == "RECORDED"], on)
 
 
 def clip_moments(login: str, vod: dict) -> list[tuple[int, int]]:

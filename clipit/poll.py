@@ -3,7 +3,8 @@
 An AI searches the web first for who something just happened to. Then the streamers getting the most clip views today,
 alternating between sites, then big live streamers. A pass goes down that list until it has a clip good enough to post
 and stops there, since a run posts one clip: the ones asked for by name are all clipped, everyone the search found is
-tried whatever top_n says, and past top_n at most EXTRA more VODs. Each VOD is claimed in the SQLite catalog before
+tried whatever top_n says, and past top_n at most EXTRA more VODs. For someone the search found, the VOD of the day
+it happened is clipped, not just their latest, and the clip-picking AI is told what happened. Each VOD is claimed in the SQLite catalog before
 processing, so overlapping runs never double-process and finished VODs are never redone.
 """
 
@@ -20,6 +21,8 @@ from clipit.util import ROOT, ClipitError, log, logger, utcnow
 
 MIN_VIEWERS = 2000  # smaller streamers' clips don't get views
 MAX_AGE = datetime.timedelta(days=2)  # older VODs aren't worth clipping anymore
+# The VOD of an event the search found: people are still talking about it, so it's worth clipping a while longer.
+EVENT_AGE = datetime.timedelta(days=ai.HOT_DAYS + 1)
 EXTRA = 6  # more VODs a pass may try to find a clip good enough to post: bounded, each one takes minutes and AI calls
 # Never clipped, on any site, even when most clipped or prioritized: known to copyright-strike clip channels until banned.
 BLOCKED = frozenset({"pokimane"})
@@ -84,20 +87,21 @@ def ended(vod: dict) -> datetime.datetime:
     return datetime.datetime.fromisoformat(vod["publishedAt"]) + datetime.timedelta(seconds=vod["lengthSeconds"])
 
 
-def find_hot(search_ai: str | None) -> list[tuple[str, str]]:
-    """(site, login) of who to clip today, best first. A failed search still leaves the pass the clip-view ranking."""
+def find_hot(search_ai: str | None) -> dict[tuple[str, str], tuple[str, datetime.date | None]]:
+    """{(site, login): (what happened, the day it did)} of who to clip today, best first. A failed search still leaves
+    the pass the clip-view ranking."""
     if not search_ai:
         logger.warning("no AI with web search: going by clip views only")
-        return []
+        return {}
     try:
         found = ai.find_hot(search_ai)
     except Exception:
         logger.exception("the search for who's popping off failed: going by clip views only")
-        return []
+        return {}
     log(f"the search found {len(found)} streamer(s) with something happening")
-    for site, login, why in found:
-        log(f"  {site}:{login}: {why}")
-    return [(site, login) for site, login, _ in found if login not in BLOCKED | NOT_STREAMERS]
+    for site, login, why, when in found:
+        log(f"  {site}:{login} ({when or 'day unknown'}): {why}")
+    return {(site, login): (why, when) for site, login, why, when in found if login not in BLOCKED | NOT_STREAMERS}
 
 
 def moments_of(site: ModuleType, login: str, vod: dict) -> list[tuple[int, int]]:
@@ -147,13 +151,16 @@ def poll(
     for login, _, _, site in picks:
         name = (site.__name__.rsplit(".", 1)[1], login.lower())
         is_hot = name in hot
+        why, when = hot.get(name, ("", None))
         if good and name not in prioritize:
             continue
         if top_left <= 0 and not is_hot and (dry_run or extra_left <= 0):
             continue  # not a break: someone the search found may still be further down the list
         try:
-            vod = site.latest_vod(login)
-            if not vod or now - ended(vod) > MAX_AGE:
+            vod = site.latest_vod(login, when)
+            if not vod or now - ended(vod) > (EVENT_AGE if when else MAX_AGE):
+                if is_hot:  # the search's best leads must never vanish without a word
+                    log(f"skipping {login}, found by the search: no {'VOD' if not vod else 'recent enough VOD'}")
                 continue  # no usable VOD (VODs off, corporate channel...): the next streamer takes the slot
         except Exception:  # one streamer's VOD list failing (API change, odd data) must not end the pass
             logger.warning("could not list VODs of %s", login, exc_info=True)
@@ -165,6 +172,8 @@ def poll(
                 log(f"would clip {login}: {url}")
             continue
         if not db.claim(conn, vod_id, url, login, "top", run_id=runs.current()):
+            if is_hot:
+                log(f"skipping {login}, found by the search: this VOD was already clipped")
             continue  # already clipped: the next streamer takes the slot, so a repeat pass finds someone new
         if top_left > 0:
             top_left -= 1
@@ -177,7 +186,7 @@ def poll(
         )
         try:
             with db.heartbeat(conn, vod_id):
-                _, clips = process_vod(url, out_root=out_root, clipped=moments_of(site, login, vod), **pipeline_opts)
+                _, clips = process_vod(url, out_root=out_root, clipped=moments_of(site, login, vod), event=why, **pipeline_opts)
             db.save_clips(conn, vod_id, [{**c, "file": f"{vod_id}/{c['file']}"} for c in clips])
             db.finish(conn, vod_id)
             good = good or any(c["score"] >= db.AUTO_SCORE for c in clips)

@@ -92,11 +92,13 @@ def process_vod(
     info: dict | None = None,
     high_effort: bool = False,
     clipped: Sequence[tuple[int, int]] = (),
+    event: str = "",
 ) -> tuple[Path, list[dict]]:
     """Make up to n_clips clips from a VOD, none the AI scored under MIN_SCORE. Returns (work folder, rendered clips). Raises ClipitError when it can't.
     `info` is source.fetch_info(url), when the caller already has it. high_effort: the AI edits each pick scored db.AUTO_SCORE+
     and reviews it until it's done (clipit.edit), into picks_edited.json and posts_edited.md so the plain clips stay as they are.
-    clipped: (second, views) of moments people clipped in this VOD (site.clip_moments), looked at first."""
+    clipped: (second, views) of moments people clipped in this VOD (site.clip_moments), looked at first.
+    event: what the web search says just happened to this streamer (poll.find_hot), told to the clip-picking AI."""
     info = info or source.fetch_info(url)
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", str(info["id"])):  # it becomes a folder name
         raise ClipitError(f"unexpected video id {info['id']!r}")
@@ -152,7 +154,7 @@ def process_vod(
     def ask():
         log(f"asking the AI to pick up to {n_clips} clips from {len(cands)} candidates")
         progress(f"The AI is picking up to {n_clips} clips from {len(cands)} moments")
-        return ai.pick_clips(ai_cmd, info, cands, n_clips, work)
+        return ai.pick_clips(ai_cmd, {**info, "event": event}, cands, n_clips, work)
 
     picks = cached_json(work / "picks.json", ask)  # delete picks.json to re-ask the AI
     if dropped := [p for p in picks if p["score"] < MIN_SCORE]:

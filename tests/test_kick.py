@@ -105,10 +105,11 @@ def test_live_streams_pages_and_drops_odd_slugs(monkeypatch):
     assert kick.live_streams() == [("b-c", 99, "EN"), ("a", 9, "EN")]
 
 
-def test_latest_vod_skips_live_and_sub_only(monkeypatch):
+def test_latest_vod_skips_live_and_sub_only_and_older_ones_listed_first(monkeypatch):
     vods = [
         {"id": "live", "is_live": True, "status": "public", "duration": 0, "start_time": "x"},
         {"id": "sub", "is_live": False, "status": "subscriber_only", "duration": 9, "start_time": "x"},
+        {"id": "old", "is_live": False, "status": "public", "duration": 9, "start_time": "2026-10-16T23:46:35Z"},
         {
             "id": "ok",
             "is_live": False,

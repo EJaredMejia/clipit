@@ -71,7 +71,7 @@ HOT_SCHEMA = _strict(
     {
         "streamers": {
             "type": "array",
-            "items": _strict({field: {"type": "string"} for field in ("site", "login", "why")}),
+            "items": _strict({field: {"type": "string"} for field in ("site", "login", "why", "when")}),
         }
     }
 )
