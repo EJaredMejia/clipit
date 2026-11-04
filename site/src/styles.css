@@ -1,0 +1,52 @@
+@import "@fontsource-variable/bricolage-grotesque/standard.css";
+@import "@fontsource-variable/jetbrains-mono";
+@import "./styles/home.css";
+
+html { background: #160b2b; scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+body { margin: 0; overflow-x: hidden; }
+:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* A drawn 9:16 clip. --h is the clip's hue; --cf-accent the caption highlight. */
+.clip-frame {
+  aspect-ratio: 9 / 16; margin: 0; border-radius: 6px; overflow: hidden; position: relative;
+  display: grid; grid-template-rows: 38% 1fr; background: #000; container-type: inline-size;
+  box-shadow: 0 1px 0 rgb(255 255 255 / .08) inset, 0 24px 48px -20px rgb(0 0 0 / .55);
+}
+.clip-cam {
+  background: radial-gradient(circle at 50% 70%, hsl(var(--h) 45% 55%), hsl(var(--h) 50% 18%) 70%);
+  display: grid; place-items: end center; border-bottom: 2px solid #000;
+}
+.clip-face { width: 60%; height: 78%; position: relative; }
+.clip-face::before, .clip-face::after { content: ""; position: absolute; background: hsl(var(--h) 25% 12% / .85); }
+.clip-face::before { width: 42%; aspect-ratio: 1; border-radius: 50%; left: 29%; top: 4%; }
+.clip-face::after { width: 100%; height: 42%; left: 0; bottom: 0; border-radius: 50% 50% 0 0 / 70% 70% 0 0; }
+.clip-game {
+  position: relative; display: flex; flex-direction: column; justify-content: space-between; padding: 10% 7%;
+  background:
+    radial-gradient(60% 30% at 70% 62%, hsl(calc(var(--h) + 160) 60% 60% / .55), transparent),
+    linear-gradient(hsl(calc(var(--h) + 180) 35% 28%), hsl(calc(var(--h) + 150) 30% 14%));
+}
+.clip-hook {
+  align-self: center; text-align: center; background: #fff; color: #000; font: 800 7cqi/1.15 system-ui, sans-serif;
+  padding: .35em .55em; border-radius: 3px; max-width: 100%;
+}
+.clip-caption {
+  text-align: center; color: #fff; font: 900 10cqi/1.1 system-ui, sans-serif; text-transform: uppercase;
+  -webkit-text-stroke: 3px #000; paint-order: stroke fill;
+}
+.clip-caption .is-hot { color: var(--cf-accent, #ffd23f); }
+
+
+/* "--" must read as two dashes in commands. After home.css so it beats its font shorthands. */
+.va pre, .va code { font-variant-ligatures: none; }
+.clip-progress {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: rgb(255 255 255 / .85);
+  transform-origin: left; animation: clip-progress var(--loop) linear both;
+}
+@keyframes clip-progress { from { transform: scaleX(0); } }
+
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }

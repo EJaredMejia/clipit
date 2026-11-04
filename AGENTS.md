@@ -28,6 +28,19 @@ npm test                                                 # Vitest, must pass
 npm run build                                            # type check, then write the page to clipit/web/
 ```
 
+The public website is a TanStack Start (server-rendered React) app in `site/`, on Cloudflare Workers at
+https://clipit.jared-mejia.workers.dev. It's separate from the dashboard and shares no code with it:
+
+```bash
+cd site && npm ci                                        # install, versions pinned by package-lock.json
+npm run dev                                              # the site on :3000
+npm run build && npm run typecheck                       # must pass; CI's `site` job runs both
+```
+
+Never deploy the site by hand: `.github/workflows/deploy-site.yml` deploys it when a change to `site/` lands on
+main, with the `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` repository secrets. Copy lives in
+`site/src/content.ts` and must match what the tool really does.
+
 A change is not done until `ruff check .`, `ruff format --check .`, `pyright` and `pytest -q` all pass, and for `web/`
 changes `npm test` and `npm run build` too, with the rebuilt `clipit/web/` committed. CI runs all of them on every push
 and pull request, and fails if `clipit/web/` doesn't match `web/src/`. Changes to media handling (ffmpeg, Whisper,

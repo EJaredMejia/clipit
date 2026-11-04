@@ -79,3 +79,30 @@ jobs:
             echo "::error::clipit/web is out of date: run 'npm run build' in web/ and commit clipit/web"
             exit 1
           fi
+
+  # The public website (site/), deployed by deploy-site.yml once this passes on main.
+  site:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: site/package-lock.json
+      - name: Install (versions pinned by package-lock.json)
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Type check
+        run: npm run typecheck
+      - name: Committed route tree matches src/routes
+        run: |
+          if [[ -n "$(git status --porcelain -- src/routeTree.gen.ts)" ]]; then
+            echo "::error::src/routeTree.gen.ts is out of date: run 'npm run build' in site/ and commit it"
+            exit 1
+          fi
