@@ -1,6 +1,7 @@
-import { PICKS, VOD } from '#/content'
+import { CLIPS, VOD } from '#/content'
 
 const W = 4 // px per minute in the viewBox
+const HOURS = Array.from({ length: Math.floor(VOD.length / 60) + 1 }, (_, h) => h)
 
 function stamp(min: number) {
   const h = Math.floor(min / 60)
@@ -19,18 +20,18 @@ export function Timeline() {
           <rect x={i * W} y={122} width={W - 1.5} height={m.chat * 56} className="tl-chat" />
         </g>
       ))}
-      {[0, 1, 2, 3, 4].map((h) => (
-        <text key={h} x={h * 60 * W} y="210" className="tl-hour" textAnchor={h === 0 ? 'start' : h === 4 ? 'end' : 'middle'}>
+      {HOURS.map((h) => (
+        <text key={h} x={h * 60 * W} y="210" className="tl-hour" textAnchor={h === 0 ? 'start' : h === HOURS.length - 1 ? 'end' : 'middle'}>
           {h}h
         </text>
       ))}
-      {PICKS.map((p, i) => (
+      {CLIPS.map(({ at: p }, i) => (
         <g key={p} className="tl-pick" style={{ '--i': i } as React.CSSProperties}>
           <rect x={p * W - 4} y="18" width={4 * W + 8} height="168" rx="4" />
           <text x={p * W - 4} y="10">{stamp(p)}</text>
         </g>
       ))}
-      <line className="tl-scan" x1="0" x2="0" y1="14" y2="190" />
+      <line className="tl-scan" x1="0" x2="0" y1="14" y2="190" style={{ '--tl-w': `${VOD.length * W}px` } as React.CSSProperties} />
     </svg>
   )
 }

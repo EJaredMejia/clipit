@@ -82,7 +82,7 @@
   .tl-pick { animation: va-fade .25s ease-out both; animation-delay: calc(.55s + var(--i) * .5s); }
   .va-clip { animation: va-rise .3s ease-out both; animation-delay: calc(.7s + var(--i) * .5s); }
 }
-@keyframes va-scan { 0% { opacity: 1; transform: translateX(0); } 95% { opacity: 1; } 100% { opacity: 0; transform: translateX(960px); } }
+@keyframes va-scan { 0% { opacity: 1; transform: translateX(0); } 95% { opacity: 1; } 100% { opacity: 0; transform: translateX(var(--tl-w)); } }
 @keyframes va-fade { from { opacity: 0; } }
 @keyframes va-rise { from { opacity: 0; transform: translateY(12px); } }
 

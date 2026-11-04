@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { AIS, CLIPS, DESCRIPTION, FEATURES, INSTALL, PICKS, REPO, SPECS, STEPS, VOD } from '#/content'
+import { AIS, CLIPS, DESCRIPTION, FEATURES, INSTALL, REPO, SPECS, STEPS, VOD } from '#/content'
 import { ClipFrame } from '#/components/ClipFrame'
 import { Timeline } from '#/components/Timeline'
 import { CopyButton } from '#/components/CopyButton'
@@ -54,7 +54,7 @@ function Home() {
           <Timeline />
           <div className="va-clips">
             {CLIPS.map((c, i) => (
-              <div key={c.hook} className="va-clip" style={{ '--x': `${((PICKS[i] + 2) / VOD.length) * 100}%`, '--i': i } as React.CSSProperties}>
+              <div key={c.hook} className="va-clip" style={{ '--x': `${((c.at + 2) / VOD.length) * 100}%`, '--i': i } as React.CSSProperties}>
                 <ClipFrame clip={c} />
                 <span className="va-score">Score {c.score} / 10</span>
               </div>
@@ -101,6 +101,9 @@ function Home() {
           <div className="va-code">
             <pre><code>{INSTALL.join('\n')}</code></pre>
             <CopyButton text={INSTALL.join('\n')} />
+            <p className="va-code-note">
+              On Windows, activate with <code>.venv\Scripts\activate</code> instead of <code>source .venv/bin/activate</code>.
+            </p>
             <p className="va-code-note">
               The last line clips one Twitch VOD. Run <code>clipit --poll</code> to clip whoever is trending, or{' '}
               <code>clipit --dashboard</code> to review clips in your browser.

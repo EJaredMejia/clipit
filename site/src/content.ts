@@ -69,7 +69,7 @@ export const SPECS: [string, string][] = [
   ['License', 'MIT'],
 ]
 
-export const AIS =['Claude Code', 'Codex CLI', 'Ollama', 'Any AI CLI']
+export const AIS = ['Claude Code', 'Codex CLI', 'Ollama', 'Any AI CLI']
 
 export const INSTALL = [
   'git clone https://github.com/EJaredMejia/clipit.git',
@@ -78,10 +78,11 @@ export const INSTALL = [
   'clipit https://www.twitch.tv/videos/2906456464',
 ]
 
+// at: the minute of the VOD each clip starts, three minutes wide on the timeline.
 export const CLIPS = [
-  { hook: 'He did NOT see that coming', words: ['wait', 'wait', 'WAIT', 'no', 'way'], hot: 2, score: 9.1, hue: 330 },
-  { hook: 'Chat called it 10 seconds early', words: ['bro', 'is', 'actually', 'cooked'], hot: 3, score: 8.6, hue: 210 },
-  { hook: 'The cop stop went sideways', words: ['sir', 'step', 'out', 'of', 'the', 'car'], hot: 1, score: 8.8, hue: 40 },
+  { hook: 'He did NOT see that coming', words: ['wait', 'wait', 'WAIT', 'no', 'way'], hot: 2, score: 9.1, hue: 330, at: 37 },
+  { hook: 'Chat called it 10 seconds early', words: ['bro', 'is', 'actually', 'cooked'], hot: 3, score: 8.6, hue: 210, at: 111 },
+  { hook: 'The cop stop went sideways', words: ['sir', 'step', 'out', 'of', 'the', 'car'], hot: 1, score: 8.8, hue: 40, at: 186 },
 ]
 
 // A made-up four-hour VOD: loudness and chat per minute, deterministic so server and client render the same.
@@ -93,4 +94,3 @@ export const VOD = Array.from({ length: 240 }, (_, i) => {
   return { loud, chat }
 })
 
-export const PICKS = [37, 111, 186] // start minute of each picked window, three minutes wide
