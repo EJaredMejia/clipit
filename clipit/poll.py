@@ -17,7 +17,7 @@ from types import ModuleType
 
 from clipit import ai, db, kick, runs, twitch
 from clipit.pipeline import process_vod
-from clipit.util import ROOT, ClipitError, log, logger, utcnow
+from clipit.util import ROOT, ClipitError, ended, log, logger, utcnow
 
 MIN_VIEWERS = 2000  # smaller streamers' clips don't get views
 MAX_AGE = datetime.timedelta(days=2)  # older VODs aren't worth clipping anymore
@@ -81,10 +81,6 @@ def candidates(
             ]
         )
     return out
-
-
-def ended(vod: dict) -> datetime.datetime:
-    return datetime.datetime.fromisoformat(vod["publishedAt"]) + datetime.timedelta(seconds=vod["lengthSeconds"])
 
 
 def find_hot(search_ai: str | None) -> dict[tuple[str, str], tuple[str, datetime.date | None]]:
@@ -158,7 +154,11 @@ def poll(
             continue  # not a break: someone the search found may still be further down the list
         try:
             vod = site.latest_vod(login, when)
-            if not vod or now - ended(vod) > (EVENT_AGE if when else MAX_AGE):
+            if when and vod and db.status(conn, site.vod_ref(login, vod)[0]) == "done":
+                vod = site.latest_vod(login)  # the event's VOD is clipped: their newest may have what came next
+            # only a VOD from the event on gets EVENT_AGE: vod_on falls back to the newest when none covers the day
+            event_vod = when and vod and ended(vod).date() >= when
+            if not vod or now - ended(vod) > (EVENT_AGE if event_vod else MAX_AGE):
                 if is_hot:  # the search's best leads must never vanish without a word
                     log(f"skipping {login}, found by the search: no {'VOD' if not vod else 'recent enough VOD'}")
                 continue  # no usable VOD (VODs off, corporate channel...): the next streamer takes the slot

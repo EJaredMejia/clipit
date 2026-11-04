@@ -23,6 +23,11 @@ def utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
 
 
+def ended(vod: dict) -> datetime.datetime:
+    """When a VOD's stream ended: publishedAt is when it started."""
+    return datetime.datetime.fromisoformat(vod["publishedAt"]) + datetime.timedelta(seconds=vod["lengthSeconds"])
+
+
 def vod_on(vods: list[dict], day: datetime.date | None) -> dict | None:
     """The newest of vods (newest first, each with publishedAt and lengthSeconds) streaming on day, or the newest one
     when day is None or none was."""
@@ -31,8 +36,7 @@ def vod_on(vods: list[dict], day: datetime.date | None) -> dict | None:
         lo = datetime.datetime.combine(day, datetime.time(), datetime.UTC)
         hi = lo + datetime.timedelta(hours=36)
         for v in vods:
-            start = datetime.datetime.fromisoformat(v["publishedAt"])
-            if start < hi and start + datetime.timedelta(seconds=v["lengthSeconds"]) > lo:
+            if datetime.datetime.fromisoformat(v["publishedAt"]) < hi and ended(v) > lo:
                 return v
     return next(iter(vods), None)
 

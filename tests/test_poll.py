@@ -297,3 +297,26 @@ def test_someone_the_search_found_gets_the_vod_of_that_day_and_the_picker_hears_
     monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned live", day)])
     poll.poll(conn, top_n=1, out_root=out, search_ai="search")
     assert calls == ["v9"] and told == ["banned live"]
+
+
+def test_the_event_day_buys_extra_age_only_for_a_vod_from_that_day_on_and_a_done_one_gives_way(world, monkeypatch):
+    conn, calls, out = world
+    day = datetime.date.today() - datetime.timedelta(days=1)
+    at = lambda days: (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)).isoformat()  # noqa: E731
+    # s2 has no VOD of the event day, and its newest is 4 days old: past MAX_AGE, so not clipped
+    monkeypatch.setattr(poll.twitch, "latest_vod", lambda login, on=None: {"id": "7", "publishedAt": at(4), "lengthSeconds": 60})
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned", day)])
+    monkeypatch.setattr(poll, "EXTRA", 0)
+    poll.poll(conn, top_n=0, out_root=out, search_ai="search")
+    assert calls == []
+
+    # s2's event VOD was already clipped: the newest one is clipped instead
+    vods = {
+        day: {"id": "8", "publishedAt": at(1), "lengthSeconds": 60},
+        None: {"id": "9", "publishedAt": at(0.1), "lengthSeconds": 60},
+    }
+    monkeypatch.setattr(poll.twitch, "latest_vod", lambda login, on=None: vods[on])
+    db.claim(conn, "v8", "u", "s2", "top")
+    db.finish(conn, "v8")
+    poll.poll(conn, top_n=0, out_root=out, search_ai="search")
+    assert calls == ["v9"]
