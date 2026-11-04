@@ -6,7 +6,7 @@
   --cf-accent: #ffc83d;
   --gutter: 32px; --section: 144px; --r: 6px;
   background: var(--bg); color: var(--text); min-height: 100vh;
-  font-family: "Bricolage Grotesque Variable", "Bricolage Grotesque Fallback", system-ui, sans-serif; font-size: 17px; line-height: 1.6;
+  font-family: "Bricolage Grotesque Variable", "Bricolage Grotesque Fallback", "Bricolage Grotesque Fallback Roboto", system-ui, sans-serif; font-size: 17px; line-height: 1.6;
   font-variation-settings: "wdth" 100;
 }
 .va a { color: inherit; }
@@ -39,7 +39,7 @@
   grid-column: 1 / -1; margin: 0 0 40px;
   font-size: clamp(46px, 6.6vw, 96px); line-height: .94; letter-spacing: -.02em; font-weight: 720;
   font-variation-settings: "wdth" 82, "opsz" 96;
-  font-family: "Bricolage Grotesque Variable", "Bricolage Grotesque Condensed Fallback", system-ui, sans-serif;
+  font-family: "Bricolage Grotesque Variable", "Bricolage Grotesque Condensed Fallback", "Bricolage Grotesque Condensed Fallback Roboto", system-ui, sans-serif;
 }
 .va-hero h1 span { display: block; text-wrap: balance; }
 .va-hero-copy { grid-column: 1 / span 6; }
@@ -125,7 +125,7 @@
 .va-code-note code { color: var(--text); }
 .va-copy {
   position: absolute; top: 40px; right: 16px; height: 32px; padding: 0 12px; border-radius: 4px; cursor: pointer;
-  font: 600 13px/1 "Bricolage Grotesque Variable", "Bricolage Grotesque Fallback", system-ui, sans-serif; color: var(--text);
+  font: 600 13px/1 "Bricolage Grotesque Variable", "Bricolage Grotesque Fallback", "Bricolage Grotesque Fallback Roboto", system-ui, sans-serif; color: var(--text);
   background: rgb(199 182 255 / .1); border: 1px solid rgb(199 182 255 / .22);
   transition: background-color .15s ease-out, transform .15s ease-out;
 }

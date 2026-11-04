@@ -2,21 +2,34 @@
 @import "@fontsource-variable/jetbrains-mono";
 @import "./styles/home.css";
 
-/* Fallbacks sized to match the web fonts (metrics from @capsizecss/metrics), so swapping in the real font
-   once it loads barely moves the text. */
+/* Fallbacks sized to match the web fonts, so swapping in the real font once it loads doesn't move the text.
+   Metrics come from @capsizecss/metrics (createFontStack). Each comes in an Arial version (Windows, macOS, iOS)
+   and a Roboto version (Android, ChromeOS, most Linux), since a local() font that's missing skips the face. */
 @font-face {
   font-family: "Bricolage Grotesque Fallback"; src: local("Arial"), local("ArialMT");
   ascent-override: 88.2116%; descent-override: 25.6098%; line-gap-override: 0%; size-adjust: 105.4283%;
 }
 @font-face {
+  font-family: "Bricolage Grotesque Fallback Roboto"; src: local("Roboto"), local("Roboto Regular"), local("Roboto-Regular");
+  ascent-override: 88.0184%; descent-override: 25.5537%; line-gap-override: 0%; size-adjust: 105.6597%;
+}
+@font-face {
   font-family: "JetBrains Mono Fallback"; src: local("Courier New"), local("CourierNewPSMT");
   ascent-override: 102.0166%; descent-override: 30.0049%; line-gap-override: 0%; size-adjust: 99.9837%;
 }
-/* The headline uses Bricolage condensed (wdth 82), which Arial can't do: this one is scaled to the same line width
-   instead, so the headline wraps the same way before and after the swap. */
+/* The headline uses Bricolage condensed (wdth 82), which these fonts can't do, so it gets fallbacks scaled to the
+   same line width instead and wraps the same way before and after the swap. Derived as:
+     k = width of "The forty seconds worth posting." in Bricolage (720, wdth 82)
+         ÷ its width in "Bricolage Grotesque Fallback" (720), measured in Chrome: 1046.69 / 1387.09 = 0.7546
+     size-adjust = the regular face's size-adjust × k; ascent and descent overrides = the regular face's ÷ k.
+   Re-measure k if the headline's weight, wdth or letter-spacing changes. */
 @font-face {
   font-family: "Bricolage Grotesque Condensed Fallback"; src: local("Arial"), local("ArialMT");
   ascent-override: 116.9%; descent-override: 33.9387%; line-gap-override: 0%; size-adjust: 79.5552%;
+}
+@font-face {
+  font-family: "Bricolage Grotesque Condensed Fallback Roboto"; src: local("Roboto"), local("Roboto Regular"), local("Roboto-Regular");
+  ascent-override: 116.644%; descent-override: 33.8643%; line-gap-override: 0%; size-adjust: 79.7298%;
 }
 
 html { background: #160b2b; scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
