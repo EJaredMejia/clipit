@@ -23,6 +23,24 @@ def utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
 
 
+def ended(vod: dict) -> datetime.datetime:
+    """When a VOD's stream ended: publishedAt is when it started."""
+    return datetime.datetime.fromisoformat(vod["publishedAt"]) + datetime.timedelta(seconds=vod["lengthSeconds"])
+
+
+def vod_on(vods: list[dict], day: datetime.date | None) -> dict | None:
+    """The newest of vods (newest first, each with publishedAt and lengthSeconds) streaming on day, or the newest one
+    when day is None or none was."""
+    if day:
+        # to noon UTC the next day: an evening stream in the Americas is already past midnight UTC
+        lo = datetime.datetime.combine(day, datetime.time(), datetime.UTC)
+        hi = lo + datetime.timedelta(hours=36)
+        for v in vods:
+            if datetime.datetime.fromisoformat(v["publishedAt"]) < hi and ended(v) > lo:
+                return v
+    return next(iter(vods), None)
+
+
 def sh(cmd: list[str], timeout: float, **kw) -> subprocess.CompletedProcess:
     """Run a command, capture text output, raise on failure or when it runs longer than timeout seconds."""
     return subprocess.run(

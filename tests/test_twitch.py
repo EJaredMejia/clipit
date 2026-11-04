@@ -1,3 +1,4 @@
+import datetime
 import io
 import json
 import urllib.error
@@ -122,3 +123,16 @@ def test_clip_moments_are_only_this_vods_most_viewed_first(monkeypatch):
     edges = [clip("1", 50, 10), clip("2", 60, 99), clip("1", 70, 40), clip("1", None, 500), clip(None, 80, 500)]
     monkeypatch.setattr(twitch, "gql", lambda q, v: {"user": {"clips": {"edges": edges}}})
     assert twitch.clip_moments("x", {"id": "1"}) == [(70, 40), (50, 10)]
+
+
+def test_latest_vod_on_a_day_takes_the_vod_streaming_then(monkeypatch):
+    vods = [
+        {"id": "3", "status": "RECORDING", "publishedAt": "2026-11-03T18:00:00Z", "lengthSeconds": 100},
+        {"id": "2", "status": "RECORDED", "publishedAt": "2026-11-02T18:00:00Z", "lengthSeconds": 3600},
+        {"id": "1", "status": "RECORDED", "publishedAt": "2026-11-01T01:00:00Z", "lengthSeconds": 3600},  # Oct 31 in the US
+        {"id": "0", "status": "RECORDED", "publishedAt": "2026-10-29T18:00:00Z", "lengthSeconds": 3600},
+    ]
+    monkeypatch.setattr(twitch, "gql", lambda q, v: {"user": {"videos": {"edges": [{"node": n} for n in vods]}}})
+    assert twitch.latest_vod("x") == vods[1]
+    assert twitch.latest_vod("x", datetime.date(2026, 10, 31)) == vods[2]
+    assert twitch.latest_vod("x", datetime.date(2026, 10, 30)) == vods[1]  # nothing that day: the latest

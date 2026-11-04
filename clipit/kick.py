@@ -15,7 +15,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from clipit.twitch import MIN_CLIP_VIEWS, RETRY_WAITS
-from clipit.util import ClipitError, logger
+from clipit.util import ClipitError, logger, vod_on
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"  # Kick answers 403 to urllib's default user agent
 PAGES = 5  # 100 live streams a page, most viewers first: 5 pages reach down to the smaller streamers
@@ -106,18 +106,26 @@ def followers(channel: dict) -> int:
         return 0
 
 
-def latest_vod(slug: str) -> dict | None:
-    """Newest finished public VOD as {id, publishedAt, lengthSeconds, language, followers}, or None (none yet, still live, sub-only...)."""
+def latest_vod(slug: str, on: datetime.date | None = None) -> dict | None:
+    """Newest finished public VOD as {id, publishedAt, lengthSeconds, language, followers}, or None (none yet, still
+    live, sub-only...). on: the newest one streaming that day instead, when there is one (util.vod_on)."""
     channel = get(f"https://kick.com/api/v2/channels/{check_slug(slug)}")
     vods = get(f"https://web.kick.com/api/v1/channels/{int(channel['id'])}/videos")["data"]
-    v = next((v for v in vods if not v["is_live"] and v["status"] == "public" and v["duration"]), None)
-    return v and {
-        "id": v["id"],
-        "publishedAt": v["start_time"],
-        "lengthSeconds": v["duration"],
-        "language": (v.get("language") or "").split("-")[0].upper(),  # "en-IN" is English for --lang EN
-        "followers": followers(channel),
-    }
+    found = [
+        {
+            "id": v["id"],
+            "publishedAt": v["start_time"],
+            "lengthSeconds": v["duration"],
+            "language": (v.get("language") or "").split("-")[0].upper(),  # "en-IN" is English for --lang EN
+        }
+        for v in vods
+        if not v["is_live"] and v["status"] == "public" and v["duration"] and v.get("start_time")
+    ]
+    # Kick lists some older VODs first (seen: Adin Ross's from Oct 16 ahead of Nov 3), so the newest wasn't found. Its
+    # times all come as "2026-11-03T11:24:53Z": compared as text, so one odd one can't fail the whole channel.
+    found.sort(key=lambda v: str(v["publishedAt"]), reverse=True)
+    v = vod_on(found, on)
+    return v and {**v, "followers": followers(channel)}
 
 
 def clip_moments(slug: str, vod: dict) -> list[tuple[int, int]]:

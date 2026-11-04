@@ -44,6 +44,9 @@ Pick up to {n} clips most likely to go viral, or none if nothing here would stop
   clip is always a SHORTER cut from inside one: never return a candidate's whole range.
 - A candidate marked "viewers clipped this" is a moment strangers already chose: start there, it beats any chat or
   audio spike. Make your own cut and write your own words, with your own angle on why it matters.
+- "In the news" is what a web search says just happened to this streamer: people are looking for it right now. If a
+  candidate shows it happening, it is your best clip. It may not be in this stream at all: then judge the rest as usual,
+  and never claim a clip shows it when it doesn't.
 - Cold open: start on the first second that matters, never dead air or slow setup. The first 2 seconds must hook.
 - "peak" is the second of the single biggest thing in the clip: the hit, the shock, the punchline. At most {lead} s
   of setup before it and {tail} s after it are kept, the rest is cut, so choose the peak with that in mind.
@@ -85,6 +88,7 @@ Answer with ONLY this JSON (no commentary). No emoji in "hook".
 <stream_data>
 Stream title: {title}
 Streamer: {streamer}
+In the news: {event}
 
 {candidates}
 </stream_data>
@@ -134,6 +138,7 @@ Answer with ONLY this JSON (no commentary), one entry per check:
 CHANNEL = re.compile(r"^\s*[-*]\s*`?(twitch|kick):([A-Za-z0-9_-]{2,40})`?\s*$", re.M | re.I)
 
 MAX_HOT = 20  # streamers one search can add to a pass
+HOT_DAYS = 4  # an event day further back than this is a wrong date, or old news: the streamer's latest VOD is clipped
 HOT_PROMPT = """Today is {date}. You find what to clip for a Shorts channel of Twitch and Kick streams. Use web search
 now, many searches, and only trust what you find from the last 48 hours, never what you remember.
 
@@ -149,7 +154,7 @@ would share comes first. Up to {most}, and fewer is fine.
 
 Answer with ONLY this JSON (no commentary):
 {{"streamers": [{{"site": "twitch or kick", "login": "the channel name in their twitch.tv or kick.com URL",
-"why": "the event in one line"}}]}}"""
+"why": "the event in one line", "when": "YYYY-MM-DD, the day it happened on stream"}}]}}"""
 LOGIN = re.compile(r"[A-Za-z0-9_-]{2,40}")
 
 
@@ -238,22 +243,33 @@ def ask_ai(cmd: str, prompt: str, schema: dict = codex.PICKS_SCHEMA, images: Seq
     return claude_result(out) if images else out
 
 
-def clean_hot(reply: object) -> list[tuple[str, str, str]]:
-    """(site, login, why) from a search's answer. It comes from the open web: only well-formed channels on our sites
-    pass, and what's left is only ever looked up on those sites, once each."""
+Hot = tuple[str, str, str, datetime.date | None]  # (site, login, what happened, the day it happened if known)
+
+
+def clean_hot(reply: object) -> list[Hot]:
+    """(site, login, why, when) from a search's answer. It comes from the open web: only well-formed channels on our
+    sites pass, and what's left is only ever looked up on those sites, once each. A day that isn't a real date in the
+    last HOT_DAYS is dropped."""
     entries = reply.get("streamers") if isinstance(reply, dict) else None
-    found: dict[tuple[str, str], str] = {}
+    found: dict[tuple[str, str], tuple[str, datetime.date | None]] = {}
+    today = datetime.date.today()
     for e in entries if isinstance(entries, list) else []:
         if not isinstance(e, dict):
             continue
         site, login = str(e.get("site", "")).lower().strip(), str(e.get("login", "")).lower().strip()
+        try:
+            when: datetime.date | None = datetime.date.fromisoformat(str(e.get("when", ""))[:10])
+        except ValueError:
+            when = None
+        if when and not 0 <= (today - when).days <= HOT_DAYS:
+            when = None
         if site in ("twitch", "kick") and LOGIN.fullmatch(login):
-            found.setdefault((site, login), " ".join(str(e.get("why", "")).split())[:200])
-    return [(site, login, why) for (site, login), why in found.items()][:MAX_HOT]
+            found.setdefault((site, login), (" ".join(str(e.get("why", "")).split())[:200], when))
+    return [(site, login, why, when) for (site, login), (why, when) in found.items()][:MAX_HOT]
 
 
-def find_hot(cmd: str) -> list[tuple[str, str, str]]:
-    """Search the web, fresh every time, for who to clip today: (site, login, why), best first."""
+def find_hot(cmd: str) -> list[Hot]:
+    """Search the web, fresh every time, for who to clip today: (site, login, why, when), best first."""
     prompt = HOT_PROMPT.format(date=datetime.date.today(), most=MAX_HOT)
     if cmd == "codex":
         reply = codex.ask(prompt, web_search=True, schema=codex.HOT_SCHEMA, timeout=AI_TIMEOUT)
@@ -282,6 +298,7 @@ def build_prompt(info: dict, cands: list[dict], n: int) -> str:
         date=datetime.date.today(),
         title=fenced(info.get("title"))[:200],
         streamer=fenced(info.get("uploader")),
+        event=fenced(info.get("event") or "nothing found")[:200],
         n=n,
         auto_score=db.AUTO_SCORE,
         max_post=MAX_POST_LEN,

@@ -89,7 +89,7 @@ def world(tmp_path, monkeypatch):
     monkeypatch.setattr(
         poll.twitch,
         "latest_vod",
-        lambda login: login in vods and {"id": vods[login], "publishedAt": fresh, "lengthSeconds": 3600} or None,
+        lambda login, on=None: login in vods and {"id": vods[login], "publishedAt": fresh, "lengthSeconds": 3600} or None,
     )
     calls = []
 
@@ -149,10 +149,10 @@ def test_one_streamers_vod_lookup_failing_does_not_end_the_pass(world, monkeypat
     conn, calls, out = world
     real = poll.twitch.latest_vod
 
-    def flaky(login):
+    def flaky(login, on=None):
         if login == "big1":
             raise ClipitError("Twitch API: service timeout")
-        return real(login)
+        return real(login, on)
 
     monkeypatch.setattr(poll.twitch, "latest_vod", flaky)
     poll.poll(conn, top_n=2, lang="EN", out_root=out)
@@ -220,7 +220,7 @@ def test_a_pass_with_no_good_clip_gives_up_after_extra_vods(world, monkeypatch):
 
 def test_a_pass_stops_at_its_first_good_clip(world, monkeypatch):
     conn, calls, out = world
-    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned"), ("twitch", "s1", "a fight")])
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned", None), ("twitch", "s1", "a fight", None)])
     poll.poll(conn, top_n=6, out_root=out, search_ai="search")
     assert calls == ["v5"]  # the rest wait for the next pass: a run only posts one clip
 
@@ -235,9 +235,14 @@ def test_everyone_the_search_finds_is_tried_whatever_top_n_says(world, monkeypat
     conn, calls, out = world
     weak_unless(monkeypatch, "/never")
     monkeypatch.setattr(poll, "EXTRA", 0)
-    found = [("twitch", "s2", "banned"), ("twitch", "s1", "a fight"), ("twitch", "pgl", "a final"), ("kick", "nobody", "x")]
+    found = [
+        ("twitch", "s2", "banned", None),
+        ("twitch", "s1", "a fight", None),
+        ("twitch", "pgl", "a final", None),
+        ("kick", "nobody", "x", None),
+    ]
     monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: found)
-    monkeypatch.setattr(poll.kick, "latest_vod", lambda login: None)
+    monkeypatch.setattr(poll.kick, "latest_vod", lambda login, on=None: None)
     poll.poll(conn, top_n=1, out_root=out, search_ai="search")
     assert calls == ["v5", "v4"]  # both found, with a slot for one
 
@@ -246,7 +251,7 @@ def test_a_full_pass_still_reaches_someone_the_search_found_further_down(world, 
     conn, calls, out = world
     weak_unless(monkeypatch, "/never")
     monkeypatch.setattr(poll, "EXTRA", 0)
-    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned")])
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned", None)])
     poll.poll(conn, top_n=1, out_root=out, search_ai="search", prioritize=[("twitch", "big1"), ("twitch", "s1")])
     assert calls == ["v1", "v5"]  # s1 is past the quota, but s2 was found by the search
 
@@ -275,3 +280,43 @@ def test_a_pass_where_every_vod_failed_says_so(world):
     poll.poll(conn, top_n=1, lang="EN", out_root=out)  # v1 works
     assert poll.poll(conn, top_n=1, lang="EN", out_root=out) == 1  # only v3 left, and it fails
     assert calls == ["v1", "v3"]
+
+
+def test_someone_the_search_found_gets_the_vod_of_that_day_and_the_picker_hears_what_happened(world, monkeypatch):
+    conn, calls, out = world
+    day = datetime.date.today() - datetime.timedelta(days=3)
+    old = datetime.datetime.combine(day, datetime.time(20), datetime.UTC).isoformat()
+    told = []
+
+    def vods(login, on=None):  # s2's VOD of that day is older than MAX_AGE, but it's when it happened
+        return {"id": "9", "publishedAt": old, "lengthSeconds": 3600} if login == "s2" and on == day else None
+
+    real = poll.process_vod
+    monkeypatch.setattr(poll.twitch, "latest_vod", vods)
+    monkeypatch.setattr(poll, "process_vod", lambda url, out_root, **kw: told.append(kw["event"]) or real(url, out_root))
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned live", day)])
+    poll.poll(conn, top_n=1, out_root=out, search_ai="search")
+    assert calls == ["v9"] and told == ["banned live"]
+
+
+def test_the_event_day_buys_extra_age_only_for_a_vod_from_that_day_on_and_a_done_one_gives_way(world, monkeypatch):
+    conn, calls, out = world
+    day = datetime.date.today() - datetime.timedelta(days=1)
+    at = lambda days: (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)).isoformat()  # noqa: E731
+    # s2 has no VOD of the event day, and its newest is 4 days old: past MAX_AGE, so not clipped
+    monkeypatch.setattr(poll.twitch, "latest_vod", lambda login, on=None: {"id": "7", "publishedAt": at(4), "lengthSeconds": 60})
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned", day)])
+    monkeypatch.setattr(poll, "EXTRA", 0)
+    poll.poll(conn, top_n=0, out_root=out, search_ai="search")
+    assert calls == []
+
+    # s2's event VOD was already clipped: the newest one is clipped instead
+    vods = {
+        day: {"id": "8", "publishedAt": at(1), "lengthSeconds": 60},
+        None: {"id": "9", "publishedAt": at(0.1), "lengthSeconds": 60},
+    }
+    monkeypatch.setattr(poll.twitch, "latest_vod", lambda login, on=None: vods[on])
+    db.claim(conn, "v8", "u", "s2", "top")
+    db.finish(conn, "v8")
+    poll.poll(conn, top_n=0, out_root=out, search_ai="search")
+    assert calls == ["v9"]
