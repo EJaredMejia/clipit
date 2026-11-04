@@ -2,6 +2,23 @@
 @import "@fontsource-variable/jetbrains-mono";
 @import "./styles/home.css";
 
+/* Fallbacks sized to match the web fonts (metrics from @capsizecss/metrics), so swapping in the real font
+   once it loads barely moves the text. */
+@font-face {
+  font-family: "Bricolage Grotesque Fallback"; src: local("Arial"), local("ArialMT");
+  ascent-override: 88.2116%; descent-override: 25.6098%; line-gap-override: 0%; size-adjust: 105.4283%;
+}
+@font-face {
+  font-family: "JetBrains Mono Fallback"; src: local("Courier New"), local("CourierNewPSMT");
+  ascent-override: 102.0166%; descent-override: 30.0049%; line-gap-override: 0%; size-adjust: 99.9837%;
+}
+/* The headline uses Bricolage condensed (wdth 82), which Arial can't do: this one is scaled to the same line width
+   instead, so the headline wraps the same way before and after the swap. */
+@font-face {
+  font-family: "Bricolage Grotesque Condensed Fallback"; src: local("Arial"), local("ArialMT");
+  ascent-override: 116.9%; descent-override: 33.9387%; line-gap-override: 0%; size-adjust: 79.5552%;
+}
+
 html { background: #160b2b; scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
 body { margin: 0; overflow-x: hidden; }
 :focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
