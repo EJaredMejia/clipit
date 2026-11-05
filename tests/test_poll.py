@@ -79,7 +79,8 @@ def test_vod_age_counts_from_when_the_stream_ended():
 
 @pytest.fixture
 def world(tmp_path, monkeypatch):
-    """Fake Twitch + pipeline. big2 has no VODs; VOD 3 always fails."""
+    """Fake Twitch + pipeline. big2 has no VODs; VOD 3 always fails. A pass wants one good VOD unless a test says more."""
+    monkeypatch.setattr(db, "POSTS", 1)
     fresh = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=5)).isoformat()
     vods = {"big1": "1", "mid": "3", "s1": "4", "s2": "5"}
     monkeypatch.setattr(poll.twitch, "live_streams", lambda: STREAMS)
@@ -192,12 +193,12 @@ def test_dry_run_touches_nothing(world):
     assert calls == [] and conn.execute("SELECT count(*) FROM vods").fetchone()[0] == 0
 
 
-def weak_unless(monkeypatch, good_url_end):
+def weak_unless(monkeypatch, good_url_ends):
     real = poll.process_vod
 
     def scored(url, out_root, **kw):
         work, clips = real(url, out_root, **kw)
-        return work, [{**c, "score": 8.0 if url.endswith(good_url_end) else 5.0} for c in clips]
+        return work, [{**c, "score": 8.0 if url.endswith(good_url_ends) else 5.0} for c in clips]
 
     monkeypatch.setattr(poll, "process_vod", scored)
 
@@ -216,6 +217,15 @@ def test_a_pass_with_no_good_clip_gives_up_after_extra_vods(world, monkeypatch):
     monkeypatch.setattr(poll, "EXTRA", 1)
     poll.poll(conn, top_n=1, out_root=out)
     assert len(calls) == 2
+
+
+def test_a_pass_goes_on_until_posts_vods_have_a_good_clip(world, monkeypatch):
+    conn, calls, out = world
+    monkeypatch.setattr(db, "POSTS", 2)
+    monkeypatch.setattr(poll.twitch, "live_streams", lambda: [("big1", 30000, "EN"), ("s1", 3000, "EN"), ("s2", 3000, "EN")])
+    weak_unless(monkeypatch, ("/1", "/5"))
+    poll.poll(conn, top_n=1, out_root=out)
+    assert calls == ["v1", "v4", "v5"]  # big1 good, s1 weak, s2 good: two good VODs, so the run can post two
 
 
 def test_a_pass_stops_at_its_first_good_clip(world, monkeypatch):

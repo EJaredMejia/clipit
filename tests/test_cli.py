@@ -29,7 +29,7 @@ def test_every_repeats_passes_and_survives_a_failed_one(monkeypatch: pytest.Monk
     monkeypatch.setattr(cli, "setup_logging", lambda out: None)
     monkeypatch.setattr(cli.shutil, "which", lambda name: name)
     monkeypatch.setattr(poll, "poll", fake_poll)
-    monkeypatch.setattr(youtube, "upload_next", lambda *a, **kw: None)
+    monkeypatch.setattr(youtube, "upload_run", lambda *a, **kw: None)
     monkeypatch.setattr(cli.time, "sleep", fake_sleep)
     with pytest.raises(Stop):
         cli.main()
@@ -44,7 +44,7 @@ def test_prioritize_reaches_poll_and_upload_as_clean_names(monkeypatch: pytest.M
     monkeypatch.setattr(cli, "setup_logging", lambda out: None)
     monkeypatch.setattr(cli.shutil, "which", lambda name: name)
     monkeypatch.setattr(poll, "poll", lambda *a, prioritize, **kw: got.update(poll=prioritize))
-    monkeypatch.setattr(youtube, "upload_next", lambda conn, out, first, run_id: got.update(upload=first))
+    monkeypatch.setattr(youtube, "upload_run", lambda conn, out, first, run_id: got.update(upload=first))
     cli.main()
     assert got == {"poll": [("twitch", "caedrel"), ("kick", "xqc")], "upload": ["twitch:caedrel", "kick:xqc"]}
 
@@ -59,7 +59,7 @@ def test_a_failed_upload_still_polls_then_exits_with_an_error(monkeypatch: pytes
     monkeypatch.setattr(cli, "setup_logging", lambda out: None)
     monkeypatch.setattr(cli.shutil, "which", lambda name: name)
     monkeypatch.setattr(poll, "poll", lambda *a, **kw: polled.append(True))
-    monkeypatch.setattr(youtube, "upload_next", no_login)
+    monkeypatch.setattr(youtube, "upload_run", no_login)
     with pytest.raises(SystemExit) as exit:
         cli.main()
     assert exit.value.code == 1  # a dashboard run shows the post as failed, not done
@@ -72,7 +72,7 @@ def test_failed_vods_still_post_then_exit_with_an_error(monkeypatch: pytest.Monk
     monkeypatch.setattr(cli, "setup_logging", lambda out: None)
     monkeypatch.setattr(cli.shutil, "which", lambda name: name)
     monkeypatch.setattr(poll, "poll", lambda *a, **kw: 2)  # every VOD of the pass failed
-    monkeypatch.setattr(youtube, "upload_next", lambda *a, **kw: posted.append(True))
+    monkeypatch.setattr(youtube, "upload_run", lambda *a, **kw: posted.append(True))
     with pytest.raises(SystemExit) as exit:
         cli.main()
     assert exit.value.code == 1  # a dashboard run shows clipping as failed, not done

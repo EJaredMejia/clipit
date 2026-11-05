@@ -8,7 +8,7 @@ clipit --poll              (clip the streamers getting the most clip views today
 clipit --poll --dry-run    (only show which VODs it would clip)
 clipit --dashboard         (browse every VOD and clip, mark clips keep/skip and posted)
 clipit --youtube-login     (once: sign in to the YouTube channel to post to)
-clipit --poll --upload     (also post the best fresh clip to YouTube Shorts, a few a day)
+clipit --poll --upload     (also post the best fresh clips to YouTube Shorts, up to 6 a run, an hour apart)
 clipit --poll --upload --every 45   (keep running: one pass every 45 minutes, no Task Scheduler needed)
 """
 
@@ -158,7 +158,7 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
     elif a.upload:
         try:
             # a dashboard run posts only clips of the VODs its own polling took
-            youtube.upload_next(conn, a.out, a.prioritize, run_id=runs.current())
+            youtube.upload_run(conn, a.out, a.prioritize, run_id=runs.current())
         except Exception:  # logged, and retried on a later run: the rest of this run (polling) still happens
             logger.exception("YouTube upload failed")
             upload_failed = True

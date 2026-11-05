@@ -7,6 +7,8 @@ from pathlib import Path
 
 import numpy as np
 
+from clipit.util import logger
+
 WORKERS = 2  # measured on 12 cores: 2 parallel windows are 1.5x faster, a 3rd adds nothing
 # Streamers talk to "chat" constantly; without this Whisper often writes "Chad". One word, so it can't steer the language.
 PROMPT = "Chat,"
@@ -51,15 +53,19 @@ def transcribe(audio: Path, windows: list[tuple[int, int]], model_name: str) -> 
             condition_on_previous_text=False,
             initial_prompt=PROMPT,
         )
-        segs = [
-            {
-                "start": a + s.start,
-                "end": a + s.end,
-                "text": s.text.strip(),
-                "words": [[a + w.start, a + w.end, w.word.strip()] for w in s.words or []],
-            }
-            for s in segs
-        ]
+        try:
+            segs = [
+                {
+                    "start": a + s.start,
+                    "end": a + s.end,
+                    "text": s.text.strip(),
+                    "words": [[a + w.start, a + w.end, w.word.strip()] for w in s.words or []],
+                }
+                for s in segs
+            ]
+        except IndexError:  # faster-whisper's word alignment crashes on some audio: lose this moment, not the whole VOD
+            logger.warning("Whisper failed on the moment at %d s, skipping it", a, exc_info=True)
+            segs = []
         return segs, info.language
 
     if not windows:
