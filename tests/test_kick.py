@@ -144,14 +144,15 @@ def test_followers_survive_a_format_change():
 def test_clip_moments_places_live_clips_in_the_vod(monkeypatch):
     clips = [
         {"id": "a", "created_at": at(130), "duration": 30, "views": 5},  # covers 100-130 s
-        {"id": "b", "created_at": at(5000), "duration": 20, "views": 900},  # made after the stream, from the VOD
+        {"id": "b", "created_at": at(3610), "duration": 30, "views": 900},  # made just after the stream, from the VOD
         {"id": "c", "created_at": at(20), "duration": 60, "views": 900},  # would start before the VOD
         {"id": "d", "created_at": "garbled", "duration": 10, "views": 1},
-        {"id": "e", "created_at": at(400.5), "duration": 25, "views": 50},
+        {"id": "e", "created_at": "2026-10-24T20:06:40.5149Z", "duration": 25, "views": 50},  # Kick's odd fractions
+        {"id": "f", "created_at": at(2000), "duration": 180, "views": 70},  # a long clip: its moment is near the end
     ]
     monkeypatch.setattr(kick, "get", lambda url: {"clips": clips})
     vod = {"publishedAt": at(0), "lengthSeconds": 3600}
-    assert kick.clip_moments("destiny", vod) == [(375, 50), (100, 5)]
+    assert kick.clip_moments("destiny", vod) == [(1970, 70), (375, 50), (100, 5)]
 
 
 def test_top_clipped_adds_up_views_and_reads_languages_off_vods(monkeypatch):
