@@ -161,7 +161,7 @@ recorded by hand from the dashboard until then.
   repost someone's clip, or reuse its title or wording: the user wants clips we make, and reposts lose reach on YouTube.
   The score alone proves nothing: the picker grades its own pick from a transcript. So a separate reviewer watches
   each finished clip, as contact sheets of its frames (`render.sheets`), that
-  reached `pipeline.REVIEW_FROM` (one under `db.AUTO_SCORE`: the picker only reads words, and a 7 that passes every check by sight earns the bar), answers `ai.CHECKS`, and code decides: any failed check,
+  reached `db.AUTO_SCORE`, answers `ai.CHECKS`, and code decides: any failed check,
   a clip over `ai.MAX_POST_LEN`, or a reviewer that couldn't see it drops the score below the bar (`pipeline.review`).
   Cuts are made in code too (`ai.cut_to_peak`): a clip keeps `ai.LEAD` s before the peak the picker names and `ai.TAIL` s after.
   A clip the reviewer stops is cut again once around the peak it saw (`ai.recut`) and watched again: the picker only reads words.

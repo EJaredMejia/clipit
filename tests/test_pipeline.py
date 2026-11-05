@@ -219,18 +219,8 @@ def test_a_clip_the_review_stops_never_reaches_the_auto_post_score(stages, monke
 
 def test_a_rerun_doesnt_review_a_reviewed_clip_or_look_at_weak_ones(monkeypatch, tmp_path):
     monkeypatch.setattr(pipeline.ai, "veto", lambda *a: pytest.fail("reviewed again"))
-    for clip in ({"score": 9.0, "reviewed": True}, {"score": 6.0}):
+    for clip in ({"score": 9.0, "reviewed": True}, {"score": 7.0}):
         pipeline.review("x", {}, clip, [], tmp_path)
-
-
-def test_a_seven_that_passes_by_sight_earns_the_post_score_and_one_that_fails_stays(monkeypatch, tmp_path):
-    answers = [[], ["tension: calm talk"]]
-    monkeypatch.setattr(pipeline.render, "sheets", lambda *a: [])
-    monkeypatch.setattr(pipeline.ai, "veto", lambda *a: answers.pop(0))
-    passed, failed = ({"score": 7.0, "start": 0.0, "end": 20.0, "file": "c.mp4", "why": ""} for _ in range(2))
-    pipeline.review("x", {}, passed, [], tmp_path)
-    pipeline.review("x", {}, failed, [], tmp_path)
-    assert passed["score"] == pipeline.db.AUTO_SCORE and failed["score"] == 7.0
 
 
 def test_no_webcam_but_a_person_in_shot_crops_on_them_unless_the_edit_chose(monkeypatch, tmp_path):
