@@ -78,6 +78,8 @@ Pick up to {n} clips most likely to go viral, or none if nothing here would stop
   1-4: needs stream context, an inside joke, or nothing much happens.
   You only read the words, and danger reads thin: cops showing up, a swatting, a fight, a crash, a chase or a stranger
   really losing it at the streamer is {auto_score}+ when the words and chat show it happening, however little is said.
+  So is a real argument, callout or bet blow-up between real people that lands, above all the one "In the news": the
+  moment people are searching for, caught as it happens, is {auto_score}+ unless the cut itself is weak.
   Talking about something, however hot the topic, is not it happening. A reviewer watches every {auto_score}+ clip
   before it posts, so score what happens, not how well it reads.
   The moment has to carry it: how well known the streamer is earns nothing. Never round a calm clip up.
