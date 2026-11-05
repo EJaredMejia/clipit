@@ -71,13 +71,15 @@ Pick up to {n} clips most likely to go viral, or none if nothing here would stop
   holds the clip back.
   What holds strangers: suspense, danger, cops, fights, hits, panic, real conflict with real people, and an adult's
   sex appeal or outrageous body or costume. Calm in-game comedy and roleplay bits lose them. A dark or messy shot is fine.
-  9-10: people would share it, stitch it and argue in the comments. Rare: most streams have none.
+  9-10: people would share it, stitch it and argue in the comments.
   7-8: someone who has never heard of the streamer watches to the end and comments.
   4-6: fans of the streamer enjoy it, everyone else scrolls past.
   1-3: needs stream context, an inside joke, or nothing much happens.
-  The moment has to carry it: how well known the streamer is earns nothing.
-  Only clips scored {auto_score}+ are posted, and most streams have none: then score every clip low and none is posted. That
-  is the right result, never a reason to round up.
+  You only read the words, and danger reads thin: cops showing up, a swatting, a fight, a crash, a chase or a stranger
+  really losing it at the streamer is {auto_score}+ when the words and chat show it happening, however little is said.
+  Talking about something, however hot the topic, is not it happening. A reviewer watches every {auto_score}+ clip
+  before it posts, so score what happens, not how well it reads.
+  The moment has to carry it: how well known the streamer is earns nothing. Never round a calm clip up.
   Riding a trend earns points only when the clip is actually about it.
 - No links, @mentions of other accounts, or slurs in any text you write.
 - Hashtags: 3-5, mixing broad ones (gaming, twitch) with specific ones (the game, the meme). A credit line for the

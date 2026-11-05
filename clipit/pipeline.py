@@ -23,6 +23,9 @@ from clipit.util import ROOT, ClipitError, log, logger, mmss, slug, write_atomic
 
 MAX_DURATION = 48 * 3600  # bounds disk use (~2.5 GB of audio); longer VODs are skipped
 MIN_SCORE = 5  # picks the AI scored under this (1-10) are dropped: trash nobody would keep, not worth rendering
+REVIEW_FROM = (
+    7  # picks the AI scored this high are watched by a reviewer (review): one under db.AUTO_SCORE, since it only reads words
+)
 
 
 def cached_json(path: Path, make: Callable[[], Any]) -> Any:
@@ -241,12 +244,14 @@ def review(
     work: Path,
     remake: Callable[[dict, float, float], bool] | None = None,
 ) -> None:
-    """A separate reviewer watches a clip good enough to post by itself. If it fails any check, the clip is cut again once
-    around the peak the reviewer saw (remake: the picker only reads words) and watched again. If it still fails, its
-    score drops under db.AUTO_SCORE and the reasons go in "why", so it stays for the user to judge but never posts alone.
+    """A separate reviewer watches a clip good enough to post by itself, or one point short (REVIEW_FROM): the picker only
+    reads words, so it scores cops or a fight it can't see a point low, and a 7 that passes every check by sight earns
+    db.AUTO_SCORE. If it fails any check, the clip is cut again once around the peak the reviewer saw (remake) and
+    watched again. If it still fails, its score stays under db.AUTO_SCORE and the reasons go in "why", so it stays for
+    the user to judge but never posts alone.
     A review that never happened (the AI failed) stops the clip too, and is asked again if the VOD is run again."""
     clip.setdefault("picked_score", clip["score"])
-    if clip["picked_score"] < db.AUTO_SCORE or clip.get("reviewed"):
+    if clip["picked_score"] < REVIEW_FROM or clip.get("reviewed"):
         return
     failed = watch(cmd, info, clip, words, work)
     seen = clip.pop("seen", None)
@@ -254,7 +259,7 @@ def review(
         failed = watch(cmd, info, clip, words, work)
         clip.pop("seen", None)
     clip["reviewed"] = not any(f.startswith("review:") for f in failed)
-    clip["score"] = db.AUTO_SCORE - 1.0 if failed else clip["picked_score"]
+    clip["score"] = min(clip["picked_score"], db.AUTO_SCORE - 1.0) if failed else max(clip["picked_score"], db.AUTO_SCORE)
     if failed:
         log(f"review stopped {clip['file']}: " + "; ".join(failed))
         clip["why"] = ("Review failed: " + "; ".join(failed))[: ai.TEXT_FIELDS["why"]]
