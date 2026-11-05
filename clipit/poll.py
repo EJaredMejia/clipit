@@ -106,7 +106,7 @@ def find_hot(search_ai: str | None) -> dict[tuple[str, str], tuple[str, datetime
     for hot in itertools.chain.from_iterable(itertools.zip_longest(*answers)):  # each search's best first
         if hot:
             merged.setdefault((hot[0], hot[1].lower()), hot)
-    found = list(merged.values())
+    found = list(merged.values())[: ai.MAX_HOT]  # each is tried whatever top_n says: two full answers mustn't double a pass
     log(f"the search found {len(found)} streamer(s) with something happening")
     for site, login, why, when in found:
         log(f"  {site}:{login} ({when or 'day unknown'}): {why}")

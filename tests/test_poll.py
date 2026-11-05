@@ -277,6 +277,15 @@ def test_the_searches_are_merged_best_first_and_one_failing_loses_only_its_names
     monkeypatch.setattr(poll.ai, "find_hot", flaky)
     assert list(poll.find_hot("search")) == [("twitch", "c")]
 
+    prefixes = ["s", "t"]  # each search answers in full, with names of its own
+
+    def full(cmd):
+        p = prefixes.pop()
+        return [("twitch", f"{p}{i}", "x", None) for i in range(poll.ai.MAX_HOT)]
+
+    monkeypatch.setattr(poll.ai, "find_hot", full)
+    assert len(poll.find_hot("search")) == poll.ai.MAX_HOT  # two full answers still make one pass's worth
+
 
 def test_a_failed_search_still_clips_by_the_ranking(world, monkeypatch):
     conn, calls, out = world
