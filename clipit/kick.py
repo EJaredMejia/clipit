@@ -20,6 +20,7 @@ from clipit.util import ClipitError, logger, vod_on
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"  # Kick answers 403 to urllib's default user agent
 PAGES = 5  # 100 live streams a page, most viewers first: 5 pages reach down to the smaller streamers
 CLIP_PAGES = 5  # 20 clips a page, most viewed first: by page 5 they are down to ~80 views
+MOMENT_PAGES = 3  # one channel's clips of the week: the most viewed 60 cover its last few VODs' big moments
 MIN_FOLLOWERS = 100_000  # a clip can blow up on a nobody: seen 19,000 views for a channel of 1,023 followers
 MAX_PAGES = 300  # chat pages to sample a VOD: ~4 min at GAP, alongside the audio download
 CLOSE_SPOTS, CLOSE_SPAN, CLOSE_STEP = 40, 106, 15  # read_closer: ~280 more pages, ~4 min. Replaying 10 VODs' chat, this
@@ -129,9 +130,24 @@ def latest_vod(slug: str, on: datetime.date | None = None) -> dict | None:
 
 
 def clip_moments(slug: str, vod: dict) -> list[tuple[int, int]]:
-    """Where in this VOD people clipped. shortcut: none yet, Kick's clips give no VOD offset, it has to be worked out from
-    the playlist's timestamps; until then Kick VODs go by chat and loudness only."""
-    return []
+    """Where in this VOD people clipped, as (second, views), most viewed first. Kick's clips carry no VOD offset, but one
+    made live is the duration just before its created_at: a clip made after the stream ended (from the VOD) is left out."""
+    start = datetime.datetime.fromisoformat(vod["publishedAt"])
+    length = float(vod["lengthSeconds"])
+    found, cursor = [], ""
+    for _ in range(MOMENT_PAGES):
+        d = get(f"https://kick.com/api/v2/channels/{check_slug(slug)}/clips?sort=view&time=week{cursor}")
+        for c in d.get("clips") or []:
+            try:
+                at = (datetime.datetime.fromisoformat(c["created_at"]) - start).total_seconds() - float(c["duration"])
+                if 0 <= at < length:
+                    found.append((int(at), int(c["views"])))
+            except (KeyError, TypeError, ValueError):  # one odd clip only loses its hint
+                logger.warning("unexpected Kick clip %r", c.get("id"))
+        if not d.get("nextCursor"):
+            break
+        cursor = "&cursor=" + urllib.parse.quote(d["nextCursor"])
+    return sorted(found, key=lambda m: -m[1])
 
 
 def vod_ref(slug: str, vod: dict) -> tuple[str, str]:
