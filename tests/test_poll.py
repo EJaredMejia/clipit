@@ -256,6 +256,37 @@ def test_a_full_pass_still_reaches_someone_the_search_found_further_down(world, 
     assert calls == ["v1", "v5"]  # s1 is past the quota, but s2 was found by the search
 
 
+def test_the_searches_are_merged_best_first_and_one_failing_loses_only_its_names(monkeypatch):
+    answers = [
+        [("twitch", "a", "x", None), ("kick", "b", "y", None)],
+        [("twitch", "c", "z", None), ("twitch", "A", "same streamer", None), ("twitch", "d", "w", None)],
+    ]
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: answers.pop(0))
+    got = [(site, login.lower()) for site, login in poll.find_hot("search")]  # the searches run at once: either may be first
+    assert sorted(got) == [("kick", "b"), ("twitch", "a"), ("twitch", "c"), ("twitch", "d")]  # A is a once
+    assert set(got[:2]) == {("twitch", "a"), ("twitch", "c")}  # each search's best come before anyone's second
+
+    calls = []
+
+    def flaky(cmd):
+        calls.append(cmd)
+        if len(calls) == 1:
+            raise ClipitError("no web")
+        return [("twitch", "c", "z", None)]
+
+    monkeypatch.setattr(poll.ai, "find_hot", flaky)
+    assert list(poll.find_hot("search")) == [("twitch", "c")]
+
+    prefixes = ["s", "t"]  # each search answers in full, with names of its own
+
+    def full(cmd):
+        p = prefixes.pop()
+        return [("twitch", f"{p}{i}", "x", None) for i in range(poll.ai.MAX_HOT)]
+
+    monkeypatch.setattr(poll.ai, "find_hot", full)
+    assert len(poll.find_hot("search")) == poll.ai.MAX_HOT  # two full answers still make one pass's worth
+
+
 def test_a_failed_search_still_clips_by_the_ranking(world, monkeypatch):
     conn, calls, out = world
 
