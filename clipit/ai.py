@@ -76,8 +76,10 @@ Pick up to {n} clips most likely to go viral, or none if nothing here would stop
   7: ok: it works, but nothing makes people stay or comment.
   5-6: bad: slow, small, or only funny if you watch the stream.
   1-4: needs stream context, an inside joke, or nothing much happens.
-  You only read the words, and danger reads thin: cops showing up, a swatting, a fight, a crash, a chase or a stranger
-  really losing it at the streamer is {auto_score}+ when the words and chat show it happening, however little is said.
+  You only read the words, and what's on camera reads thin: cops showing up, a swatting, a fight, a crash, a chase, a
+  stranger really losing it at the streamer, or a striking costume or body being shown off is {auto_score}+ when the
+  words and chat show it happening, however little is said. When a clip depends on what the camera shows, score it
+  as if the camera shows it: the reviewer sees the video and stops it if not.
   So is a real argument, callout or bet blow-up between real people that lands, above all the one "In the news": the
   moment people are searching for, caught as it happens, is {auto_score}+ unless the cut itself is weak.
   Talking about something, however hot the topic, is not it happening. A reviewer watches every {auto_score}+ clip
