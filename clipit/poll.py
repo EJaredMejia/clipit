@@ -12,6 +12,7 @@ import datetime
 import itertools
 import sqlite3
 from collections.abc import Iterable
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import ModuleType
 
@@ -27,7 +28,8 @@ EXTRA = 6  # more VODs a pass may try to find a clip good enough to post: bounde
 # Never clipped, on any site, even when most clipped or prioritized: known to copyright-strike clip channels until banned.
 BLOCKED = frozenset({"pokimane"})
 # Tournament and company channels: famous and clipped, but no streamer to name. shortcut: the ones seen, add more as they show up.
-NOT_STREAMERS = frozenset({"pgl", "riotgames"})
+NOT_STREAMERS = frozenset({"pgl", "riotgames", "warcraft", "eslcs", "eslcsb"})
+SEARCHES = 2  # web searches per pass, merged: one alone found 2 names one pass and 9 the next
 
 
 Stream = tuple[str, int, str, ModuleType]  # (login, viewers, language, site module: twitch or kick)
@@ -89,11 +91,22 @@ def find_hot(search_ai: str | None) -> dict[tuple[str, str], tuple[str, datetime
     if not search_ai:
         logger.warning("no AI with web search: going by clip views only")
         return {}
-    try:
-        found = ai.find_hot(search_ai)
-    except Exception:
-        logger.exception("the search for who's popping off failed: going by clip views only")
+    with ThreadPoolExecutor(SEARCHES) as pool:  # each one is minutes of searching: side by side, not one after another
+        asked = [pool.submit(ai.find_hot, search_ai) for _ in range(SEARCHES)]
+    answers = []
+    for f in asked:
+        try:
+            answers.append(f.result())
+        except Exception:
+            logger.exception("a search for who's popping off failed")
+    if not answers:
+        logger.warning("every search failed: going by clip views only")
         return {}
+    merged: dict[tuple[str, str], ai.Hot] = {}
+    for hot in itertools.chain.from_iterable(itertools.zip_longest(*answers)):  # each search's best first
+        if hot:
+            merged.setdefault((hot[0], hot[1].lower()), hot)
+    found = list(merged.values())
     log(f"the search found {len(found)} streamer(s) with something happening")
     for site, login, why, when in found:
         log(f"  {site}:{login} ({when or 'day unknown'}): {why}")
