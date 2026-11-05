@@ -103,11 +103,13 @@ MAX_POST_LEN = 45  # seconds: our choice, the evidence on length conflicts; a lo
 CHECKS = {
     "hook": "In the first 3 seconds the sound, the action or the on-screen hook makes a stranger want to know what happens. "
     "Shouting, panic, a threat or a striking body or costume counts, even in the dark. Calm setup or a joke being set up fails.",
-    "tension": "It has real stakes or real pull: danger, a chase, cops, a fight, a hit, panic, a stranger's anger, or an "
-    "adult's sex appeal or body that people can't look away from. Suspense counts: the danger can stay off camera, heard in "
-    "voices, panic or sirens, and it needn't resolve. A dark, shaky or messy shot is fine, it can even add to it.",
-    "real": "It feels like it's really happening to a real person, or it's a real body or outfit on camera. Fail calm "
-    "in-game comedy, roleplay bits, characters joking in a game, and sitting still talking over a screen or a video call.",
+    "tension": "It has real stakes or real pull: danger, a chase, cops, a fight, a hit, panic, a stranger's anger, a real "
+    "argument or callout between real people, someone caught out or losing money, or an adult's sex appeal or body that "
+    "people can't look away from. Suspense counts: the danger can stay off camera, heard in voices, panic or sirens, and "
+    "it needn't resolve. A dark, shaky or messy shot is fine, it can even add to it.",
+    "real": "It's really happening to real people: a real argument, a real reaction to something that just happened to "
+    "them, a real body or outfit on camera. Reacting at a desk or on a call counts when the moment itself is real. "
+    "Fail fiction: roleplay bits, game characters joking in a game, scripted skits.",
     "share": "A 19 year old would comment on it or send it to a friend, even if only to say what the hell is this. "
     "Mildly amusing fails.",
     "minors": "Nobody who is or might be under 18 is shown in a sexual or body-focused way. Any doubt fails.",
