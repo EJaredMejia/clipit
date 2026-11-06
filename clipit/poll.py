@@ -29,6 +29,7 @@ EXTRA = 12  # more VODs a pass may try to find a clip good enough to post: bound
 BLOCKED = frozenset({"pokimane"})
 # Tournament and company channels: famous and clipped, but no streamer to name. shortcut: the ones seen, add more as they show up.
 NOT_STREAMERS = frozenset({"pgl", "riotgames", "warcraft", "eslcs", "eslcsb"})
+TRIES = 2  # a failing VOD is tried again at once (APIs and downloads fail now and then); stages done are cached
 SEARCHES = 2  # web searches per pass, merged: one alone found 2 names one pass and 9 the next
 
 
@@ -188,25 +189,35 @@ def poll(
             if is_hot:
                 log(f"skipping {login}, found by the search: this VOD was already clipped")
             continue  # already clipped: the next streamer takes the slot, so a repeat pass finds someone new
-        if top_left > 0:
-            top_left -= 1
-        elif not is_hot:
-            extra_left -= 1
+        slot = "top" if top_left > 0 else "" if is_hot else "extra"
+        top_left -= slot == "top"
+        extra_left -= slot == "extra"
         tried += 1
         log(f"clipping {login}: {url}")
         runs.progress(
             what=f"Clipping {login}", vod=[tried, max(tried, top_n, len(hot))], stage="Getting the VOD's details", count=None
         )
         try:
-            with db.heartbeat(conn, vod_id):
-                _, clips = process_vod(url, out_root=out_root, clipped=moments_of(site, login, vod), event=why, **pipeline_opts)
+            clips: list[dict] = []  # set by the attempt that works: the last one re-raises
+            for attempt in range(1, TRIES + 1):
+                try:
+                    with db.heartbeat(conn, vod_id):
+                        clipped = moments_of(site, login, vod)
+                        _, clips = process_vod(url, out_root=out_root, clipped=clipped, event=why, **pipeline_opts)
+                    break
+                except Exception:
+                    if attempt == TRIES:
+                        raise
+                    logger.warning("VOD %s failed, trying it again", vod_id, exc_info=True)
             db.save_clips(conn, vod_id, [{**c, "file": f"{vod_id}/{c['file']}"} for c in clips])
             db.finish(conn, vod_id)
             good += any(c["score"] >= db.AUTO_SCORE for c in clips)
         except Exception as e:  # one bad VOD (sub-only, deleted...) must not stop the rest
-            logger.exception("VOD %s failed", vod_id)
+            logger.exception("VOD %s failed %d times, the next streamer takes its place", vod_id, TRIES)
             db.finish(conn, vod_id, error=f"{type(e).__name__}: {e}"[:1000])
             failed += 1
+            top_left += slot == "top"  # it made nothing: its slot goes to the next one on the list
+            extra_left += slot == "extra"
         finally:  # the ~300 MB audio is only needed while processing; a later rerun re-downloads it
             for p in (Path(out_root) / vod_id).glob("audio.*"):
                 p.unlink()

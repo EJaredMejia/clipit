@@ -195,7 +195,8 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
 
 ### Errors and logging
 - Library code raises `ClipitError` for expected failures. Only `cli.py` calls `sys.exit`.
-- One bad VOD must never stop a polling pass: `poll.py` catches it, logs it with its traceback, records it in the database.
+- One bad VOD must never stop a polling pass: `poll.py` tries it again once (`poll.TRIES`), then logs it with its traceback,
+  records it in the database, and gives its slot to the next streamer on the list, so a crash never costs the run a clip.
 - Log with `util.log` / `util.logger`, never `print`. Use `logger.exception` when a traceback helps.
 
 ### Code
