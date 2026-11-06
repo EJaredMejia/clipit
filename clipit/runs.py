@@ -26,7 +26,8 @@ from clipit.util import logger
 # What a run does when the user never changed it: the CLI's defaults, then posting.
 SETTINGS = {"lang": "EN", "clips": 6, "high_effort": False, "prioritize": [], "upload": True}
 # A hung step is killed. A poll that finds no good clip goes through many VODs; high effort is up to 5 AI reviews per clip.
-POLL_TIMEOUT, HIGH_EFFORT_TIMEOUT, UPLOAD_TIMEOUT, REEDIT_TIMEOUT = 8 * 3600, 24 * 3600, 3600, 2 * 3600
+# A pass looks for db.POSTS good VODs, and the post step sends up to db.POSTS uploads.
+POLL_TIMEOUT, HIGH_EFFORT_TIMEOUT, UPLOAD_TIMEOUT, REEDIT_TIMEOUT = 12 * 3600, 24 * 3600, db.POSTS * 3600, 2 * 3600
 UPLOAD = "--upload"  # the step Stop never cuts
 REQUEST_MAX = 500  # characters of a re-edit request
 BEAT = 3.0  # seconds between the runner's checks: alive, stop asked, timed out

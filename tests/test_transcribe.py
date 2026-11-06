@@ -8,8 +8,8 @@ from clipit import transcribe
 
 
 def iter_crash():
+    yield types.SimpleNamespace(start=0.0, end=1.0, text=" w20 ", words=[])
     raise IndexError("boolean index did not match")  # faster-whisper's find_alignment, mid-iteration
-    yield
 
 
 def test_parallel_windows_keep_order_and_the_first_windows_language(monkeypatch):
@@ -36,6 +36,6 @@ def test_parallel_windows_keep_order_and_the_first_windows_language(monkeypatch)
         lambda cmd, **kw: types.SimpleNamespace(stdout=np.full(4, float(cmd[cmd.index("-ss") + 1]), np.float32).tobytes()),
     )
     out = list(transcribe.transcribe(transcribe.Path("a.m4a"), [(0, 5), (10, 15), (20, 25), (30, 35)], "small"))
-    assert [s[0]["text"] if s else None for s in out] == ["w0", "w10", None, "w30"]  # a crashing window is lost alone
-    assert [s[0]["start"] for s in out if s] == [0, 10, 30]
+    assert [[g["text"] for g in s] for s in out] == [["w0"], ["w10"], ["w20"], ["w30"]]  # a crash loses only what follows
+    assert [s[0]["start"] for s in out] == [0, 10, 20, 30]
     assert langs[0] is None and langs[1:] == ["de", "de", "de"]

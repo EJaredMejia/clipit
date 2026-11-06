@@ -179,3 +179,24 @@ def test_a_run_posts_one_clip_per_vod_first_the_rest_scheduled_an_hour_apart(con
         for h in (1, 2)
     ]
     assert youtube.upload_run(conn, tmp_path) == 0  # the next run waits for an hour after the last scheduled one
+
+
+def test_a_run_that_runs_out_of_quota_keeps_its_posts_and_other_errors_still_fail(conn, tmp_path, monkeypatch):
+    db.save_clips(conn, "v1", [{**CLIP, "idx": 2, "file": "v1/clips/02_a.mp4", "start": 50.0, "end": 70.0}])
+    sent = []
+
+    def upload(creds, video, body):
+        if sent:
+            raise HttpError(httplib2.Response({"status": 403}), b'{"error": {"errors": [{"reason": "quotaExceeded"}]}}')
+        sent.append(video)
+        return VIDEO
+
+    monkeypatch.setattr(youtube, "_upload", upload)
+    assert youtube.upload_run(conn, tmp_path) == 1  # the run's post step isn't failed by the quota
+    conn.execute("DELETE FROM uploads")
+    sent.clear()
+    monkeypatch.setattr(
+        youtube, "_upload", lambda *a: (_ for _ in ()).throw(HttpError(httplib2.Response({"status": 403}), b"quotaExceeded"))
+    )
+    with pytest.raises(HttpError):  # nothing posted at all: the step shows as failed
+        youtube.upload_run(conn, tmp_path)

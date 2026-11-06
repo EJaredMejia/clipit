@@ -103,8 +103,13 @@ def upload_next(
 def upload_run(conn: sqlite3.Connection, out: Path, first: list[str] | None = None, run_id: int | None = None) -> int:
     """A run's posts: up to db.POSTS due clips, the first now and each next one scheduled GAP later. Returns how many."""
     at, posted = utcnow(), 0
-    while posted < db.POSTS and upload_next(conn, out, first, run_id, at):
-        posted, at = posted + 1, at + GAP
+    try:
+        while posted < db.POSTS and upload_next(conn, out, first, run_id, at):
+            posted, at = posted + 1, at + GAP
+    except HttpError as e:  # the daily quota ran out partway: the posts so far stand, the rest wait for a later run
+        if not posted or not any(q in e.content for q in QUOTA):
+            raise
+        logger.warning("YouTube's daily quota ran out after %d post(s): the rest wait for a later run", posted)
     return posted
 
 
