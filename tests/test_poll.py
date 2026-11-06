@@ -255,6 +255,22 @@ def test_a_vod_that_keeps_failing_gives_its_slot_to_the_next_streamer(world, mon
     assert calls == ["v3", "v3", "v4"]  # mid broke twice, so s1 gets the one slot
 
 
+def test_when_every_vod_breaks_the_pass_stops_giving_slots_back(world, monkeypatch):
+    conn, calls, out = world
+    monkeypatch.setattr(poll, "EXTRA", 0)
+    monkeypatch.setattr(poll, "REPLACE", 1)
+    big = [("big1", 30000, "EN"), ("mid", 9000, "EN"), ("s1", 8000, "EN"), ("s2", 7000, "EN")]
+    monkeypatch.setattr(poll.twitch, "live_streams", lambda: big)
+
+    def broken(url, out_root, **kw):
+        calls.append(url)
+        raise ClipitError("whisper model missing")
+
+    monkeypatch.setattr(poll, "process_vod", broken)
+    poll.poll(conn, top_n=1, out_root=out)
+    assert len(calls) == 2  # big1's slot went to mid, then no more: s1 and s2 are never tried
+
+
 def test_a_pass_stops_at_its_first_good_clip(world, monkeypatch):
     conn, calls, out = world
     monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned", None), ("twitch", "s1", "a fight", None)])

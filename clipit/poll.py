@@ -29,6 +29,7 @@ EXTRA = 12  # more VODs a pass may try to find a clip good enough to post: bound
 BLOCKED = frozenset({"pokimane"})
 # Tournament and company channels: famous and clipped, but no streamer to name. shortcut: the ones seen, add more as they show up.
 NOT_STREAMERS = frozenset({"pgl", "riotgames", "warcraft", "eslcs", "eslcsb"})
+REPLACE = 6  # failed VODs a pass gives the slot of to the next streamer: more means a broken setup or an outage
 TRIES = 2  # a failing VOD is tried again at once (APIs and downloads fail now and then); stages done are cached
 SEARCHES = 2  # web searches per pass, merged: one alone found 2 names one pass and 9 the next
 
@@ -216,8 +217,9 @@ def poll(
             logger.exception("VOD %s failed %d times, the next streamer takes its place", vod_id, TRIES)
             db.finish(conn, vod_id, error=f"{type(e).__name__}: {e}"[:1000])
             failed += 1
-            top_left += slot == "top"  # it made nothing: its slot goes to the next one on the list
-            extra_left += slot == "extra"
+            if failed <= REPLACE:  # it made nothing: its slot goes to the next one on the list
+                top_left += slot == "top"
+                extra_left += slot == "extra"
         finally:  # the ~300 MB audio is only needed while processing; a later rerun re-downloads it
             for p in (Path(out_root) / vod_id).glob("audio.*"):
                 p.unlink()
