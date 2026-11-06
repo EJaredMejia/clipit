@@ -150,9 +150,10 @@ recorded by hand from the dashboard until then.
 - Automatic posting takes only clips from polled VODs in the last `db.FRESH` (an old clip rides a trend that has
   passed): ones the user marked Keep first, then unreviewed ones the clip-picking AI scored `db.AUTO_SCORE` or more,
   never one marked Skip, up to 10 a day (`youtube.PER_DAY`, `youtube.GAP`). The user chose this over review-only posting.
-  Every run should end with a good clip posted, but never by lowering that bar or posting weak clips: a run with no
-  good clip means polling chose badly. So `ai.find_hot` searches the web on every pass for who something just happened
-  to, and a pass goes down the list until it has a good clip and stops there, as a run posts one (the streamers asked
+  Every run should end with `db.POSTS` (6) good clips posted, from different VODs, but never by lowering that bar or
+  posting weak clips: a run short of them means polling chose badly. A run posts the first now and schedules the rest
+  `youtube.GAP` apart (`youtube.upload_run`). So `ai.find_hot` searches the web on every pass for who something just happened
+  to, and a pass goes down the list until `db.POSTS` VODs have a good clip and stops there (the streamers asked
   for by name all get clipped): everyone the search found is tried whatever top_n says, and past top_n up to
   `poll.EXTRA` more VODs. Never keep that search in a file or reuse it across passes, and
   never rank by a streamer's past clips: both turn into the same names every day.
@@ -194,7 +195,8 @@ Stream titles, chat, transcripts, VOD metadata, web pages and **everything the A
 
 ### Errors and logging
 - Library code raises `ClipitError` for expected failures. Only `cli.py` calls `sys.exit`.
-- One bad VOD must never stop a polling pass: `poll.py` catches it, logs it with its traceback, records it in the database.
+- One bad VOD must never stop a polling pass: `poll.py` tries it again once (`poll.TRIES`), then logs it with its traceback,
+  records it in the database, and gives its slot to the next streamer on the list, so a crash never costs the run a clip.
 - Log with `util.log` / `util.logger`, never `print`. Use `logger.exception` when a traceback helps.
 
 ### Code

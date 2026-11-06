@@ -1,9 +1,9 @@
 """Decide which streams to clip and run the pipeline on each one's latest finished VOD, on Twitch and Kick.
 
 An AI searches the web first for who something just happened to. Then the streamers getting the most clip views today,
-alternating between sites, then big live streamers. A pass goes down that list until it has a clip good enough to post
-and stops there, since a run posts one clip: the ones asked for by name are all clipped, everyone the search found is
-tried whatever top_n says, and past top_n at most EXTRA more VODs. For someone the search found, the VOD of the day
+alternating between sites, then big live streamers. A pass goes down that list until db.POSTS VODs have a clip good enough to post
+and stops there, since a run posts that many, one per VOD: the ones asked for by name are all clipped, everyone the
+search found is tried whatever top_n says, and past top_n at most EXTRA more VODs. For someone the search found, the VOD of the day
 it happened is clipped, not just their latest, and the clip-picking AI is told what happened. Each VOD is claimed in the SQLite catalog before
 processing, so overlapping runs never double-process and finished VODs are never redone.
 """
@@ -24,11 +24,13 @@ MIN_VIEWERS = 2000  # smaller streamers' clips don't get views
 MAX_AGE = datetime.timedelta(days=2)  # older VODs aren't worth clipping anymore
 # The VOD of an event the search found: people are still talking about it, so it's worth clipping a while longer.
 EVENT_AGE = datetime.timedelta(days=ai.HOT_DAYS + 1)
-EXTRA = 6  # more VODs a pass may try to find a clip good enough to post: bounded, each one takes minutes and AI calls
+EXTRA = 12  # more VODs a pass may try to find a clip good enough to post: bounded, each one takes minutes and AI calls
 # Never clipped, on any site, even when most clipped or prioritized: known to copyright-strike clip channels until banned.
 BLOCKED = frozenset({"pokimane"})
 # Tournament and company channels: famous and clipped, but no streamer to name. shortcut: the ones seen, add more as they show up.
 NOT_STREAMERS = frozenset({"pgl", "riotgames", "warcraft", "eslcs", "eslcsb"})
+REPLACE = 6  # failed VODs a pass gives the slot of to the next streamer: more means a broken setup or an outage
+TRIES = 2  # a failing VOD is tried again at once (APIs and downloads fail now and then); stages done are cached
 SEARCHES = 2  # web searches per pass, merged: one alone found 2 names one pass and 9 the next
 
 
@@ -140,7 +142,7 @@ def poll(
     now = utcnow()
     failed = 0
     top_left = top_n
-    extra_left, good, tried = EXTRA, False, 0
+    extra_left, good, tried = EXTRA, 0, 0  # good: VODs with a clip good enough to post
     runs.progress(what="Searching what's popping off today")
     hot = find_hot(search_ai)
     runs.progress(what="Finding streamers to clip")
@@ -161,7 +163,7 @@ def poll(
         name = (site.__name__.rsplit(".", 1)[1], login.lower())
         is_hot = name in hot
         why, when = hot.get(name, ("", None))
-        if good and name not in prioritize:
+        if good >= db.POSTS and name not in prioritize:
             continue
         if top_left <= 0 and not is_hot and (dry_run or extra_left <= 0):
             continue  # not a break: someone the search found may still be further down the list
@@ -188,30 +190,41 @@ def poll(
             if is_hot:
                 log(f"skipping {login}, found by the search: this VOD was already clipped")
             continue  # already clipped: the next streamer takes the slot, so a repeat pass finds someone new
-        if top_left > 0:
-            top_left -= 1
-        elif not is_hot:
-            extra_left -= 1
+        slot = "top" if top_left > 0 else "" if is_hot else "extra"
+        top_left -= slot == "top"
+        extra_left -= slot == "extra"
         tried += 1
         log(f"clipping {login}: {url}")
         runs.progress(
             what=f"Clipping {login}", vod=[tried, max(tried, top_n, len(hot))], stage="Getting the VOD's details", count=None
         )
         try:
-            with db.heartbeat(conn, vod_id):
-                _, clips = process_vod(url, out_root=out_root, clipped=moments_of(site, login, vod), event=why, **pipeline_opts)
+            clips: list[dict] = []  # set by the attempt that works: the last one re-raises
+            for attempt in range(1, TRIES + 1):
+                try:
+                    with db.heartbeat(conn, vod_id):
+                        clipped = moments_of(site, login, vod)
+                        _, clips = process_vod(url, out_root=out_root, clipped=clipped, event=why, **pipeline_opts)
+                    break
+                except Exception:
+                    if attempt == TRIES:
+                        raise
+                    logger.warning("VOD %s failed, trying it again", vod_id, exc_info=True)
             db.save_clips(conn, vod_id, [{**c, "file": f"{vod_id}/{c['file']}"} for c in clips])
             db.finish(conn, vod_id)
-            good = good or any(c["score"] >= db.AUTO_SCORE for c in clips)
+            good += any(c["score"] >= db.AUTO_SCORE for c in clips)
         except Exception as e:  # one bad VOD (sub-only, deleted...) must not stop the rest
-            logger.exception("VOD %s failed", vod_id)
+            logger.exception("VOD %s failed %d times, the next streamer takes its place", vod_id, TRIES)
             db.finish(conn, vod_id, error=f"{type(e).__name__}: {e}"[:1000])
             failed += 1
+            if failed <= REPLACE:  # it made nothing: its slot goes to the next one on the list
+                top_left += slot == "top"
+                extra_left += slot == "extra"
         finally:  # the ~300 MB audio is only needed while processing; a later rerun re-downloads it
             for p in (Path(out_root) / vod_id).glob("audio.*"):
                 p.unlink()
-    if top_n > 0 and not good and not dry_run:
-        logger.warning("no clip scored %d+ this pass: nothing from it is good enough to post", db.AUTO_SCORE)
+    if top_n > 0 and good < db.POSTS and not dry_run:
+        logger.warning("only %d of %d VODs had a clip scored %d+ this pass", good, db.POSTS, db.AUTO_SCORE)
     if failed:
         logger.warning("%d of %d VODs failed to clip this pass (see above)", failed, tried)
     return failed if failed == tried else 0

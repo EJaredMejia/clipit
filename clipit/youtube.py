@@ -1,6 +1,6 @@
 """Post clips to YouTube Shorts through the official YouTube Data API.
 
-Only clips from polled VODs of the last db.FRESH are posted (in a dashboard run, only from VODs that run polled): the ones the user marked Keep, then unreviewed ones the AI
+A run posts up to db.POSTS clips, the first now and the rest scheduled GAP apart (YouTube publishes them). Only clips from polled VODs of the last db.FRESH are posted (in a dashboard run, only from VODs that run polled): the ones the user marked Keep, then unreviewed ones the AI
 scored db.AUTO_SCORE+, never skipped ones, at most PER_DAY a day and GAP apart: slow posting through the official API
 is what keeps the channel clear of spam enforcement. Never replace this with browser automation of YouTube Studio.
 
@@ -30,6 +30,7 @@ SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]  # posting only: it 
 PER_DAY = 10  # YouTube's default API quota fits about 6 uploads a day: past that a post waits (QUOTA) until a raise
 QUOTA = (b"quotaExceeded", b"uploadLimitExceeded")  # daily limits: hitting one costs the clip no attempt
 GAP = datetime.timedelta(hours=1)
+SOON = datetime.timedelta(minutes=1)  # a post due sooner than this goes public now, not scheduled
 STUCK = datetime.timedelta(hours=2)  # an upload still unfinished this long after it started belongs to a run that died
 
 
@@ -49,8 +50,9 @@ def login() -> None:
     log(f"logged in to YouTube, token saved in {TOKEN}")
 
 
-def metadata(clip: sqlite3.Row) -> dict:
-    """The video's title, description and settings. YouTube rejects < and >, and titles over 100 characters."""
+def metadata(clip: sqlite3.Row, publish_at: datetime.datetime | None = None) -> dict:
+    """The video's title, description and settings. YouTube rejects < and >, and titles over 100 characters.
+    publish_at: a scheduled post, private until YouTube makes it public then."""
 
     def text(s: str) -> str:
         return s.replace("<", "").replace(">", "")
@@ -62,13 +64,26 @@ def metadata(clip: sqlite3.Row) -> dict:
             "description": text(clip["youtube"] if clip["edited"] else clip["youtube"] or clip["caption"]),
             "categoryId": "20",  # Gaming
         },
-        "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False},
+        "status": {"privacyStatus": "public", "selfDeclaredMadeForKids": False}
+        if publish_at is None
+        else {
+            "privacyStatus": "private",
+            "publishAt": publish_at.isoformat(timespec="seconds"),
+            "selfDeclaredMadeForKids": False,
+        },
     }
 
 
-def upload_next(conn: sqlite3.Connection, out: Path, first: list[str] | None = None, run_id: int | None = None) -> str | None:
+def upload_next(
+    conn: sqlite3.Connection,
+    out: Path,
+    first: list[str] | None = None,
+    run_id: int | None = None,
+    at: datetime.datetime | None = None,
+) -> str | None:
     """Post the next due clip (db.claim_upload) that isn't on YouTube yet, if the pacing allows. Returns its link.
-    first: streamers ("twitch:login", "kick:login") whose clips go ahead of the rest. run_id: only VODs that dashboard run polled."""
+    first: streamers ("twitch:login", "kick:login") whose clips go ahead of the rest. run_id: only VODs that dashboard run polled.
+    at: when it goes public, a later time schedules it; the pacing counts from then."""
     for clip_id in db.stuck_uploads(conn, "youtube", utcnow() - STUCK):
         logger.warning(
             "clip %d was being posted to YouTube when a run stopped, so it may be up: check YouTube Studio, then in the "
@@ -76,11 +91,26 @@ def upload_next(conn: sqlite3.Connection, out: Path, first: list[str] | None = N
             clip_id,
         )
     creds = _credentials()  # before claiming: a broken login must not use up a clip's attempts
-    clip = db.claim_upload(conn, "youtube", PER_DAY, GAP, first=first, run_id=run_id)
+    now = utcnow()
+    at = max(at or now, now)
+    clip = db.claim_upload(conn, "youtube", PER_DAY, GAP, now=at, first=first, run_id=run_id)
     if not clip:
         log("no YouTube post due: no fresh clip is kept or scored high enough, or the last post was too recent")
         return None
-    return _post(conn, creds, clip, out)
+    return _post(conn, creds, clip, out, at if at - now > SOON else None)
+
+
+def upload_run(conn: sqlite3.Connection, out: Path, first: list[str] | None = None, run_id: int | None = None) -> int:
+    """A run's posts: up to db.POSTS due clips, the first now and each next one scheduled GAP later. Returns how many."""
+    at, posted = utcnow(), 0
+    try:
+        while posted < db.POSTS and upload_next(conn, out, first, run_id, at):
+            posted, at = posted + 1, at + GAP
+    except HttpError as e:  # the daily quota ran out partway: the posts so far stand, the rest wait for a later run
+        if not posted or not any(q in e.content for q in QUOTA):
+            raise
+        logger.warning("YouTube's daily quota ran out after %d post(s): the rest wait for a later run", posted)
+    return posted
 
 
 def upload_clip(conn: sqlite3.Connection, clip_id: int, out: Path) -> str | None:
@@ -90,23 +120,26 @@ def upload_clip(conn: sqlite3.Connection, clip_id: int, out: Path) -> str | None
     return _post(conn, creds, clip, out) if clip else None
 
 
-def _post(conn: sqlite3.Connection, creds: Credentials, clip: sqlite3.Row, out: Path) -> str:
-    log(f"posting clip {clip['id']} to YouTube: {clip['title']}")
+def _post(
+    conn: sqlite3.Connection, creds: Credentials, clip: sqlite3.Row, out: Path, publish_at: datetime.datetime | None = None
+) -> str:
+    when = f", public at {publish_at:%H:%M} UTC" if publish_at else ""
+    log(f"posting clip {clip['id']} to YouTube{when}: {clip['title']}")
     runs.progress(what="Posting to YouTube", stage=clip["title"])
     try:
         video_file = (out / clip["file"]).resolve()
         if not video_file.is_relative_to(out.resolve()):  # never send a local file that isn't one of our clips
             raise ClipitError(f"clip file {clip['file']} is outside {out}")
-        video = _upload(creds, video_file, metadata(clip))
+        video = _upload(creds, video_file, metadata(clip, publish_at))
     except Exception as e:  # retried on a later run (up to db.MAX_ATTEMPTS), unless the video may already be up
         spent = not (isinstance(e, HttpError) and any(q in e.content for q in QUOTA))
         error = f"{type(e).__name__}: {e}"[:1000]
         db.fail_upload(conn, clip["id"], "youtube", error, retry=not isinstance(e, MaybePosted), spent=spent)
         raise
     url = f"https://youtube.com/shorts/{video['id']}"
-    db.set_upload(conn, clip["id"], "youtube", url)
+    db.set_upload(conn, clip["id"], "youtube", url, at=publish_at)
     log(f"posted clip {clip['id']} to {video['snippet']['channelTitle']}: {url}")
-    if (privacy := video["status"]["privacyStatus"]) != "public":
+    if (privacy := video["status"]["privacyStatus"]) != "public" and not publish_at:
         logger.warning("YouTube made clip %d %s, not public: check it in YouTube Studio", clip["id"], privacy)
     return url
 

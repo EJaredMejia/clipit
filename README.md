@@ -157,10 +157,12 @@ It only listens on your own machine (127.0.0.1) and refuses requests from other 
 
 Clipit posts clips from VODs polled in the last 2 days (older trends have passed) to your channel, through YouTube's
 official API: the ones you marked **Keep** first, then ones you haven't reviewed that the AI scored 8/10 or more,
-newest first, public, at most 10 in any 24-hour period and at least 1 hour apart. Clips you skipped are never posted.
-Weak clips are never posted to fill a gap. Polling looks for a good clip instead: an AI searches the web on every run
-for who something just happened to, everyone it finds with a fresh VOD gets clipped, and a run tries up to 6 more VODs
-past your streamer count until it has one. On Twitch and Kick it starts from the moments viewers clipped, then cuts its own clip
+newest first, at most 10 in any 24-hour period and at least 1 hour apart. A run posts up to 6, a different VOD's clip
+first: the first goes public now, the rest are uploaded as scheduled Shorts that YouTube makes public an hour apart. Clips you skipped are never posted.
+Weak clips are never posted to fill a gap. Polling looks for good clips instead: an AI searches the web on every run
+for who something just happened to, everyone it finds with a fresh VOD gets clipped, and a run tries up to 12 more VODs
+past your streamer count until 6 VODs each have a good clip. A VOD that fails is tried again once, then the next
+streamer on the list takes its place. On Twitch and Kick it starts from the moments viewers clipped, then cuts its own clip
 from the VOD. Before an unreviewed clip posts by itself, a separate AI watches it frame by frame and must pass every check,
 so that needs Claude Code or Codex, and a clip over 45 seconds always waits for you.
 YouTube's default API quota covers about 6 uploads a day. Past that, a post waits for the quota to reset, without
@@ -186,7 +188,7 @@ Set up once (free, about 15 minutes):
 To post one clip right away, open it in the dashboard and click **Post to YouTube now**. That post counts toward the
 pace of the automatic ones.
 
-Then add `--upload` to the timer: `clipit --poll --upload`, or `clipit --poll --upload --every 45`. Each run posts at most one clip, and only when one is due.
+Then add `--upload` to the timer: `clipit --poll --upload`, or `clipit --poll --upload --every 45`. Each run posts up to 6 clips an hour apart, and none until an hour after the last one it scheduled.
 Posted clips show in the dashboard with their link. A failed upload is retried on a later run, up to 3 times at least
 an hour apart, and the error is in `out/logs/clipit.log`.
 

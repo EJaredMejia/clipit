@@ -79,7 +79,9 @@ def test_vod_age_counts_from_when_the_stream_ended():
 
 @pytest.fixture
 def world(tmp_path, monkeypatch):
-    """Fake Twitch + pipeline. big2 has no VODs; VOD 3 always fails."""
+    """Fake Twitch + pipeline. big2 has no VODs; VOD 3 always fails. A pass wants one good VOD unless a test says more."""
+    monkeypatch.setattr(db, "POSTS", 1)
+    monkeypatch.setattr(poll, "TRIES", 1)  # a failing VOD fails once, unless a test says more
     fresh = (datetime.datetime.now(datetime.UTC) - datetime.timedelta(hours=5)).isoformat()
     vods = {"big1": "1", "mid": "3", "s1": "4", "s2": "5"}
     monkeypatch.setattr(poll.twitch, "live_streams", lambda: STREAMS)
@@ -97,7 +99,7 @@ def world(tmp_path, monkeypatch):
         vod_id = "v" + url.rsplit("/", 1)[1]
         calls.append(vod_id)
         work = out_root / vod_id
-        work.mkdir()
+        work.mkdir(exist_ok=True)
         (work / "audio.m4a").write_text("x")
         if vod_id == "v3":
             raise ClipitError("sub-only VOD")
@@ -192,12 +194,12 @@ def test_dry_run_touches_nothing(world):
     assert calls == [] and conn.execute("SELECT count(*) FROM vods").fetchone()[0] == 0
 
 
-def weak_unless(monkeypatch, good_url_end):
+def weak_unless(monkeypatch, good_url_ends):
     real = poll.process_vod
 
     def scored(url, out_root, **kw):
         work, clips = real(url, out_root, **kw)
-        return work, [{**c, "score": 8.0 if url.endswith(good_url_end) else 5.0} for c in clips]
+        return work, [{**c, "score": 8.0 if url.endswith(good_url_ends) else 5.0} for c in clips]
 
     monkeypatch.setattr(poll, "process_vod", scored)
 
@@ -216,6 +218,57 @@ def test_a_pass_with_no_good_clip_gives_up_after_extra_vods(world, monkeypatch):
     monkeypatch.setattr(poll, "EXTRA", 1)
     poll.poll(conn, top_n=1, out_root=out)
     assert len(calls) == 2
+
+
+def test_a_pass_goes_on_until_posts_vods_have_a_good_clip(world, monkeypatch):
+    conn, calls, out = world
+    monkeypatch.setattr(db, "POSTS", 2)
+    monkeypatch.setattr(poll.twitch, "live_streams", lambda: [("big1", 30000, "EN"), ("s1", 3000, "EN"), ("s2", 3000, "EN")])
+    weak_unless(monkeypatch, ("/1", "/5"))
+    poll.poll(conn, top_n=1, out_root=out)
+    assert calls == ["v1", "v4", "v5"]  # big1 good, s1 weak, s2 good: two good VODs, so the run can post two
+
+
+def test_a_vod_that_fails_once_is_tried_again_and_its_clips_count(world, monkeypatch):
+    conn, calls, out = world
+    monkeypatch.setattr(poll, "TRIES", 2)
+    real = poll.process_vod
+    flaky = iter([True])
+
+    def once(url, out_root, **kw):
+        if next(flaky, False):
+            calls.append("broke")
+            raise ClipitError("Twitch API: 502")
+        return real(url, out_root, **kw)
+
+    monkeypatch.setattr(poll, "process_vod", once)
+    poll.poll(conn, top_n=1, out_root=out)
+    assert calls == ["broke", "v1"] and db.status(conn, "v1") == "done"
+
+
+def test_a_vod_that_keeps_failing_gives_its_slot_to_the_next_streamer(world, monkeypatch):
+    conn, calls, out = world
+    monkeypatch.setattr(poll, "TRIES", 2)
+    monkeypatch.setattr(poll, "EXTRA", 0)
+    monkeypatch.setattr(poll.twitch, "live_streams", lambda: [("mid", 30000, "EN"), ("s1", 3000, "EN")])
+    poll.poll(conn, top_n=1, out_root=out)
+    assert calls == ["v3", "v3", "v4"]  # mid broke twice, so s1 gets the one slot
+
+
+def test_when_every_vod_breaks_the_pass_stops_giving_slots_back(world, monkeypatch):
+    conn, calls, out = world
+    monkeypatch.setattr(poll, "EXTRA", 0)
+    monkeypatch.setattr(poll, "REPLACE", 1)
+    big = [("big1", 30000, "EN"), ("mid", 9000, "EN"), ("s1", 8000, "EN"), ("s2", 7000, "EN")]
+    monkeypatch.setattr(poll.twitch, "live_streams", lambda: big)
+
+    def broken(url, out_root, **kw):
+        calls.append(url)
+        raise ClipitError("whisper model missing")
+
+    monkeypatch.setattr(poll, "process_vod", broken)
+    poll.poll(conn, top_n=1, out_root=out)
+    assert len(calls) == 2  # big1's slot went to mid, then no more: s1 and s2 are never tried
 
 
 def test_a_pass_stops_at_its_first_good_clip(world, monkeypatch):
