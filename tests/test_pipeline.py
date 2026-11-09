@@ -252,6 +252,21 @@ def test_one_clip_whose_stream_cant_be_read_doesnt_lose_the_vod(stages, monkeypa
     assert [c["hook"] for c in clips] == ["ok"]
 
 
+def test_a_clip_whose_stream_stalls_once_is_rendered_again_with_fresh_links(stages, monkeypatch):
+    _, tmp_path = stages
+    links = iter(["https://old/v.m3u8", "https://fresh/v.m3u8"])
+    monkeypatch.setattr(pipeline.source, "stream_urls", lambda url: [next(links)])
+
+    def stale(urls, clip, words, out, cam):
+        if urls[0].startswith("https://old"):
+            raise pipeline.ClipitError("the stream is stalled: got no frames of the clip")
+        out.write_bytes(b"mp4")
+
+    monkeypatch.setattr(pipeline.render, "render", stale)
+    _, clips = pipeline.process_vod("https://example/vod", n_clips=1, ai_cmd="ai", out_root=tmp_path)
+    assert len(clips) == 1  # the VOD's best moment isn't lost to one stalled read
+
+
 def test_a_stalled_render_keeps_the_clips_made_and_skips_the_rest(stages, monkeypatch):
     _, tmp_path = stages
     tried = []
