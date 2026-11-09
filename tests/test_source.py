@@ -180,8 +180,14 @@ def test_fragments_takes_the_init_and_the_segments_a_clip_spans():
     assert source.fragments(FRAGMENTED, "https://cdn/v/", 12.5, 25.0) == (parts, 2.5)
 
 
+def test_fragments_takes_the_ts_segments_a_clip_spans_deep_into_a_long_vod():
+    # ffmpeg's own seek stalled for minutes 26 h into a 48 h Twitch VOD made of these, muted ones among them
+    ts = "#EXTM3U\n" + "".join(f"#EXTINF:10.000,\n{i}{'-muted' if i == 1 else ''}.ts\n" for i in range(9600))
+    assert source.fragments(ts, "https://cdn/v/", 95905.0, 95915.0) == (["https://cdn/v/9590.ts", "https://cdn/v/9591.ts"], 5.0)
+
+
 def test_fragments_leaves_other_playlists_to_ffmpeg():
-    assert source.fragments("#EXTM3U\n#EXTINF:10.000,\n0.ts\n", "https://cdn/v/", 0, 5) is None
+    assert source.fragments("#EXTM3U\n#EXTINF:10.000,\nsegment/0\n", "https://cdn/v/", 0, 5) is None
 
 
 def test_fragments_follows_nothing_outside_the_stream():
@@ -210,6 +216,20 @@ def test_inputs_joins_a_fragmented_clip_into_one_local_file(monkeypatch):
     with source.inputs(["https://cdn/v/index.m3u8"], 12.5, 5) as args:
         assert args[:4] == ["-ss", "2.50", "-t", "5.00"]
         assert Path(args[-1]).read_bytes() == b"init-0.mp41.mp4"
+
+
+def test_inputs_joins_a_ts_clip_into_a_local_ts_file(monkeypatch):
+    def fake_fetch(url, to=None, deadline=None):
+        if to is None:
+            return "#EXTM3U\n#EXTINF:10.000,\n0.ts\n#EXTINF:10.000,\n1.ts\n#EXT-X-ENDLIST\n"
+        to.write(url.rsplit("/", 1)[1].encode())
+        return ""
+
+    monkeypatch.setattr(source, "fetch", fake_fetch)
+    monkeypatch.setattr(source, "playlist", lambda url: fake_fetch(url))  # not the cached real one
+    with source.inputs(["https://cdn/v/index-dvr.m3u8"], 12.5, 5) as args:
+        assert args[:4] == ["-ss", "2.50", "-t", "5.00"]  # a local file: no remote seek left to stall
+        assert args[-1].endswith(".ts") and Path(args[-1]).read_bytes() == b"1.ts"
 
 
 def test_a_garbled_playlist_is_not_split():

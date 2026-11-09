@@ -225,11 +225,10 @@ def fetch(url: str, to: BinaryIO | None = None, deadline: float = math.inf) -> s
 
 
 def fragments(playlist: str, base: str, start: float, end: float) -> tuple[list[str], float] | None:
-    """A fragmented-MP4 playlist's URLs for start-end, init segment first, and how far into them start is. None for any
-    other playlist. Segment names come from the playlist, so only ones under base are followed."""
+    """A Twitch playlist's URLs for start-end (a fragmented-MP4 one's init segment first), and how far into them start
+    is. None for any other playlist. Segment names come from the playlist, so only ones under base are followed.
+    MPEG-TS ones too: ffmpeg's own HLS seek stalled for minutes 26 h into a 48 h VOD, where these segments read fine."""
     init = re.search(r'#EXT-X-MAP:URI="([^"]+)"', playlist)
-    if not init:
-        return None
     at, length, parts, first = 0.0, 0.0, [], 0.0
     for line in playlist.splitlines():
         if line.startswith("#EXTINF:"):
@@ -242,7 +241,9 @@ def fragments(playlist: str, base: str, start: float, end: float) -> tuple[list[
                 first = first if parts else at
                 parts.append(line)
             at += length
-    urls = [urllib.parse.urljoin(base, name) for name in (init[1], *parts)]
+    if not init and not all(urllib.parse.urlsplit(name).path.endswith(".ts") for name in parts):
+        return None
+    urls = [urllib.parse.urljoin(base, name) for name in (*([init[1]] if init else []), *parts)]
     if not parts or not all(u.startswith(base) for u in urls):
         return None
     return urls, max(start - first, 0.0)
@@ -309,7 +310,8 @@ def _kick_video(groups: list[tuple[list[str], float]], folder: Path, i: int) -> 
 @contextmanager
 def inputs(urls: list[str], start: float, length: float) -> Iterator[list[str]]:
     """ffmpeg's input arguments for length seconds at start of each stream. ffmpeg can't seek into fragmented-MP4 HLS
-    (Twitch's newer VODs): -ss there gives no frames and exit 0, so those parts are fetched to a temp file first."""
+    (Twitch's newer VODs): -ss there gives no frames and exit 0, and stalls deep into long MPEG-TS ones, so Twitch
+    parts are fetched to a temp file first."""
     args = []
     with tempfile.TemporaryDirectory(prefix="clipit-") as tmp:
         for i, url in enumerate(urls):
@@ -323,7 +325,7 @@ def inputs(urls: list[str], start: float, length: float) -> Iterator[list[str]]:
             if not found:
                 args += [*REMOTE, "-ss", f"{start:.2f}", "-t", f"{length:.2f}", "-i", url]
                 continue
-            part = Path(tmp) / f"{i}.mp4"
+            part = Path(tmp) / f"{i}{'.ts' if found[0][0].split('?')[0].endswith('.ts') else '.mp4'}"
             deadline = time.monotonic() + FETCH_TIMEOUT
             with part.open("wb") as out:
                 for segment in found[0]:
