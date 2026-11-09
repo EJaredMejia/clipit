@@ -3,7 +3,7 @@ import datetime
 import pytest
 
 from clipit import db, poll
-from clipit.util import ClipitError
+from clipit.util import AILimit, ClipitError
 
 STREAMS = [
     ("big1", 30000, "EN"),
@@ -255,6 +255,20 @@ def test_a_vod_that_keeps_failing_gives_its_slot_to_the_next_streamer(world, mon
     assert calls == ["v3", "v3", "v4"]  # mid broke twice, so s1 gets the one slot
 
 
+def test_an_ai_out_of_usage_stops_the_pass_at_once(world, monkeypatch):
+    conn, calls, out = world
+    monkeypatch.setattr(poll, "TRIES", 2)
+
+    def no_usage(url, out_root, **kw):
+        calls.append(url)
+        raise AILimit("You've hit your session limit")
+
+    monkeypatch.setattr(poll, "process_vod", no_usage)
+    assert poll.poll(conn, top_n=3, out_root=out) == 1
+    assert len(calls) == 1  # no retry, and no more VODs downloaded only to fail the same way
+    assert db.status(conn, "v1") == "failed"  # retried by a later pass, once the limit resets
+
+
 def test_when_every_vod_breaks_the_pass_stops_giving_slots_back(world, monkeypatch):
     conn, calls, out = world
     monkeypatch.setattr(poll, "EXTRA", 0)
@@ -273,7 +287,9 @@ def test_when_every_vod_breaks_the_pass_stops_giving_slots_back(world, monkeypat
 
 def test_a_pass_stops_at_its_first_good_clip(world, monkeypatch):
     conn, calls, out = world
-    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned", None), ("twitch", "s1", "a fight", None)])
+    monkeypatch.setattr(
+        poll.ai, "find_hot", lambda cmd, focus: [("twitch", "s2", "banned", None), ("twitch", "s1", "a fight", None)]
+    )
     poll.poll(conn, top_n=6, out_root=out, search_ai="search")
     assert calls == ["v5"]  # the rest wait for the next pass: a run only posts one clip
 
@@ -294,7 +310,7 @@ def test_everyone_the_search_finds_is_tried_whatever_top_n_says(world, monkeypat
         ("twitch", "pgl", "a final", None),
         ("kick", "nobody", "x", None),
     ]
-    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: found)
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd, focus: found)
     monkeypatch.setattr(poll.kick, "latest_vod", lambda login, on=None: None)
     poll.poll(conn, top_n=1, out_root=out, search_ai="search")
     assert calls == ["v5", "v4"]  # both found, with a slot for one
@@ -304,24 +320,27 @@ def test_a_full_pass_still_reaches_someone_the_search_found_further_down(world, 
     conn, calls, out = world
     weak_unless(monkeypatch, "/never")
     monkeypatch.setattr(poll, "EXTRA", 0)
-    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned", None)])
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd, focus: [("twitch", "s2", "banned", None)])
     poll.poll(conn, top_n=1, out_root=out, search_ai="search", prioritize=[("twitch", "big1"), ("twitch", "s1")])
     assert calls == ["v1", "v5"]  # s1 is past the quota, but s2 was found by the search
 
 
 def test_the_searches_are_merged_best_first_and_one_failing_loses_only_its_names(monkeypatch):
+    monkeypatch.setattr(poll.ai, "FOCUS", ("reddit", "kick"))
     answers = [
         [("twitch", "a", "x", None), ("kick", "b", "y", None)],
         [("twitch", "c", "z", None), ("twitch", "A", "same streamer", None), ("twitch", "d", "w", None)],
     ]
-    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: answers.pop(0))
+    focuses = []
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd, focus: focuses.append(focus) or answers.pop(0))
     got = [(site, login.lower()) for site, login in poll.find_hot("search")]  # the searches run at once: either may be first
     assert sorted(got) == [("kick", "b"), ("twitch", "a"), ("twitch", "c"), ("twitch", "d")]  # A is a once
     assert set(got[:2]) == {("twitch", "a"), ("twitch", "c")}  # each search's best come before anyone's second
+    assert sorted(focuses) == ["kick", "reddit"]  # each search starts somewhere else, so they find different people
 
     calls = []
 
-    def flaky(cmd):
+    def flaky(cmd, focus):
         calls.append(cmd)
         if len(calls) == 1:
             raise ClipitError("no web")
@@ -332,7 +351,7 @@ def test_the_searches_are_merged_best_first_and_one_failing_loses_only_its_names
 
     prefixes = ["s", "t"]  # each search answers in full, with names of its own
 
-    def full(cmd):
+    def full(cmd, focus):
         p = prefixes.pop()
         return [("twitch", f"{p}{i}", "x", None) for i in range(poll.ai.MAX_HOT)]
 
@@ -343,7 +362,7 @@ def test_the_searches_are_merged_best_first_and_one_failing_loses_only_its_names
 def test_a_failed_search_still_clips_by_the_ranking(world, monkeypatch):
     conn, calls, out = world
 
-    def broken(cmd):
+    def broken(cmd, focus):
         raise ClipitError("no web")
 
     monkeypatch.setattr(poll.ai, "find_hot", broken)
@@ -378,7 +397,7 @@ def test_someone_the_search_found_gets_the_vod_of_that_day_and_the_picker_hears_
     real = poll.process_vod
     monkeypatch.setattr(poll.twitch, "latest_vod", vods)
     monkeypatch.setattr(poll, "process_vod", lambda url, out_root, **kw: told.append(kw["event"]) or real(url, out_root))
-    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned live", day)])
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd, focus: [("twitch", "s2", "banned live", day)])
     poll.poll(conn, top_n=1, out_root=out, search_ai="search")
     assert calls == ["v9"] and told == ["banned live"]
 
@@ -389,7 +408,7 @@ def test_the_event_day_buys_extra_age_only_for_a_vod_from_that_day_on_and_a_done
     at = lambda days: (datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=days)).isoformat()  # noqa: E731
     # s2 has no VOD of the event day, and its newest is 4 days old: past MAX_AGE, so not clipped
     monkeypatch.setattr(poll.twitch, "latest_vod", lambda login, on=None: {"id": "7", "publishedAt": at(4), "lengthSeconds": 60})
-    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd: [("twitch", "s2", "banned", day)])
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd, focus: [("twitch", "s2", "banned", day)])
     monkeypatch.setattr(poll, "EXTRA", 0)
     poll.poll(conn, top_n=0, out_root=out, search_ai="search")
     assert calls == []

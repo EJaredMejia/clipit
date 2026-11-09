@@ -18,7 +18,7 @@ from types import ModuleType
 
 from clipit import ai, db, kick, runs, twitch
 from clipit.pipeline import process_vod
-from clipit.util import ROOT, ClipitError, ended, log, logger, utcnow
+from clipit.util import ROOT, AILimit, ClipitError, ended, log, logger, utcnow
 
 MIN_VIEWERS = 2000  # smaller streamers' clips don't get views
 MAX_AGE = datetime.timedelta(days=2)  # older VODs aren't worth clipping anymore
@@ -31,7 +31,6 @@ BLOCKED = frozenset({"pokimane"})
 NOT_STREAMERS = frozenset({"pgl", "riotgames", "warcraft", "eslcs", "eslcsb"})
 REPLACE = 6  # failed VODs a pass gives the slot of to the next streamer: more means a broken setup or an outage
 TRIES = 2  # a failing VOD is tried again at once (APIs and downloads fail now and then); stages done are cached
-SEARCHES = 2  # web searches per pass, merged: one alone found 2 names one pass and 9 the next
 
 
 Stream = tuple[str, int, str, ModuleType]  # (login, viewers, language, site module: twitch or kick)
@@ -93,8 +92,8 @@ def find_hot(search_ai: str | None) -> dict[tuple[str, str], tuple[str, datetime
     if not search_ai:
         logger.warning("no AI with web search: going by clip views only")
         return {}
-    with ThreadPoolExecutor(SEARCHES) as pool:  # each one is minutes of searching: side by side, not one after another
-        asked = [pool.submit(ai.find_hot, search_ai) for _ in range(SEARCHES)]
+    with ThreadPoolExecutor(len(ai.FOCUS)) as pool:  # each one is minutes of searching: side by side, not one after another
+        asked = [pool.submit(ai.find_hot, search_ai, focus) for focus in ai.FOCUS]
     answers = []
     for f in asked:
         try:
@@ -206,13 +205,18 @@ def poll(
                         clipped = moments_of(site, login, vod)
                         _, clips = process_vod(url, out_root=out_root, clipped=clipped, event=why, **pipeline_opts)
                     break
-                except Exception:
-                    if attempt == TRIES:
+                except Exception as e:
+                    if attempt == TRIES or isinstance(e, AILimit):
                         raise
                     logger.warning("VOD %s failed, trying it again", vod_id, exc_info=True)
             db.save_clips(conn, vod_id, [{**c, "file": f"{vod_id}/{c['file']}"} for c in clips])
             db.finish(conn, vod_id)
             good += any(c["score"] >= db.AUTO_SCORE for c in clips)
+        except AILimit as e:  # every VOD after this one would download, then fail the same way
+            logger.error("the AI ran out of usage, so this pass stops here; the next run goes on:\n%s", e)
+            db.finish(conn, vod_id, error=f"{type(e).__name__}: {e}"[:1000])
+            failed += 1
+            break
         except Exception as e:  # one bad VOD (sub-only, deleted...) must not stop the rest
             logger.exception("VOD %s failed %d times, the next streamer takes its place", vod_id, TRIES)
             db.finish(conn, vod_id, error=f"{type(e).__name__}: {e}"[:1000])

@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from clipit import ai
-from clipit.util import ClipitError
+from clipit.util import AILimit, ClipitError
 
 
 def test_extract_json_ignores_chatter_and_fences():
@@ -183,8 +183,12 @@ def test_ask_ai_strips_terminal_escape_codes(tmp_path):
 
 
 def test_ask_ai_failures_raise_clipit_error(monkeypatch):
-    with pytest.raises(ClipitError):
+    with pytest.raises(ClipitError) as e:
         ai.ask_ai(f'"{sys.executable}" -c "import sys; sys.exit(3)"', "prompt")
+    assert not isinstance(e.value, AILimit)
+    out_of_usage = "print('You' + chr(39) + 've hit your session limit - resets 10:40pm'); import sys; sys.exit(1)"
+    with pytest.raises(AILimit):  # the pass stops on this one: every later call would fail the same way
+        ai.ask_ai(f'"{sys.executable}" -c "{out_of_usage}"', "prompt")
 
     def hang(*a, **k):
         raise subprocess.TimeoutExpired("cmd", 1)
@@ -242,8 +246,9 @@ def test_clean_hot_lets_only_real_channel_names_through():
 def test_find_hot_searches_again_every_time(monkeypatch):
     asked = []
     reply = '{"streamers": [{"site": "kick", "login": "adin"}]}'
-    monkeypatch.setattr(ai, "ask_ai", lambda cmd, prompt: asked.append(cmd) or reply)
-    assert ai.find_hot("search") == [("kick", "adin", "", None)]
+    monkeypatch.setattr(ai, "ask_ai", lambda cmd, prompt: asked.append(prompt) or reply)
+    assert ai.find_hot("search", ai.FOCUS[1]) == [("kick", "adin", "", None)]
+    assert ai.FOCUS[1] in asked[0] and ai.FOCUS[0] not in asked[0]  # each search starts where poll told it
     assert ai.find_hot("search") and len(asked) == 2  # never cached: yesterday's answer is the same names again
 
 
