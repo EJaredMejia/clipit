@@ -283,6 +283,13 @@ def _kick_segments(text: str, url: str, start: float, end: float) -> tuple[list[
     return list(groups.values()), max(start - first, 0.0)
 
 
+def _indexed(raw: Path, out: Path) -> Path:
+    """Index a downloaded TS before seeking: a raw TS seek can skip to the next keyframe, leaving video a second behind
+    the audio. Also standardizes stream order."""
+    sh(["ffmpeg", "-v", "error", "-y", "-i", str(raw), "-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy", str(out)], timeout=120)
+    return out
+
+
 def _kick_video(groups: list[tuple[list[str], float]], folder: Path, i: int) -> Path:
     files = []
     for n, (urls, duration) in enumerate(groups):
@@ -290,13 +297,7 @@ def _kick_video(groups: list[tuple[list[str], float]], folder: Path, i: int) -> 
         with raw.open("wb") as out:
             for segment in urls:
                 fetch(segment, out)
-        # Index the downloaded TS before seeking: a raw TS seek can skip to the next
-        # keyframe, leaving video a second behind the audio. Also standardize stream order.
-        normalized = folder / f"{i}-{n}-normalized.mkv"
-        sh(
-            ["ffmpeg", "-v", "error", "-y", "-i", str(raw), "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", str(normalized)],
-            timeout=120,
-        )
+        normalized = _indexed(raw, folder / f"{i}-{n}-normalized.mkv")
         if len(groups) == 1:
             return normalized
         files.append(f"file '{normalized.name}'\nduration {duration:.6f}\n")
@@ -325,10 +326,13 @@ def inputs(urls: list[str], start: float, length: float) -> Iterator[list[str]]:
             if not found:
                 args += [*REMOTE, "-ss", f"{start:.2f}", "-t", f"{length:.2f}", "-i", url]
                 continue
-            part = Path(tmp) / f"{i}{'.ts' if found[0][0].split('?')[0].endswith('.ts') else '.mp4'}"
+            ts = urllib.parse.urlsplit(found[0][0]).path.endswith(".ts")  # no init segment: MPEG-TS, see fragments
+            part = Path(tmp) / f"{i}{'.ts' if ts else '.mp4'}"
             deadline = time.monotonic() + FETCH_TIMEOUT
             with part.open("wb") as out:
                 for segment in found[0]:
                     fetch(segment, out, deadline)
+            if ts:
+                part = _indexed(part, Path(tmp) / f"{i}.mkv")
             args += ["-ss", f"{found[1]:.2f}", "-t", f"{length:.2f}", "-i", str(part)]
         yield args

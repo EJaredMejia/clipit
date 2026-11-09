@@ -218,7 +218,7 @@ def test_inputs_joins_a_fragmented_clip_into_one_local_file(monkeypatch):
         assert Path(args[-1]).read_bytes() == b"init-0.mp41.mp4"
 
 
-def test_inputs_joins_a_ts_clip_into_a_local_ts_file(monkeypatch):
+def test_inputs_joins_a_ts_clip_into_a_local_indexed_file(monkeypatch):
     def fake_fetch(url, to=None, deadline=None):
         if to is None:
             return "#EXTM3U\n#EXTINF:10.000,\n0.ts\n#EXTINF:10.000,\n1.ts\n#EXT-X-ENDLIST\n"
@@ -227,9 +227,16 @@ def test_inputs_joins_a_ts_clip_into_a_local_ts_file(monkeypatch):
 
     monkeypatch.setattr(source, "fetch", fake_fetch)
     monkeypatch.setattr(source, "playlist", lambda url: fake_fetch(url))  # not the cached real one
+    remuxed = []
+
+    def remux(cmd, timeout):  # a raw TS seek can leave video a second behind the audio: indexed first, like Kick's
+        remuxed.append(cmd[cmd.index("-i") + 1])
+        Path(cmd[-1]).write_bytes(Path(remuxed[-1]).read_bytes())
+
+    monkeypatch.setattr(source, "sh", remux)
     with source.inputs(["https://cdn/v/index-dvr.m3u8"], 12.5, 5) as args:
         assert args[:4] == ["-ss", "2.50", "-t", "5.00"]  # a local file: no remote seek left to stall
-        assert args[-1].endswith(".ts") and Path(args[-1]).read_bytes() == b"1.ts"
+        assert remuxed[0].endswith(".ts") and args[-1].endswith(".mkv") and Path(args[-1]).read_bytes() == b"1.ts"
 
 
 def test_a_garbled_playlist_is_not_split():
@@ -283,7 +290,7 @@ def test_inputs_fetches_only_the_requested_kick_segment(monkeypatch):
     monkeypatch.setattr(source, "fetch", fake_fetch)
 
     def remux(cmd, timeout):
-        assert cmd[cmd.index("-map") + 1] == "0:v:0"
+        assert cmd[cmd.index("-map") + 1] == "0:v:0?"
         Path(cmd[-1]).write_bytes(Path(cmd[cmd.index("-i") + 1]).read_bytes())
 
     monkeypatch.setattr(source, "sh", remux)

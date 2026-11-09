@@ -325,6 +325,15 @@ def test_a_full_pass_still_reaches_someone_the_search_found_further_down(world, 
     assert calls == ["v1", "v5"]  # s1 is past the quota, but s2 was found by the search
 
 
+def test_a_search_out_of_usage_ends_the_pass_before_any_download(monkeypatch):
+    def out_of_usage(cmd, focus):
+        raise AILimit("You've hit your usage limit")
+
+    monkeypatch.setattr(poll.ai, "find_hot", out_of_usage)
+    with pytest.raises(AILimit):
+        poll.find_hot("search")
+
+
 def test_the_searches_are_merged_best_first_and_one_failing_loses_only_its_names(monkeypatch):
     monkeypatch.setattr(poll.ai, "FOCUS", ("reddit", "kick"))
     answers = [

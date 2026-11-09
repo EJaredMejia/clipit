@@ -98,6 +98,8 @@ def find_hot(search_ai: str | None) -> dict[tuple[str, str], tuple[str, datetime
     for f in asked:
         try:
             answers.append(f.result())
+        except AILimit:  # every VOD would download, then fail at picking: end the pass before the first
+            raise
         except Exception:
             logger.exception("a search for who's popping off failed")
     if not answers:

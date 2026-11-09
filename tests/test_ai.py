@@ -186,6 +186,10 @@ def test_ask_ai_failures_raise_clipit_error(monkeypatch):
     with pytest.raises(ClipitError) as e:
         ai.ask_ai(f'"{sys.executable}" -c "import sys; sys.exit(3)"', "prompt")
     assert not isinstance(e.value, AILimit)
+    busy = "print('API Error: 429 rate limit'); import sys; sys.exit(1)"
+    with pytest.raises(ClipitError) as e:
+        ai.ask_ai(f'"{sys.executable}" -c "{busy}"', "prompt")
+    assert not isinstance(e.value, AILimit)  # a 429 clears in seconds: the VOD's retry handles it, not the end of the pass
     out_of_usage = "print('You' + chr(39) + 've hit your session limit - resets 10:40pm'); import sys; sys.exit(1)"
     with pytest.raises(AILimit):  # the pass stops on this one: every later call would fail the same way
         ai.ask_ai(f'"{sys.executable}" -c "{out_of_usage}"', "prompt")
@@ -280,6 +284,13 @@ def test_a_clip_nothing_could_watch_is_stopped(monkeypatch):
 
     monkeypatch.setattr(ai, "ask_ai", broken)
     assert ai.veto('"claude" -p', clip, "s", "words", stills, 20.0) == ["review: failed"]
+
+    def out_of_usage(*a):
+        raise ai.AILimit("You've hit your session limit")
+
+    monkeypatch.setattr(ai, "ask_ai", out_of_usage)
+    with pytest.raises(ai.AILimit):  # not a failed review: the clip keeps its score and the VOD is tried again
+        ai.veto('"claude" -p', clip, "s", "words", stills, 20.0)
 
 
 def test_a_clip_too_long_to_post_alone_is_stopped_without_asking(monkeypatch):

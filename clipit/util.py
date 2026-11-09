@@ -24,7 +24,8 @@ class AILimit(ClipitError):
 
 
 # What Claude Code ("You've hit your session limit") and Codex ("You've hit your usage limit") print when out of usage.
-LIMIT = re.compile(r"hit your (?:\w+ )?limit|usage limit|rate limit", re.IGNORECASE)
+# Not "rate limit": a 429 clears in seconds, and the VOD's retry (poll.TRIES) handles it.
+LIMIT = re.compile(r"hit your (?:\w+ )?limit|usage limit", re.IGNORECASE)
 
 
 def ai_error(message: str, output: str) -> ClipitError:
