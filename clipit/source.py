@@ -225,11 +225,10 @@ def fetch(url: str, to: BinaryIO | None = None, deadline: float = math.inf) -> s
 
 
 def fragments(playlist: str, base: str, start: float, end: float) -> tuple[list[str], float] | None:
-    """A fragmented-MP4 playlist's URLs for start-end, init segment first, and how far into them start is. None for any
-    other playlist. Segment names come from the playlist, so only ones under base are followed."""
+    """A Twitch playlist's URLs for start-end (a fragmented-MP4 one's init segment first), and how far into them start
+    is. None for any other playlist. Segment names come from the playlist, so only ones under base are followed.
+    MPEG-TS ones too: ffmpeg's own HLS seek stalled for minutes 26 h into a 48 h VOD, where these segments read fine."""
     init = re.search(r'#EXT-X-MAP:URI="([^"]+)"', playlist)
-    if not init:
-        return None
     at, length, parts, first = 0.0, 0.0, [], 0.0
     for line in playlist.splitlines():
         if line.startswith("#EXTINF:"):
@@ -242,7 +241,9 @@ def fragments(playlist: str, base: str, start: float, end: float) -> tuple[list[
                 first = first if parts else at
                 parts.append(line)
             at += length
-    urls = [urllib.parse.urljoin(base, name) for name in (init[1], *parts)]
+    if not init and not all(urllib.parse.urlsplit(name).path.endswith(".ts") for name in parts):
+        return None
+    urls = [urllib.parse.urljoin(base, name) for name in (*([init[1]] if init else []), *parts)]
     if not parts or not all(u.startswith(base) for u in urls):
         return None
     return urls, max(start - first, 0.0)
@@ -282,6 +283,13 @@ def _kick_segments(text: str, url: str, start: float, end: float) -> tuple[list[
     return list(groups.values()), max(start - first, 0.0)
 
 
+def _indexed(raw: Path, out: Path) -> Path:
+    """Index a downloaded TS before seeking: a raw TS seek can skip to the next keyframe, leaving video a second behind
+    the audio. Also standardizes stream order."""
+    sh(["ffmpeg", "-v", "error", "-y", "-i", str(raw), "-map", "0:v:0?", "-map", "0:a:0?", "-c", "copy", str(out)], timeout=120)
+    return out
+
+
 def _kick_video(groups: list[tuple[list[str], float]], folder: Path, i: int) -> Path:
     files = []
     for n, (urls, duration) in enumerate(groups):
@@ -289,13 +297,7 @@ def _kick_video(groups: list[tuple[list[str], float]], folder: Path, i: int) -> 
         with raw.open("wb") as out:
             for segment in urls:
                 fetch(segment, out)
-        # Index the downloaded TS before seeking: a raw TS seek can skip to the next
-        # keyframe, leaving video a second behind the audio. Also standardize stream order.
-        normalized = folder / f"{i}-{n}-normalized.mkv"
-        sh(
-            ["ffmpeg", "-v", "error", "-y", "-i", str(raw), "-map", "0:v:0", "-map", "0:a:0", "-c", "copy", str(normalized)],
-            timeout=120,
-        )
+        normalized = _indexed(raw, folder / f"{i}-{n}-normalized.mkv")
         if len(groups) == 1:
             return normalized
         files.append(f"file '{normalized.name}'\nduration {duration:.6f}\n")
@@ -309,7 +311,8 @@ def _kick_video(groups: list[tuple[list[str], float]], folder: Path, i: int) -> 
 @contextmanager
 def inputs(urls: list[str], start: float, length: float) -> Iterator[list[str]]:
     """ffmpeg's input arguments for length seconds at start of each stream. ffmpeg can't seek into fragmented-MP4 HLS
-    (Twitch's newer VODs): -ss there gives no frames and exit 0, so those parts are fetched to a temp file first."""
+    (Twitch's newer VODs): -ss there gives no frames and exit 0, and stalls deep into long MPEG-TS ones, so Twitch
+    parts are fetched to a temp file first."""
     args = []
     with tempfile.TemporaryDirectory(prefix="clipit-") as tmp:
         for i, url in enumerate(urls):
@@ -323,10 +326,13 @@ def inputs(urls: list[str], start: float, length: float) -> Iterator[list[str]]:
             if not found:
                 args += [*REMOTE, "-ss", f"{start:.2f}", "-t", f"{length:.2f}", "-i", url]
                 continue
-            part = Path(tmp) / f"{i}.mp4"
+            ts = urllib.parse.urlsplit(found[0][0]).path.endswith(".ts")  # no init segment: MPEG-TS, see fragments
+            part = Path(tmp) / f"{i}{'.ts' if ts else '.mp4'}"
             deadline = time.monotonic() + FETCH_TIMEOUT
             with part.open("wb") as out:
                 for segment in found[0]:
                     fetch(segment, out, deadline)
+            if ts:
+                part = _indexed(part, Path(tmp) / f"{i}.mkv")
             args += ["-ss", f"{found[1]:.2f}", "-t", f"{length:.2f}", "-i", str(part)]
         yield args

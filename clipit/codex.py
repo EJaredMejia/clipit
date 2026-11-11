@@ -9,7 +9,7 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
-from clipit.util import ClipitError
+from clipit.util import ClipitError, ai_error
 
 # Keep local I/O unavailable even when a model's catalog enables it by default.
 DISABLED_FEATURES = (
@@ -210,9 +210,10 @@ def ask(
             raise ClipitError(f"Could not start Codex: {exc}") from exc
     reply = result.stdout.strip()
     if result.returncode or not reply:
-        raise ClipitError(
+        raise ai_error(
             f"Codex command failed:\n{(result.stdout + result.stderr)[-2000:]}\n"
-            "If not logged in, run `codex login` once and retry."
+            "If not logged in, run `codex login` once and retry.",
+            result.stdout + result.stderr,
         )
     try:
         if not isinstance(json.loads(reply), dict):

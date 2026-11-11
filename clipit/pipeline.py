@@ -195,7 +195,12 @@ def process_vod(
         if not out.exists():
             progress("Rendering the clips", i - 1, len(picks))
             try:
-                render_clip(urls, layouts, c, words, out)
+                try:
+                    render_clip(urls, layouts, c, words, out)
+                except ClipitError as e:  # a stalled read is often the CDN or links gone stale: fresh ones, once
+                    logger.warning("render failed for %s: %s; trying again with fresh links", out.name, e)
+                    urls = source.stream_urls(url)
+                    render_clip(urls, layouts, c, words, out)
             except subprocess.CalledProcessError as e:
                 logger.error("render failed for %s: %s", out.name, e.stderr[-800:])
                 continue

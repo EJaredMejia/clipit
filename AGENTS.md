@@ -58,12 +58,14 @@ gets in the way, stop and ask.
     CSP; never loosen them, not even for the dev server.
 - **Posting:** only through a platform's official API. Never download or repost someone else's clip.
   - Automatic posts take only clips from the last `db.FRESH`: Keep first, then unreviewed ones scored `db.AUTO_SCORE`
-    or more that pass `pipeline.review`, never Skip, at most `youtube.PER_DAY`. A run with no good clip means polling
-    chose badly: fix that, never lower the bar.
+    or more that pass `pipeline.review`, never Skip, at most `youtube.PER_DAY`. A run aims for `db.POSTS` good clips
+    from different VODs, the first posted now and the rest scheduled `youtube.GAP` apart (`youtube.upload_run`). A run
+    short of them means polling chose badly: fix that, never lower the bar.
   - Every upload is claimed (`db.claim_upload`) before it's sent, and one that broke off is never retried automatically:
     the video may already be up.
-- **Errors:** library code raises `ClipitError`; one bad VOD never stops a polling pass. Log with `util.log`, never
-  `print`. Prefer failing a VOD so it's retried over quietly producing worse output.
+- **Errors:** library code raises `ClipitError`; one bad VOD never stops a polling pass: it's tried again once
+  (`poll.TRIES`), then the next streamer takes its slot. An AI out of usage (`util.AILimit`) ends the pass at once.
+  Log with `util.log`, never `print`. Prefer failing a VOD so it's retried over quietly producing worse output.
 - **Tests:** new logic gets a pytest test with fakes, and the test must be able to fail on a real bug.
 - **Dependencies:** add to `pyproject.toml` and regenerate `requirements.lock`
   (`pip freeze --exclude-editable > requirements.lock`); for the page, `npm install` in `web/`. Say why in the commit.

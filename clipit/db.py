@@ -190,6 +190,7 @@ PLATFORMS = ("tiktok", "youtube")
 
 FRESH = datetime.timedelta(days=2)  # automatic posts: older clips ride a trend that has passed
 AUTO_SCORE = 8  # automatic posts: an unreviewed clip goes up if the clip-picking AI scored it this high (1-10)
+POSTS = 6  # automatic posts a run makes, each from a different VOD when it can: polling looks for that many
 STALE_CLAIM = datetime.timedelta(minutes=30)  # a 'processing' row not refreshed for this long was a crashed run
 HEARTBEAT = datetime.timedelta(minutes=5)  # how often a live run refreshes its claim, well under STALE_CLAIM
 MAX_ATTEMPTS = 3
@@ -526,9 +527,11 @@ def set_text(conn: sqlite3.Connection, clip_id: int, field: str, text: str) -> b
     return conn.execute(sql, (text, clip_id)).rowcount == 1
 
 
-def set_upload(conn: sqlite3.Connection, clip_id: int, platform: str, url: str | None) -> bool:
+def set_upload(
+    conn: sqlite3.Connection, clip_id: int, platform: str, url: str | None, at: datetime.datetime | None = None
+) -> bool:
     """Record the clip as posted on platform (url: the post, '' when unknown); url None un-marks it.
-    False when there's no such clip."""
+    at: when it goes public, for a scheduled post (now when None). False when there's no such clip."""
     if url is None:
         conn.execute("DELETE FROM uploads WHERE clip_id = ? AND platform = ?", (clip_id, platform))
         return clip_file(conn, clip_id) is not None
@@ -537,7 +540,7 @@ def set_upload(conn: sqlite3.Connection, clip_id: int, platform: str, url: str |
             """INSERT INTO uploads (clip_id, platform, url, uploaded_at) VALUES (?, ?, ?, ?)
                ON CONFLICT (clip_id, platform) DO UPDATE SET url = excluded.url, status = 'done', error = NULL,
                    uploaded_at = CASE WHEN status = 'done' THEN uploaded_at ELSE excluded.uploaded_at END""",
-            (clip_id, platform, url, utcnow().isoformat()),
+            (clip_id, platform, url, (at or utcnow()).isoformat()),
         )
     except sqlite3.IntegrityError:  # the clip doesn't exist (the platform is checked by the caller and the schema)
         return False
@@ -556,7 +559,8 @@ def claim_upload(
     """Atomically take the next clip to post automatically, if the pacing allows: from a VOD polling took in the last FRESH
     (and in a dashboard run, run_id: one its own polling took)
     (a hand rerun doesn't renew it; clips from old or hand-run VODs are posted only by hand), not on platform yet, kept by the user or unreviewed with
-    an AI score of AUTO_SCORE+ (never skipped): clips of the `first` streamers ("site:login") first, then kept, then newest. At most per_day posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
+    an AI score of AUTO_SCORE+ (never skipped): clips of the `first` streamers ("site:login") first, then kept, then of
+    VODs with no post yet (a run's posts are different moments), then newest. now: when this post goes public. At most per_day posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
     The upload then ends with set_upload (posted) or fail_upload (retried later, up to MAX_ATTEMPTS)."""
     now = now or utcnow()
     conn.execute("BEGIN IMMEDIATE")  # two overlapping runs must not both post, nor both see room in the pacing
@@ -573,7 +577,9 @@ def claim_upload(
                    LEFT JOIN uploads u ON u.clip_id = c.id AND u.platform = ?
                    WHERE (c.verdict = 'keep' OR c.verdict IS NULL AND c.score >= ?) AND v.tier != 'manual' AND v.claimed_at >= ? AND (? IS NULL OR v.run_id = ?)
                      AND (u.clip_id IS NULL OR (u.status = 'failed' AND u.attempts < ? AND u.uploaded_at < ?))
-                   ORDER BY IIF(v.url LIKE '%kick.com/%', 'kick:', 'twitch:') || lower(v.login) NOT IN (SELECT value FROM json_each(?)), c.verdict IS NULL, c.created_at DESC, c.idx LIMIT 1""",
+                   ORDER BY IIF(v.url LIKE '%kick.com/%', 'kick:', 'twitch:') || lower(v.login) NOT IN (SELECT value FROM json_each(?)), c.verdict IS NULL,
+                     EXISTS (SELECT 1 FROM uploads p JOIN clips pc ON pc.id = p.clip_id WHERE pc.vod_id = c.vod_id AND p.platform = ? AND p.status != 'failed'),
+                     c.created_at DESC, c.idx LIMIT 1""",
                 (
                     platform,
                     AUTO_SCORE,
@@ -583,6 +589,7 @@ def claim_upload(
                     MAX_ATTEMPTS,
                     (now - RETRY_AFTER).isoformat(),
                     json.dumps(first or []),
+                    platform,
                 ),
             ).fetchone()
         if clip:

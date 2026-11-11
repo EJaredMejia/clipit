@@ -39,8 +39,8 @@ export function Run() {
         <div className="max-w-xl">
           <h2 className="font-heading text-3xl font-bold">Run clipit</h2>
           <p className="mt-2 text-muted-foreground">
-            An AI searches the web for who something just happened to today and clips them, then the streamers getting the most clip views on Twitch and Kick, starting from the moments viewers clipped, until a clip is good enough to post. A separate AI watches each clip before it posts by itself, then the next due clip goes to YouTube Shorts, at most 10 a
-            day and an hour apart. The same as clipit --poll, then clipit --upload, set up below. You get a notice here
+            An AI searches the web for who something just happened to today and clips them, then the streamers getting the most clip views on Twitch and Kick, starting from the moments viewers clipped, until 6 VODs each have a clip good enough to post. A separate AI watches each clip before it posts by itself, then up to 6 go to YouTube Shorts, one per VOD first: the first
+            now, the rest scheduled an hour apart, at most 10 a day. The same as clipit --poll, then clipit --upload, set up below. You get a notice here
             when it ends.
           </p>
         </div>

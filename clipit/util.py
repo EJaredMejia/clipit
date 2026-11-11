@@ -19,6 +19,20 @@ class ClipitError(Exception):
     """A VOD can't be processed. The CLI prints it; the poller records it and moves on to the next VOD."""
 
 
+class AILimit(ClipitError):
+    """The AI CLI's usage limit ran out: every AI call fails until it resets, so a pass stops instead of wasting VODs."""
+
+
+# What Claude Code ("You've hit your session limit") and Codex ("You've hit your usage limit") print when out of usage.
+# Not "rate limit": a 429 clears in seconds, and the VOD's retry (poll.TRIES) handles it.
+LIMIT = re.compile(r"hit your (?:\w+ )?limit|usage limit", re.IGNORECASE)
+
+
+def ai_error(message: str, output: str) -> ClipitError:
+    """The error for a failed AI call: AILimit when its output says the usage limit ran out."""
+    return (AILimit if LIMIT.search(output) else ClipitError)(message)
+
+
 def utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.UTC)
 

@@ -157,3 +157,46 @@ def test_hourly_uploads_wait_a_full_hour_and_keep_the_rolling_daily_limit(conn, 
     now[0] = start + datetime.timedelta(hours=24, seconds=1)
     assert youtube.upload_next(conn, tmp_path) == "https://youtube.com/shorts/post4"
     assert len(set(sent)) == 4  # each eligible clip is sent once
+
+
+def test_a_run_posts_one_clip_per_vod_first_the_rest_scheduled_an_hour_apart(conn, tmp_path, monkeypatch):
+    now = datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)
+    monkeypatch.setattr(db, "utcnow", lambda: now)
+    monkeypatch.setattr(youtube, "utcnow", lambda: now)
+    monkeypatch.setattr(db, "POSTS", 3)
+    conn.execute("UPDATE vods SET claimed_at = ?", (now.isoformat(),))
+    db.save_clips(conn, "v1", [{**CLIP, "idx": 2, "file": "v1/clips/02_a.mp4", "start": 50.0, "end": 70.0}])
+    db.claim(conn, "v2", "u2", "s", "top")
+    conn.execute("UPDATE vods SET claimed_at = ?", (now.isoformat(),))
+    db.save_clips(conn, "v2", [{**CLIP, "file": "v2/clips/01_a.mp4"}])
+    sent = []
+    monkeypatch.setattr(youtube, "_upload", lambda creds, video, body: sent.append((video.parent.parent.name, body)) or VIDEO)
+    assert youtube.upload_run(conn, tmp_path) == 3
+    assert [v for v, _ in sent] == ["v1", "v2", "v1"]  # the kept clip, then a VOD not posted yet
+    assert sent[0][1]["status"]["privacyStatus"] == "public"
+    assert [b["status"] for _, b in sent[1:]] == [
+        {"privacyStatus": "private", "publishAt": f"2026-01-01T0{h}:00:00+00:00", "selfDeclaredMadeForKids": False}
+        for h in (1, 2)
+    ]
+    assert youtube.upload_run(conn, tmp_path) == 0  # the next run waits for an hour after the last scheduled one
+
+
+def test_a_run_that_runs_out_of_quota_keeps_its_posts_and_other_errors_still_fail(conn, tmp_path, monkeypatch):
+    db.save_clips(conn, "v1", [{**CLIP, "idx": 2, "file": "v1/clips/02_a.mp4", "start": 50.0, "end": 70.0}])
+    sent = []
+
+    def upload(creds, video, body):
+        if sent:
+            raise HttpError(httplib2.Response({"status": 403}), b'{"error": {"errors": [{"reason": "quotaExceeded"}]}}')
+        sent.append(video)
+        return VIDEO
+
+    monkeypatch.setattr(youtube, "_upload", upload)
+    assert youtube.upload_run(conn, tmp_path) == 1  # the run's post step isn't failed by the quota
+    conn.execute("DELETE FROM uploads")
+    sent.clear()
+    monkeypatch.setattr(
+        youtube, "_upload", lambda *a: (_ for _ in ()).throw(HttpError(httplib2.Response({"status": 403}), b"quotaExceeded"))
+    )
+    with pytest.raises(HttpError):  # nothing posted at all: the step shows as failed
+        youtube.upload_run(conn, tmp_path)

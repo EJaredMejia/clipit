@@ -195,7 +195,7 @@ function UploadBox({ clip: c, platform, primary }: { clip: Clip; platform: Platf
       <div className="flex items-center gap-2.5 rounded-xl bg-keep-bg px-3.5 py-2.5 text-sm font-medium text-keep">
         <CheckCircle2 className="size-4 shrink-0" />
         <span>
-          {`Posted on ${name}, ${when(done.at)}`}
+          {Date.parse(done.at) > Date.now() ? `Scheduled on ${name}, public ${when(done.at)}` : `Posted on ${name}, ${when(done.at)}`}
           {done.url && <>. {link(done.url, "Open the post")}</>}
         </span>
         {undo}
