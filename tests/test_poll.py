@@ -422,7 +422,7 @@ def test_the_event_day_buys_extra_age_only_for_a_vod_from_that_day_on_and_a_done
     poll.poll(conn, top_n=0, out_root=out, search_ai="search")
     assert calls == []
 
-    # s2's event VOD was already clipped: the newest one is clipped instead
+    # s2's event VOD was already clipped: the lead is used up, their newest VOD isn't clipped for it
     vods = {
         day: {"id": "8", "publishedAt": at(1), "lengthSeconds": 60},
         None: {"id": "9", "publishedAt": at(0.1), "lengthSeconds": 60},
@@ -431,4 +431,4 @@ def test_the_event_day_buys_extra_age_only_for_a_vod_from_that_day_on_and_a_done
     db.claim(conn, "v8", "u", "s2", "top")
     db.finish(conn, "v8")
     poll.poll(conn, top_n=0, out_root=out, search_ai="search")
-    assert calls == ["v9"]
+    assert calls == []

@@ -171,7 +171,9 @@ def poll(
         try:
             vod = site.latest_vod(login, when)
             if when and vod and db.status(conn, site.vod_ref(login, vod)[0]) == "done":
-                vod = site.latest_vod(login)  # the event's VOD is clipped: their newest may have what came next
+                # their newest VOD has nothing to do with the lead: in a real pass it was talk scored 5-7 every time
+                log(f"skipping {login}, found by the search: the VOD of that day was already clipped")
+                continue
             # only a VOD from the event on gets EVENT_AGE: vod_on falls back to the newest when none covers the day
             event_vod = when and vod and ended(vod).date() >= when
             if not vod or now - ended(vod) > (EVENT_AGE if event_vod else MAX_AGE):
