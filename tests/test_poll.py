@@ -432,3 +432,5 @@ def test_the_event_day_buys_extra_age_only_for_a_vod_from_that_day_on_and_a_done
     db.finish(conn, "v8")
     poll.poll(conn, top_n=0, out_root=out, search_ai="search")
     assert calls == []
+    poll.poll(conn, top_n=0, out_root=out, search_ai="search", prioritize=[("twitch", "s2")])
+    assert calls == ["v9"]  # asked for by name: still clipped, from their newest VOD
