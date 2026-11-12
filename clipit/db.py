@@ -560,7 +560,7 @@ def claim_upload(
     (and in a dashboard run, run_id: one its own polling took)
     (a hand rerun doesn't renew it; clips from old or hand-run VODs are posted only by hand), not on platform yet, kept by the user or unreviewed with
     an AI score of AUTO_SCORE+ (never skipped): clips of the `first` streamers ("site:login") first, then kept, then of
-    VODs with no post yet (a run's posts are different moments), then newest. now: when this post goes public. At most per_day posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
+    VODs with no post yet (a run's posts are different moments), then best scored, then newest. now: when this post goes public. At most per_day posts in 24 hours, at least gap apart (posts marked by hand count too). None when nothing is due.
     The upload then ends with set_upload (posted) or fail_upload (retried later, up to MAX_ATTEMPTS)."""
     now = now or utcnow()
     conn.execute("BEGIN IMMEDIATE")  # two overlapping runs must not both post, nor both see room in the pacing
@@ -579,7 +579,7 @@ def claim_upload(
                      AND (u.clip_id IS NULL OR (u.status = 'failed' AND u.attempts < ? AND u.uploaded_at < ?))
                    ORDER BY IIF(v.url LIKE '%kick.com/%', 'kick:', 'twitch:') || lower(v.login) NOT IN (SELECT value FROM json_each(?)), c.verdict IS NULL,
                      EXISTS (SELECT 1 FROM uploads p JOIN clips pc ON pc.id = p.clip_id WHERE pc.vod_id = c.vod_id AND p.platform = ? AND p.status != 'failed'),
-                     c.created_at DESC, c.idx LIMIT 1""",
+                     c.score DESC, c.created_at DESC, c.idx LIMIT 1""",
                 (
                     platform,
                     AUTO_SCORE,

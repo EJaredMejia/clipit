@@ -242,6 +242,16 @@ def test_claim_upload_takes_kept_first_then_high_scoring_unreviewed(conn):
     assert [r and r["id"] for r in claimed] == [kept, high, None]  # the skipped clip is newest and scores 10
 
 
+def test_claim_upload_takes_the_best_scored_first(conn):
+    # A run makes dozens of clips and posts a few: the 9 goes up before a newer 8.
+    best, newer = kept_clips(conn, 2)
+    for cid, score in ((best, 9), (newer, db.AUTO_SCORE)):
+        db.set_verdict(conn, cid, None)
+        conn.execute("UPDATE clips SET score = ? WHERE id = ?", (score, cid))
+    claimed = [db.claim_upload(conn, "youtube", 9, datetime.timedelta(0), now=T0) for _ in range(2)]
+    assert [r and r["id"] for r in claimed] == [best, newer]
+
+
 def test_claim_upload_takes_prioritized_streamers_first(conn):
     old, new = kept_clips(conn, 2)
     conn.execute("UPDATE vods SET login = 'Caedrel', url = 'https://www.twitch.tv/videos/1' WHERE id = 'v1'")
