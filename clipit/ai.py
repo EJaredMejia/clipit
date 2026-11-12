@@ -122,6 +122,9 @@ CHECKS = {
     "Mildly amusing fails.",
     "minors": "Nobody who is or might be under 18 is shown in a sexual or body-focused way. Any doubt fails.",
     "honest": "The on-screen hook matches what's going on. The danger it names may stay off camera, but it must be real.",
+    "webcam": "A separate panel at the top shows the streamer themself on their own webcam. Fail when it shows anyone or "
+    "anything else: a video, show or news clip they're watching, another person, a game character, a map or a menu. "
+    "Pass when there's no separate top panel.",
 }
 VETO_PROMPT = """You watch YouTube Shorts all day: 19 years old, thumb on the screen, a hundred other videos waiting.
 Someone else picked this clip. Judge whether it would hold you, not how clean it looks: raw, dark, chaotic clips with
