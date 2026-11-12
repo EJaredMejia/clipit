@@ -66,14 +66,16 @@ Pick up to {n} clips most likely to go viral, or none if nothing here would stop
   Good: "xQc thinks his PC died mid-tournament". Bad: "he thought it was over" (over how? who?).
 - Text stays suggestive, never explicit, however racy the clip: tease the outfit or the reaction, never name body parts
   or sex acts. Good: "Divvity's blueberry cosplay goes too far". Bad: anything a parent would call porn in a title.
-- Score each clip 1-10 by how strangers scrolling past would react, not how this streamer's own chat reacted.
-  Be harsh: a low score is useful, it is how we learn what works, so give the honest number and say in "why" what
-  holds the clip back.
-  What holds strangers: suspense, danger, cops, fights, hits, panic, real conflict with real people, and an adult's
-  sex appeal or outrageous body or costume. Calm in-game comedy and roleplay bits lose them. A dark or messy shot is fine.
+- Score each clip 1-10 by whether it gets views: would strangers scrolling past stop, watch and react, not how this
+  streamer's own chat reacted. A score is not how polished the clip is but whether it's worth posting: give the honest
+  number and say in "why" what holds the clip back.
+  What gets views: suspense, danger, cops, fights, hits, panic, real conflict with real people; rage bait (a take or
+  claim outrageous enough that strangers comment to argue); goonbait (an adult's sex appeal or outrageous body or
+  costume); and a doubt left open (who's lying, what happens next, was that real) that makes people comment their
+  answer. Calm in-game comedy and roleplay bits lose them. A dark or messy shot is fine.
   9-10: people would share it, stitch it and argue in the comments.
-  8: a good clip: something real happens that fans watch to the end and strangers stop for. It gets views.
-  7: ok: it works, but nothing makes people stay or comment.
+  8: worth posting: strangers stop for it, or it makes them argue, guess or send it to a friend. It gets views.
+  7: ok: it works, but nothing makes people stop, stay or comment.
   5-6: bad: slow, small, or only funny if you watch the stream.
   1-4: needs stream context, an inside joke, or nothing much happens.
   You only read the words, and what's on camera reads thin: cops showing up, a swatting, a fight, a crash, a chase, a
@@ -82,7 +84,8 @@ Pick up to {n} clips most likely to go viral, or none if nothing here would stop
   as if the camera shows it: the reviewer sees the video and stops it if not.
   So is a real argument, callout or bet blow-up between real people that lands, above all the one "In the news": the
   moment people are searching for, caught as it happens, is {auto_score}+ unless the cut itself is weak.
-  Talking about something, however hot the topic, is not it happening. A reviewer watches every {auto_score}+ clip
+  Calmly talking about something, however hot the topic, is not it happening; a take that will make strangers angry
+  enough to comment is rage bait, and counts. A reviewer watches every {auto_score}+ clip
   before it posts, so score what happens, not how well it reads.
   The moment has to carry it: how well known the streamer is earns nothing. Never round a calm clip up.
   Riding a trend earns points only when the clip is actually about it.
@@ -106,10 +109,11 @@ MAX_POST_LEN = 45  # seconds: our choice, the evidence on length conflicts; a lo
 # grading its own pick from a transcript, so it once gave an 8 to a 49 s argument over a shared Photoshop screen.
 CHECKS = {
     "hook": "In the first 3 seconds the sound, the action or the on-screen hook makes a stranger want to know what happens. "
-    "Shouting, panic, a threat or a striking body or costume counts, even in the dark. Calm setup or a joke being set up fails.",
+    "Shouting, panic, a threat, an outrageous claim or a striking body or costume counts, even in the dark. Calm setup or a joke being set up fails.",
     "tension": "It has real stakes or real pull: danger, a chase, cops, a fight, a hit, panic, a stranger's anger, a real "
-    "argument or callout between real people, someone caught out or losing money, or an adult's sex appeal or body that "
-    "people can't look away from. Suspense counts: the danger can stay off camera, heard in voices, panic or sirens, and "
+    "argument or callout between real people, someone caught out or losing money, an adult's sex appeal or body that "
+    "people can't look away from, a take outrageous enough that strangers comment to argue, or a doubt left open that "
+    "viewers want to answer in the comments. Suspense counts: the danger can stay off camera, heard in voices, panic or sirens, and "
     "it needn't resolve. A dark, shaky or messy shot is fine, it can even add to it.",
     "real": "It's really happening to real people: a real argument, a real reaction to something that just happened to "
     "them, a real body or outfit on camera. Reacting at a desk or on a call counts when the moment itself is real. "
