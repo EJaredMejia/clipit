@@ -32,6 +32,8 @@ export const secs = (c: Clip) => `${Math.round(c.end_s - c.start_s)} s`;
 export const hms = (s: number) => `${Math.floor(s / 3600)}:${two(Math.floor(s / 60) % 60)}:${two(Math.floor(s) % 60)}`;
 export const media = (c: Clip) => `/media/${c.id}?f=${encodeURIComponent(c.file)}`; // a new file gets a new URL, not the cached copy
 export const hot = (c: Clip) => c.score >= 8;
+const compact = new Intl.NumberFormat([], { notation: "compact" });
+export const count = (n: number) => compact.format(n); // 12.3K
 
 export function atTime(url: string | null, s: number): string | null {
   try {
@@ -64,6 +66,8 @@ export const ClipFacts = ({ clip: c, className }: { clip: Clip; className?: stri
       secs(c),
       ...(c.variant === "edited" ? ["AI-edited"] : []),
       <span className={hot(c) ? "font-semibold text-primary" : undefined}>{`AI score ${score(c.score)}/10`}</span>,
+      // what the clip really did, next to what the AI guessed
+      ...(c.uploads.youtube?.views != null ? [`${count(c.uploads.youtube.views)} views${c.uploads.youtube.likes != null ? `, ${count(c.uploads.youtube.likes)} likes` : ""} on YouTube`] : []),
     ]}
   />
 );

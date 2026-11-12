@@ -9,7 +9,8 @@ import { create } from "zustand";
 export const PLATFORMS = { tiktok: "TikTok", youtube: "YouTube" } as const;
 export type Platform = keyof typeof PLATFORMS;
 export type Verdict = "keep" | "skip";
-export type Upload = { url: string | null; at: string; status: "uploading" | "done" };
+// views and likes: read back from the platform on each run (clipit/youtube.py refresh_stats), null until then
+export type Upload = { url: string | null; at: string; status: "uploading" | "done"; views: number | null; likes: number | null };
 // A re-edit the user asked for (clipit --reedit): result_id is the edited clip it made; neither it nor error while it runs.
 export type Reedit = { request: string; at_s: number | null; created_at: string; error: string | null; result_id: number | null };
 export type Clip = {
@@ -72,6 +73,7 @@ export type Run = {
 export const isReedit = (job: Run["job"]): job is ReeditJob => !!job && "reedit" in job;
 
 export const posted = (c: Clip) => Object.keys(c.uploads).length;
+export const views = (c: Clip) => c.uploads.youtube?.views ?? -1; // -1: not posted or not read yet, sorted last
 // clips made before descriptions only have the caption; once the user edits, an empty description is their choice
 export const description = (c: Clip) => (c.edited ? c.youtube : c.youtube || c.caption);
 
@@ -89,6 +91,7 @@ export const SORTS = {
   new: (a: Clip, b: Clip) => b.created_at.localeCompare(a.created_at) || a.idx - b.idx,
   score: (a: Clip, b: Clip) => b.score - a.score || b.created_at.localeCompare(a.created_at),
   streamer: (a: Clip, b: Clip) => a.streamer.localeCompare(b.streamer) || b.score - a.score,
+  views: (a: Clip, b: Clip) => views(b) - views(a) || b.score - a.score,
 };
 export type Sort = keyof typeof SORTS;
 // in the order the work goes: decide, post, look back

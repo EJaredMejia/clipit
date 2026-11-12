@@ -25,10 +25,10 @@ import {
   VIEWS,
   visible,
 } from "./store";
-import { Confirm, day, Frame, hot, score, secs } from "./ui";
+import { Confirm, count, day, Frame, hot, score, secs } from "./ui";
 
 const ALL = "__all"; // a Select value can't be empty
-const SORT_LABELS: Record<Sort, string> = { new: "Newest first", score: "Best AI score", streamer: "By streamer" };
+const SORT_LABELS: Record<Sort, string> = { new: "Newest first", score: "Best AI score", streamer: "By streamer", views: "Most views" };
 
 export function Library() {
   const clips = useClipit((s) => s.data.clips);
@@ -152,6 +152,7 @@ function Tile({ clip: c, dim }: { clip: Clip; dim: boolean }) {
                 <Loader2 className="size-3 animate-spin text-warn" />
               )}
               {PLATFORMS[p]}
+              {c.uploads[p]?.views != null && ` ${count(c.uploads[p].views)}`}
             </span>
           ))}
       </span>

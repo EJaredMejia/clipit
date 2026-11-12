@@ -184,6 +184,12 @@ MIGRATIONS = [
     """
     UPDATE clips SET score = 7.0 WHERE score >= 8 AND verdict IS NULL;
     """,
+    # How each posted video did, read back from the platform (youtube.refresh_stats): NULL until first read.
+    """
+    ALTER TABLE uploads ADD COLUMN views INTEGER;
+    ALTER TABLE uploads ADD COLUMN likes INTEGER;
+    ALTER TABLE uploads ADD COLUMN stats_at TEXT;
+    """,
 ]
 TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")
@@ -439,8 +445,16 @@ def save_setting(conn: sqlite3.Connection, key: str, value: object) -> None:
 def overview(conn: sqlite3.Connection) -> dict:
     """Every VOD and every clip with where it was posted, newest first: what the dashboard shows."""
     uploads: dict[int, dict] = {}
-    for r in conn.execute("SELECT clip_id, platform, url, uploaded_at, status FROM uploads WHERE status != 'failed'"):
-        uploads.setdefault(r["clip_id"], {})[r["platform"]] = {"url": r["url"], "at": r["uploaded_at"], "status": r["status"]}
+    for r in conn.execute(
+        "SELECT clip_id, platform, url, uploaded_at, status, views, likes FROM uploads WHERE status != 'failed'"
+    ):
+        uploads.setdefault(r["clip_id"], {})[r["platform"]] = {
+            "url": r["url"],
+            "at": r["uploaded_at"],
+            "status": r["status"],
+            "views": r["views"],
+            "likes": r["likes"],
+        }
     clips = conn.execute(
         """SELECT c.id, c.vod_id, c.idx, c.file, c.start_s, c.end_s, c.title, c.hook, c.caption, c.youtube, c.trend, c.sound,
                   c.score, c.why, c.verdict, c.edited, c.created_at, c.variant, v.url AS vod_url,
@@ -545,6 +559,32 @@ def set_upload(
     except sqlite3.IntegrityError:  # the clip doesn't exist (the platform is checked by the caller and the schema)
         return False
     return True
+
+
+def posted_urls(conn: sqlite3.Connection, platform: str, now: datetime.datetime) -> dict[int, str]:
+    """Each clip public on platform by now (a scheduled post isn't yet), as clip id -> the post's link ('' when the user
+    marked it posted without one)."""
+    rows = conn.execute(
+        "SELECT clip_id, url FROM uploads WHERE platform = ? AND status = 'done' AND uploaded_at <= ?",
+        (platform, now.isoformat()),
+    )
+    return {r["clip_id"]: r["url"] for r in rows}
+
+
+def stats_read_at(conn: sqlite3.Connection, platform: str) -> datetime.datetime | None:
+    """When set_stats last ran for platform, None if never."""
+    at = conn.execute("SELECT MAX(stats_at) FROM uploads WHERE platform = ?", (platform,)).fetchone()[0]
+    return at and _ts(at)
+
+
+def set_stats(conn: sqlite3.Connection, platform: str, stats: dict[int, tuple[int | None, int | None]], now=None) -> None:
+    """Record how posted clips did, as clip id -> (views, likes); likes None when the video hides them, both None when
+    the video is gone."""
+    at = (now or utcnow()).isoformat()
+    conn.executemany(
+        "UPDATE uploads SET views = ?, likes = ?, stats_at = ? WHERE clip_id = ? AND platform = ?",
+        [(views, likes, at, clip_id, platform) for clip_id, (views, likes) in stats.items()],
+    )
 
 
 def claim_upload(

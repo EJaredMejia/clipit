@@ -4,11 +4,16 @@ A run posts up to db.POSTS clips, the first now and the rest scheduled GAP apart
 scored db.AUTO_SCORE+, never skipped ones, at most PER_DAY a day and GAP apart: slow posting through the official API
 is what keeps the channel clear of spam enforcement. Never replace this with browser automation of YouTube Studio.
 
+refresh_stats reads back how many views and likes each posted video got, so the dashboard shows the AI's score next to
+what the clip really did.
+
 Credentials live in ~/.clipit/, outside the repo and the out folder: the OAuth client the user downloads from
 Google Cloud, and the token `clipit --youtube-login` saves.
 """
 
 import datetime
+import json
+import re
 import sqlite3
 from pathlib import Path
 
@@ -26,7 +31,14 @@ from clipit.util import ClipitError, log, logger, utcnow, write_atomic
 HOME = Path.home() / ".clipit"
 CLIENT = HOME / "youtube_client.json"
 TOKEN = HOME / "youtube_token.json"
-SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]  # posting only: it can't read or manage the channel
+UPLOAD = "https://www.googleapis.com/auth/youtube.upload"
+READ = "https://www.googleapis.com/auth/youtube.readonly"  # the posted videos' views: it can't change or delete anything
+SCOPES = [UPLOAD, READ]
+VIDEO_ID = re.compile(
+    r"(?:/shorts/|/live/|/embed/|youtu\.be/|[?&]v=)([\w-]{11})(?![\w-])"
+)  # also links the user typed in by hand
+PAGE = 50  # video ids per videos.list call, the API's most
+STATS_EVERY = datetime.timedelta(minutes=30)  # a dashboard run is two processes (--poll, then --upload): one read does
 PER_DAY = 10  # YouTube's default API quota fits about 6 uploads a day: past that a post waits (QUOTA) until a raise
 QUOTA = (b"quotaExceeded", b"uploadLimitExceeded")  # daily limits: hitting one costs the clip no attempt
 GAP = datetime.timedelta(hours=1)
@@ -43,9 +55,17 @@ def login() -> None:
     creds = flow.run_local_server(port=0, timeout_seconds=600, prompt="consent")
     if not creds.refresh_token:
         raise ClipitError("Google returned no refresh token: run clipit --youtube-login again")
+    # Google says what was granted; if it doesn't, assume posting alone: a token saved with a scope it lacks breaks posting
+    granted = getattr(creds, "granted_scopes", None) or [UPLOAD]
+    granted = granted.split() if isinstance(granted, str) else list(granted)
+    if UPLOAD not in granted:
+        raise ClipitError("Google didn't give clipit leave to post: run clipit --youtube-login again and allow it")
+    if READ not in granted:
+        logger.warning("Google didn't give clipit leave to read the channel: the dashboard won't show views")
     HOME.mkdir(exist_ok=True)
     HOME.chmod(0o700)  # owner only, also when the user made the folder: the token (and its temp file) live inside it
-    write_atomic(TOKEN, creds.to_json())
+    # a refresh asks for the saved scopes, and asking for one the user unticked would break posting too
+    write_atomic(TOKEN, json.dumps({**json.loads(creds.to_json()), "scopes": granted}))
     TOKEN.chmod(0o600)  # on Windows both only toggle read-only; the folder sits in the user's own profile there
     log(f"logged in to YouTube, token saved in {TOKEN}")
 
@@ -147,7 +167,8 @@ def _post(
 def _credentials() -> Credentials:
     if not TOKEN.exists():
         raise ClipitError("Not logged in to YouTube: run clipit --youtube-login")
-    creds = Credentials.from_authorized_user_file(str(TOKEN), SCOPES)
+    # the scopes saved with the token, not SCOPES: a login from before READ must keep posting
+    creds = Credentials.from_authorized_user_file(str(TOKEN))
     try:
         creds.refresh(Request())  # requests transport, 120 s timeout
     except RefreshError as e:
@@ -156,6 +177,42 @@ def _credentials() -> Credentials:
             "Google Cloud app is still in Testing: publish it (In production)"
         ) from e
     return creds
+
+
+def refresh_stats(conn: sqlite3.Connection, now: datetime.datetime | None = None) -> int:
+    """Read the views and likes of every clip public on YouTube into the database, at most every STATS_EVERY. Returns
+    how many it read. Without a login, or one from before clipit read views, it reads none: posting doesn't need it."""
+    now = now or utcnow()
+    last = db.stats_read_at(conn, "youtube")
+    if not TOKEN.exists() or (last and now - last < STATS_EVERY):
+        return 0
+    clips: dict[str, list[int]] = {}  # video id -> its clips: a plain clip and its edit can share one link
+    for clip_id, url in db.posted_urls(conn, "youtube", now).items():
+        if m := VIDEO_ID.search(url):
+            clips.setdefault(m[1], []).append(clip_id)
+    if not clips:
+        return 0
+    creds = _credentials()
+    if READ not in (creds.granted_scopes or creds.scopes or ()):
+        log("not reading YouTube views: run clipit --youtube-login once more to let clipit read them")
+        return 0
+    found = _stats(creds, list(clips))
+    # a video that's gone shows no views, not the last ones read
+    db.set_stats(conn, "youtube", {c: found.get(v, (None, None)) for v, cs in clips.items() for c in cs}, now)
+    return len(found)
+
+
+def _stats(creds: Credentials, ids: list[str]) -> dict[str, tuple[int, int | None]]:
+    """Views and likes by video id. A video that's gone (deleted, or never went up) is left out."""
+    youtube = build("youtube", "v3", credentials=creds)  # 60 s socket timeout, as in _upload
+    found = {}
+    for i in range(0, len(ids), PAGE):
+        reply = youtube.videos().list(part="statistics", id=",".join(ids[i : i + PAGE]), maxResults=PAGE).execute(num_retries=2)
+        for v in reply.get("items", []):
+            st = v.get("statistics", {})
+            likes = st.get("likeCount")
+            found[v["id"]] = (int(st.get("viewCount", 0)), None if likes is None else int(likes))
+    return found
 
 
 class MaybePosted(ClipitError):

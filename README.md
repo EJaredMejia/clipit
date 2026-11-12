@@ -171,8 +171,9 @@ using up the clip's tries. For all 10, ask for more quota in Google Cloud (APIs 
 Set up once (free, about 15 minutes):
 
 1. In the [Google Cloud console](https://console.cloud.google.com), create a project and enable **YouTube Data API v3**.
-2. In **Google Auth Platform**, set up the consent screen as **External** and, under **Data Access**, add the scope
-   `https://www.googleapis.com/auth/youtube.upload`.
+2. In **Google Auth Platform**, set up the consent screen as **External** and, under **Data Access**, add the scopes
+   `https://www.googleapis.com/auth/youtube.upload` (to post) and `https://www.googleapis.com/auth/youtube.readonly`
+   (to read your posts' views).
 3. The app starts in **Testing**, where only Google accounts listed as test users can sign in. Either:
    - in **Audience** → **Test users**, add the Google account that owns the YouTube channel. Without this,
      `clipit --youtube-login` fails with "Access blocked". In Testing, Google ends the login 7 days after you sign in,
@@ -189,7 +190,9 @@ To post one clip right away, open it in the dashboard and click **Post to YouTub
 pace of the automatic ones.
 
 Then add `--upload` to the timer: `clipit --poll --upload`, or `clipit --poll --upload --every 45`. Each run posts up to 6 clips an hour apart, and none until an hour after the last one it scheduled.
-Posted clips show in the dashboard with their link. A failed upload is retried on a later run, up to 3 times at least
+Posted clips show in the dashboard with their link, and each run reads how many views and likes they got: they show
+next to the AI's score, and the Library sorts by *Most views*. A login from before clipit read views keeps posting but
+shows none: run `clipit --youtube-login` once more. A failed upload is retried on a later run, up to 3 times at least
 an hour apart, and the error is in `out/logs/clipit.log`.
 
 To keep the channel safe, don't raise the pace, don't post the same clip on several channels, and only post clips you
