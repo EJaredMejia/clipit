@@ -105,7 +105,7 @@ def upload_run(conn: sqlite3.Connection, out: Path, first: list[str] | None = No
     at, posted = utcnow(), 0
     try:
         while posted < db.POSTS and upload_next(conn, out, first, run_id, at):
-            posted, at = posted + 1, at + GAP
+            posted, at = posted + 1, max(at, utcnow()) + GAP  # a post going up now is recorded when its upload ends
     except HttpError as e:  # the daily quota ran out partway: the posts so far stand, the rest wait for a later run
         if not posted or not any(q in e.content for q in QUOTA):
             raise
