@@ -181,6 +181,29 @@ def test_a_run_posts_one_clip_per_vod_first_the_rest_scheduled_an_hour_apart(con
     assert youtube.upload_run(conn, tmp_path) == 0  # the next run waits for an hour after the last scheduled one
 
 
+def test_a_run_still_posts_them_all_when_an_upload_takes_a_while(conn, tmp_path, monkeypatch):
+    # Real case: the first post was recorded when its upload ended, so the next slot an hour after the run's start
+    # looked too soon and a run with three clips scored 8+ posted one.
+    now = [datetime.datetime(2026, 1, 1, tzinfo=datetime.UTC)]
+    monkeypatch.setattr(db, "utcnow", lambda: now[0])
+    monkeypatch.setattr(youtube, "utcnow", lambda: now[0])
+    monkeypatch.setattr(db, "POSTS", 3)
+    db.save_clips(conn, "v1", [{**CLIP, "idx": 2, "file": "v1/clips/02_a.mp4", "start": 50.0, "end": 70.0}])
+    db.claim(conn, "v2", "u2", "s", "top")
+    conn.execute("UPDATE vods SET claimed_at = ?", (now[0].isoformat(),))
+    db.save_clips(conn, "v2", [{**CLIP, "file": "v2/clips/01_a.mp4"}])
+    publish = []
+
+    def upload(creds, video, body):
+        now[0] += datetime.timedelta(minutes=2)
+        publish.append(body["status"].get("publishAt"))
+        return VIDEO
+
+    monkeypatch.setattr(youtube, "_upload", upload)
+    assert youtube.upload_run(conn, tmp_path) == 3
+    assert publish == [None, "2026-01-01T01:02:00+00:00", "2026-01-01T02:02:00+00:00"]
+
+
 def test_a_run_that_runs_out_of_quota_keeps_its_posts_and_other_errors_still_fail(conn, tmp_path, monkeypatch):
     db.save_clips(conn, "v1", [{**CLIP, "idx": 2, "file": "v1/clips/02_a.mp4", "start": 50.0, "end": 70.0}])
     sent = []
