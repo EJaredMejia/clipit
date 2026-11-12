@@ -3,7 +3,7 @@
 // machines (CI caught one). Tests await the actions themselves, or vi.waitFor the request they expect.
 import { afterEach, expect, test, vi } from "vitest";
 import { toast } from "sonner";
-import { type Clip, type Run, VIEWS, type Vod, deal, decide, description, flushTexts, loadRun, runResult, saveText, searchVods, set, setDraft, startFling, textStatus, undo, useClipit } from "./store";
+import { type Clip, type Run, SORTS, VIEWS, type Vod, deal, decide, description, flushTexts, loadRun, runResult, saveText, searchVods, set, setDraft, startFling, textStatus, undo, useClipit } from "./store";
 
 vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
 
@@ -259,9 +259,15 @@ test("before posting, every field's latest draft is saved, even one typed while 
 
 test("Kept shows only kept clips not posted anywhere yet, Posted the rest", () => {
   const kept = { ...clip(1), verdict: "keep" as const };
-  const up = { ...kept, uploads: { youtube: { url: null, at: "2026-10-24", status: "done" as const } } };
+  const up = { ...kept, uploads: { youtube: { url: null, at: "2026-10-24", status: "done" as const, views: null, likes: null } } };
   expect([kept, up, clip(3)].filter(VIEWS.kept[1])).toEqual([kept]);
   expect([kept, up].filter(VIEWS.posted[1])).toEqual([up]);
+});
+
+test("Most views puts the posts that did best first, and clips with no views read yet last", () => {
+  const seen = (id: number, views: number | null) => ({ ...clip(id), uploads: { youtube: { url: null, at: "2026-10-24", status: "done" as const, views, likes: null } } });
+  const [few, many, unread] = [seen(1, 40), seen(2, 12000), seen(3, null)];
+  expect([unread, few, clip(4), many].sort(SORTS.views).map((c) => c.id)).toEqual([2, 1, 3, 4]);
 });
 
 const run = (over: Partial<Run>): Run => ({
@@ -271,7 +277,7 @@ const run = (over: Partial<Run>): Run => ({
 }); // prettier-ignore
 
 test("a run's result counts only the clips and YouTube posts since it started", () => {
-  const up = (at: string, status: "uploading" | "done") => ({ youtube: { url: null, at, status } });
+  const up = (at: string, status: "uploading" | "done") => ({ youtube: { url: null, at, status, views: null, likes: null } });
   const clips = [
     { ...clip(1), created_at: "2026-10-27T09:59:00+00:00", uploads: up("2026-10-27T10:30:00+00:00", "done") }, // old clip, posted now
     { ...clip(2), created_at: "2026-10-27T10:20:00+00:00", uploads: up("2026-10-27T10:31:00+00:00", "uploading") },

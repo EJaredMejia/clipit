@@ -183,6 +183,12 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
             whisper=a.whisper,
             high_effort=a.high_effort,
         )
+    if (a.poll or a.upload) and not a.dry_run:
+        try:
+            if n := youtube.refresh_stats(conn):
+                log(f"read the views of {n} YouTube post{'s' if n > 1 else ''}")
+        except Exception:  # only the dashboard's view counts wait: the clips and posts of this run stand
+            logger.exception("reading YouTube views failed")
     if a.reedit is not None:
         reedit(conn, a.out, a.reedit, a.request.strip(), a.at, a.ai)
     if a.dashboard:

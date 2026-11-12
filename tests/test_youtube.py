@@ -1,4 +1,5 @@
 import datetime
+import json
 
 import httplib2
 import pytest
@@ -223,3 +224,94 @@ def test_a_run_that_runs_out_of_quota_keeps_its_posts_and_other_errors_still_fai
     )
     with pytest.raises(HttpError):  # nothing posted at all: the step shows as failed
         youtube.upload_run(conn, tmp_path)
+
+
+FAKE = "fake"
+LOGIN = {"refresh_token": FAKE, "client_id": FAKE, "client_secret": FAKE}
+
+
+class Creds:
+    def __init__(self, scopes):
+        self.granted_scopes, self.scopes = None, scopes
+
+
+def test_views_are_read_back_for_every_posted_clip(conn, tmp_path, monkeypatch):
+    token = tmp_path / "token.json"
+    token.write_text("{}")
+    monkeypatch.setattr(youtube, "TOKEN", token)
+    monkeypatch.setattr(youtube, "_credentials", lambda: Creds(youtube.SCOPES))
+    db.save_clips(conn, "v1", [{**CLIP, "idx": i, "start": float(i), "file": f"v1/clips/0{i}.mp4"} for i in (1, 2, 3, 4)])
+    ids = [r[0] for r in conn.execute("SELECT id FROM clips ORDER BY idx")]
+    db.set_upload(conn, ids[0], "youtube", "https://youtube.com/shorts/abcdefghijk")
+    db.set_upload(conn, ids[1], "youtube", "https://www.youtube.com/watch?v=ABCDEFGHIJK&t=3")  # typed in by hand
+    db.set_upload(conn, ids[2], "youtube", "")  # marked posted with no link: nothing to read
+    db.set_upload(conn, ids[3], "tiktok", "https://youtube.com/shorts/zzzzzzzzzzz")  # not a YouTube post
+    asked = []
+    monkeypatch.setattr(youtube, "_stats", lambda creds, vids: asked.append(sorted(vids)) or {"abcdefghijk": (1234, 56)})
+    assert youtube.refresh_stats(conn) == 1
+    assert asked == [["ABCDEFGHIJK", "abcdefghijk"]]
+    ups = {c["id"]: c["uploads"] for c in db.overview(conn)["clips"]}
+    assert ups[ids[0]]["youtube"] | {"url": "", "at": ""} == {"url": "", "at": "", "status": "done", "views": 1234, "likes": 56}
+    assert ups[ids[1]]["youtube"]["views"] is None  # gone from YouTube: left unread
+
+
+def test_views_wait_for_a_login_that_may_read_them(conn, tmp_path, monkeypatch):
+    monkeypatch.setattr(youtube, "TOKEN", tmp_path / "missing.json")
+    assert youtube.refresh_stats(conn) == 0  # no login at all: nothing to do, and no error
+    token = tmp_path / "token.json"
+    token.write_text("{}")
+    monkeypatch.setattr(youtube, "TOKEN", token)
+    monkeypatch.setattr(youtube, "_credentials", lambda: Creds([youtube.UPLOAD]))  # a login from before views
+    monkeypatch.setattr(youtube, "_stats", lambda *_: pytest.fail("asked YouTube without leave to read"))
+    assert youtube.refresh_stats(conn) == 0
+
+
+def test_stats_are_read_in_pages_and_hidden_likes_stay_unknown(monkeypatch):
+    calls = []
+
+    class Api:
+        def videos(self):
+            return self
+
+        def list(self, part, id, maxResults):
+            calls.append(id.split(","))
+            return self
+
+        def execute(self, num_retries):
+            return {"items": [{"id": "a", "statistics": {"viewCount": "7"}}] if len(calls) == 1 else []}
+
+    monkeypatch.setattr(youtube, "build", lambda *a, **k: Api())
+    vids = [f"v{i}" for i in range(youtube.PAGE + 1)]
+    assert youtube._stats("creds", vids) == {"a": (7, None)}  # type: ignore[arg-type]
+    assert [len(c) for c in calls] == [youtube.PAGE, 1]
+
+
+def test_an_old_login_keeps_its_own_scopes(tmp_path, monkeypatch):
+    token = tmp_path / "token.json"
+    info = {"token": "t", **LOGIN, "scopes": [youtube.UPLOAD]}
+    token.write_text(json.dumps(info))
+    monkeypatch.setattr(youtube, "TOKEN", token)
+    monkeypatch.setattr(youtube.Credentials, "refresh", lambda self, request: None)
+    assert youtube._credentials().scopes == [youtube.UPLOAD]  # asking a refresh for READ would break posting
+
+
+def test_login_saves_only_the_scopes_google_granted(tmp_path, monkeypatch):
+    class Flow:
+        def run_local_server(self, **_):
+            # the user unticked reading at consent: Google granted posting alone
+            return youtube.Credentials(
+                "t",
+                refresh_token=FAKE,
+                client_id=FAKE,
+                client_secret=FAKE,
+                scopes=youtube.SCOPES,
+                granted_scopes=[youtube.UPLOAD],
+            )
+
+    (tmp_path / "client.json").write_text("{}")
+    monkeypatch.setattr(youtube, "CLIENT", tmp_path / "client.json")
+    monkeypatch.setattr(youtube, "HOME", tmp_path)
+    monkeypatch.setattr(youtube, "TOKEN", tmp_path / "token.json")
+    monkeypatch.setattr(youtube.InstalledAppFlow, "from_client_secrets_file", lambda *_: Flow())
+    youtube.login()
+    assert json.loads((tmp_path / "token.json").read_text())["scopes"] == [youtube.UPLOAD]
