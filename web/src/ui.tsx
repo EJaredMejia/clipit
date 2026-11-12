@@ -32,7 +32,8 @@ export const secs = (c: Clip) => `${Math.round(c.end_s - c.start_s)} s`;
 export const hms = (s: number) => `${Math.floor(s / 3600)}:${two(Math.floor(s / 60) % 60)}:${two(Math.floor(s) % 60)}`;
 export const media = (c: Clip) => `/media/${c.id}?f=${encodeURIComponent(c.file)}`; // a new file gets a new URL, not the cached copy
 export const hot = (c: Clip) => c.score >= 8;
-export const count = (n: number) => new Intl.NumberFormat([], { notation: "compact" }).format(n); // 12.3K
+const compact = new Intl.NumberFormat([], { notation: "compact" });
+export const count = (n: number) => compact.format(n); // 12.3K
 
 export function atTime(url: string | null, s: number): string | null {
   try {

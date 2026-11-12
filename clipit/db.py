@@ -561,14 +561,25 @@ def set_upload(
     return True
 
 
-def posted_urls(conn: sqlite3.Connection, platform: str) -> dict[int, str]:
-    """Each clip posted on platform, as clip id -> the post's link ('' when the user marked it posted without one)."""
-    rows = conn.execute("SELECT clip_id, url FROM uploads WHERE platform = ? AND status = 'done'", (platform,))
+def posted_urls(conn: sqlite3.Connection, platform: str, now: datetime.datetime) -> dict[int, str]:
+    """Each clip public on platform by now (a scheduled post isn't yet), as clip id -> the post's link ('' when the user
+    marked it posted without one)."""
+    rows = conn.execute(
+        "SELECT clip_id, url FROM uploads WHERE platform = ? AND status = 'done' AND uploaded_at <= ?",
+        (platform, now.isoformat()),
+    )
     return {r["clip_id"]: r["url"] for r in rows}
 
 
-def set_stats(conn: sqlite3.Connection, platform: str, stats: dict[int, tuple[int, int | None]], now=None) -> None:
-    """Record how posted clips did, as clip id -> (views, likes); likes None when the video hides them."""
+def stats_read_at(conn: sqlite3.Connection, platform: str) -> datetime.datetime | None:
+    """When set_stats last ran for platform, None if never."""
+    at = conn.execute("SELECT MAX(stats_at) FROM uploads WHERE platform = ?", (platform,)).fetchone()[0]
+    return at and _ts(at)
+
+
+def set_stats(conn: sqlite3.Connection, platform: str, stats: dict[int, tuple[int | None, int | None]], now=None) -> None:
+    """Record how posted clips did, as clip id -> (views, likes); likes None when the video hides them, both None when
+    the video is gone."""
     at = (now or utcnow()).isoformat()
     conn.executemany(
         "UPDATE uploads SET views = ?, likes = ?, stats_at = ? WHERE clip_id = ? AND platform = ?",

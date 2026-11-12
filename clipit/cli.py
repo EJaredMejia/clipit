@@ -187,6 +187,8 @@ def run(a: argparse.Namespace, conn: sqlite3.Connection) -> None:
         try:
             if n := youtube.refresh_stats(conn):
                 log(f"read the views of {n} YouTube post{'s' if n > 1 else ''}")
+        except ClipitError as e:  # an expired login: said once a pass, without a traceback
+            logger.warning("not reading YouTube views: %s", e)
         except Exception:  # only the dashboard's view counts wait: the clips and posts of this run stand
             logger.exception("reading YouTube views failed")
     if a.reedit is not None:

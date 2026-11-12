@@ -6,7 +6,7 @@ import pytest
 from googleapiclient.errors import HttpError
 
 from clipit import db, youtube
-from clipit.util import ClipitError
+from clipit.util import ClipitError, utcnow
 
 CLIP = {
     "idx": 1,
@@ -235,27 +235,34 @@ class Creds:
         self.granted_scopes, self.scopes = None, scopes
 
 
-def test_views_are_read_back_for_every_posted_clip(conn, tmp_path, monkeypatch):
+def test_views_are_read_back_for_every_public_post(conn, tmp_path, monkeypatch):
     token = tmp_path / "token.json"
     token.write_text("{}")
     monkeypatch.setattr(youtube, "TOKEN", token)
     monkeypatch.setattr(youtube, "_credentials", lambda: Creds(youtube.SCOPES))
-    db.save_clips(conn, "v1", [{**CLIP, "idx": i, "start": float(i), "file": f"v1/clips/0{i}.mp4"} for i in (1, 2, 3, 4)])
+    db.save_clips(conn, "v1", [{**CLIP, "idx": i, "start": float(i), "file": f"v1/clips/0{i}.mp4"} for i in range(1, 7)])
     ids = [r[0] for r in conn.execute("SELECT id FROM clips ORDER BY idx")]
-    db.set_upload(conn, ids[0], "youtube", "https://youtube.com/shorts/abcdefghijk")
-    db.set_upload(conn, ids[1], "youtube", "https://www.youtube.com/watch?v=ABCDEFGHIJK&t=3")  # typed in by hand
-    db.set_upload(conn, ids[2], "youtube", "")  # marked posted with no link: nothing to read
-    db.set_upload(conn, ids[3], "tiktok", "https://youtube.com/shorts/zzzzzzzzzzz")  # not a YouTube post
+    now = utcnow()
+    db.set_upload(conn, ids[0], "youtube", "https://youtube.com/shorts/abcdefghijk", at=now - youtube.GAP)
+    db.set_upload(conn, ids[1], "youtube", "https://www.youtube.com/watch?v=ABCDEFGHIJK&t=3", at=now - youtube.GAP)
+    db.set_upload(conn, ids[2], "youtube", "https://youtu.be/abcdefghijk", at=now - youtube.GAP)  # the same video
+    db.set_upload(conn, ids[3], "youtube", "", at=now - youtube.GAP)  # marked posted with no link: nothing to read
+    db.set_upload(conn, ids[4], "youtube", "https://youtube.com/shorts/scheduledxx", at=now + youtube.GAP)  # not public yet
+    db.set_upload(conn, ids[5], "tiktok", "https://youtube.com/shorts/zzzzzzzzzzz", at=now - youtube.GAP)  # not YouTube
+    db.set_stats(conn, "youtube", {ids[1]: (99, 9)}, now - 2 * youtube.STATS_EVERY)  # read before it was taken down
     asked = []
     monkeypatch.setattr(youtube, "_stats", lambda creds, vids: asked.append(sorted(vids)) or {"abcdefghijk": (1234, 56)})
-    assert youtube.refresh_stats(conn) == 1
+    assert youtube.refresh_stats(conn, now) == 1
     assert asked == [["ABCDEFGHIJK", "abcdefghijk"]]
-    ups = {c["id"]: c["uploads"] for c in db.overview(conn)["clips"]}
-    assert ups[ids[0]]["youtube"] | {"url": "", "at": ""} == {"url": "", "at": "", "status": "done", "views": 1234, "likes": 56}
-    assert ups[ids[1]]["youtube"]["views"] is None  # gone from YouTube: left unread
+    views = {c["id"]: c["uploads"].get("youtube", {}).get("views") for c in db.overview(conn)["clips"]}
+    assert [views[i] for i in ids] == [1234, None, 1234, None, None, None]  # the taken-down video lost its old count
+    assert youtube.refresh_stats(conn, now + youtube.STATS_EVERY / 2) == 0  # the run's next step doesn't read again
+    assert len(asked) == 1
 
 
 def test_views_wait_for_a_login_that_may_read_them(conn, tmp_path, monkeypatch):
+    clip_id = conn.execute("SELECT id FROM clips").fetchone()[0]
+    db.set_upload(conn, clip_id, "youtube", "https://youtube.com/shorts/abcdefghijk", at=utcnow() - youtube.GAP)
     monkeypatch.setattr(youtube, "TOKEN", tmp_path / "missing.json")
     assert youtube.refresh_stats(conn) == 0  # no login at all: nothing to do, and no error
     token = tmp_path / "token.json"
@@ -295,17 +302,18 @@ def test_an_old_login_keeps_its_own_scopes(tmp_path, monkeypatch):
     assert youtube._credentials().scopes == [youtube.UPLOAD]  # asking a refresh for READ would break posting
 
 
-def test_login_saves_only_the_scopes_google_granted(tmp_path, monkeypatch):
+# the user unticked reading at consent, or Google didn't say what it granted: either way, posting alone is saved
+@pytest.mark.parametrize("granted", [[youtube.UPLOAD], None])
+def test_login_saves_only_the_scopes_google_granted(tmp_path, monkeypatch, granted):
     class Flow:
         def run_local_server(self, **_):
-            # the user unticked reading at consent: Google granted posting alone
             return youtube.Credentials(
                 "t",
                 refresh_token=FAKE,
                 client_id=FAKE,
                 client_secret=FAKE,
                 scopes=youtube.SCOPES,
-                granted_scopes=[youtube.UPLOAD],
+                granted_scopes=granted,
             )
 
     (tmp_path / "client.json").write_text("{}")
