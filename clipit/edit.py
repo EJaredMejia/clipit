@@ -278,7 +278,9 @@ You also choose how the stream fills the phone, in the edit:
 - "focus": 0-1, the middle of what viewers need to see (the faces, the action, not menus or an empty desktop), across
   the stream's width: read it off the lines on "the stream". The gameplay panel (split) or the crop is centered on it,
   as far as the frame allows. For cam it's across the webcam box instead: 0 its left edge, 1 its right.
-Always return both in the edit, also when you keep them.
+Split and cam show the box we found as the webcam: use them only when it is the streamer themself. When the top panel
+shows anyone or anything else (a video or news clip they're watching, another person, a map, a menu), choose crop or
+fill instead. Always return both in the edit, also when you keep them.
 
 """
 
