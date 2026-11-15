@@ -230,16 +230,10 @@ FAKE = "fake"
 LOGIN = {"refresh_token": FAKE, "client_id": FAKE, "client_secret": FAKE}
 
 
-class Creds:
-    def __init__(self, scopes):
-        self.granted_scopes, self.scopes = None, scopes
-
-
 def test_views_are_read_back_for_every_public_post(conn, tmp_path, monkeypatch):
     token = tmp_path / "token.json"
-    token.write_text("{}")
+    token.write_text(json.dumps({"scopes": youtube.SCOPES}))
     monkeypatch.setattr(youtube, "TOKEN", token)
-    monkeypatch.setattr(youtube, "_credentials", lambda: Creds(youtube.SCOPES))
     db.save_clips(conn, "v1", [{**CLIP, "idx": i, "start": float(i), "file": f"v1/clips/0{i}.mp4"} for i in range(1, 7)])
     ids = [r[0] for r in conn.execute("SELECT id FROM clips ORDER BY idx")]
     now = utcnow()
@@ -252,12 +246,16 @@ def test_views_are_read_back_for_every_public_post(conn, tmp_path, monkeypatch):
     db.set_stats(conn, "youtube", {ids[1]: (99, 9)}, now - 2 * youtube.STATS_EVERY)  # read before it was taken down
     asked = []
     monkeypatch.setattr(youtube, "_stats", lambda creds, vids: asked.append(sorted(vids)) or {"abcdefghijk": (1234, 56)})
-    assert youtube.refresh_stats(conn, now) == 1
+    assert youtube.refresh_stats(conn, now) == 2  # two posts of the one video found
     assert asked == [["ABCDEFGHIJK", "abcdefghijk"]]
     views = {c["id"]: c["uploads"].get("youtube", {}).get("views") for c in db.overview(conn)["clips"]}
     assert [views[i] for i in ids] == [1234, None, 1234, None, None, None]  # the taken-down video lost its old count
     assert youtube.refresh_stats(conn, now + youtube.STATS_EVERY / 2) == 0  # the run's next step doesn't read again
     assert len(asked) == 1
+    db.set_upload(conn, ids[2], "youtube", "https://youtu.be/otherxxxxxx")  # the user fixed its link
+    db.set_upload(conn, ids[0], "youtube", "https://youtube.com/shorts/abcdefghijk")  # the same link again
+    views = {c["id"]: c["uploads"]["youtube"]["views"] for c in db.overview(conn)["clips"] if c["id"] in ids[:3]}
+    assert views == {ids[0]: 1234, ids[1]: None, ids[2]: None}  # another video's count isn't its
 
 
 def test_views_wait_for_a_login_that_may_read_them(conn, tmp_path, monkeypatch):
@@ -266,10 +264,9 @@ def test_views_wait_for_a_login_that_may_read_them(conn, tmp_path, monkeypatch):
     monkeypatch.setattr(youtube, "TOKEN", tmp_path / "missing.json")
     assert youtube.refresh_stats(conn) == 0  # no login at all: nothing to do, and no error
     token = tmp_path / "token.json"
-    token.write_text("{}")
+    token.write_text(json.dumps({"scopes": [youtube.UPLOAD]}))  # a login from before views
     monkeypatch.setattr(youtube, "TOKEN", token)
-    monkeypatch.setattr(youtube, "_credentials", lambda: Creds([youtube.UPLOAD]))  # a login from before views
-    monkeypatch.setattr(youtube, "_stats", lambda *_: pytest.fail("asked YouTube without leave to read"))
+    monkeypatch.setattr(youtube, "_credentials", lambda: pytest.fail("refreshed a login that can't read views"))
     assert youtube.refresh_stats(conn) == 0
 
 
@@ -305,8 +302,12 @@ def test_an_old_login_keeps_its_own_scopes(tmp_path, monkeypatch):
 # the user unticked reading at consent, or Google didn't say what it granted: either way, posting alone is saved
 @pytest.mark.parametrize("granted", [[youtube.UPLOAD], None])
 def test_login_saves_only_the_scopes_google_granted(tmp_path, monkeypatch, granted):
+    monkeypatch.delenv("OAUTHLIB_RELAX_TOKEN_SCOPE", raising=False)
+
     class Flow:
         def run_local_server(self, **_):
+            # oauthlib raises on a narrower grant unless this is set
+            assert youtube.os.environ.get("OAUTHLIB_RELAX_TOKEN_SCOPE")
             return youtube.Credentials(
                 "t",
                 refresh_token=FAKE,

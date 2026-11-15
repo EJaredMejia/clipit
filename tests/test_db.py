@@ -331,7 +331,8 @@ def test_an_edit_of_a_moment_is_a_clip_of_its_own(conn):
 
 
 def test_variant_migration_keeps_clips_uploads_and_id_sequence(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:-1])
+    variant = next(i for i, sql in enumerate(db.MIGRATIONS) if "uploads_keep" in sql)
+    monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:variant])  # the schema just before it
     old = db.connect(tmp_path / "x.db")
     db.record_manual(old, "v1", "u")
     for start in (1, 60):  # written by the old code
@@ -341,7 +342,7 @@ def test_variant_migration_keeps_clips_uploads_and_id_sequence(tmp_path, monkeyp
             (start, start + 19),
         )
     old.execute("DELETE FROM clips WHERE id = 2")  # its id must stay retired
-    db.set_upload(old, 1, "youtube", "https://youtu.be/x")
+    old.execute("INSERT INTO uploads (clip_id, platform, url, uploaded_at) VALUES (1, 'youtube', 'https://youtu.be/x', 'now')")
     old.close()
     monkeypatch.undo()
     c = db.connect(tmp_path / "x.db")

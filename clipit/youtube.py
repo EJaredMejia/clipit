@@ -13,6 +13,7 @@ Google Cloud, and the token `clipit --youtube-login` saves.
 
 import datetime
 import json
+import os
 import re
 import sqlite3
 from pathlib import Path
@@ -51,6 +52,8 @@ def login() -> None:
     if not CLIENT.exists():
         raise ClipitError(f"No OAuth client at {CLIENT}: download it from Google Cloud (README, Post to YouTube Shorts)")
     flow = InstalledAppFlow.from_client_secrets_file(str(CLIENT), SCOPES)
+    # oauthlib otherwise raises when the user unticks a scope at consent, before the check below can save the rest
+    os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"  # noqa: S105 (a flag, not a secret)
     # prompt=consent: Google only hands out the long-lived refresh token when the consent screen is shown
     creds = flow.run_local_server(port=0, timeout_seconds=600, prompt="consent")
     if not creds.refresh_token:
@@ -192,14 +195,14 @@ def refresh_stats(conn: sqlite3.Connection, now: datetime.datetime | None = None
             clips.setdefault(m[1], []).append(clip_id)
     if not clips:
         return 0
-    creds = _credentials()
-    if READ not in (creds.granted_scopes or creds.scopes or ()):
+    if READ not in json.loads(TOKEN.read_text()).get("scopes", ()):  # the scopes a refresh asks for (_credentials)
         log("not reading YouTube views: run clipit --youtube-login once more to let clipit read them")
         return 0
+    creds = _credentials()
     found = _stats(creds, list(clips))
     # a video that's gone shows no views, not the last ones read
     db.set_stats(conn, "youtube", {c: found.get(v, (None, None)) for v, cs in clips.items() for c in cs}, now)
-    return len(found)
+    return sum(len(cs) for v, cs in clips.items() if v in found)
 
 
 def _stats(creds: Credentials, ids: list[str]) -> dict[str, tuple[int, int | None]]:

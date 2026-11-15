@@ -553,6 +553,9 @@ def set_upload(
         conn.execute(
             """INSERT INTO uploads (clip_id, platform, url, uploaded_at) VALUES (?, ?, ?, ?)
                ON CONFLICT (clip_id, platform) DO UPDATE SET url = excluded.url, status = 'done', error = NULL,
+                   -- a new link is another video: the old one's counts aren't its
+                   views = CASE WHEN url = excluded.url THEN views END,
+                   likes = CASE WHEN url = excluded.url THEN likes END,
                    uploaded_at = CASE WHEN status = 'done' THEN uploaded_at ELSE excluded.uploaded_at END""",
             (clip_id, platform, url, (at or utcnow()).isoformat()),
         )
