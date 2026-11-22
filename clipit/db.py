@@ -210,6 +210,23 @@ MIGRATIONS = [
         ON CONFLICT (run_id, vod_id) DO UPDATE SET status = excluded.status;
     END;
     """,
+    # A deletion is not a completed VOD. Reconcile legacy writes made between earlier migration commits while
+    # holding the same write lock that installs the trigger, so no old poller can finish in a backfill/trigger gap.
+    """
+    DROP TRIGGER record_run_vod;
+    CREATE TRIGGER record_run_vod AFTER UPDATE OF status ON vods
+    WHEN OLD.status = 'processing' AND NEW.status IN ('done', 'failed') AND NEW.run_id IS NOT NULL AND NOT NEW.deleted
+    BEGIN
+        INSERT INTO run_vods (run_id, vod_id, status) VALUES (NEW.run_id, NEW.id, NEW.status)
+        ON CONFLICT (run_id, vod_id) DO UPDATE SET status = excluded.status;
+    END;
+    INSERT INTO run_vods SELECT run_id, id, status FROM vods
+        WHERE run_id IS NOT NULL AND status IN ('done', 'failed') AND NOT deleted
+        ON CONFLICT (run_id, vod_id) DO NOTHING;
+    DELETE FROM run_vods WHERE status = 'done' AND EXISTS (
+        SELECT 1 FROM vods WHERE vods.id = run_vods.vod_id AND vods.run_id = run_vods.run_id AND vods.deleted
+    );
+    """,
 ]
 TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")

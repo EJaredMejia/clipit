@@ -93,6 +93,39 @@ def test_a_poller_already_running_during_upgrade_preserves_its_outcome(conn):
     assert db.run_vod_result(conn, 1) == {"total": 1, "failed": 1}
 
 
+def test_deleting_an_unfinished_stale_vod_is_not_a_successful_run_outcome(conn):
+    assert db.claim(conn, "v1", "u", "s", "top", now=T0, run_id=1)
+    with db.deleting_vod(conn, "v1", now=T0 + db.STALE_CLAIM * 2):
+        pass
+    assert db.run_vod_result(conn, 1) == {"total": 0, "failed": 0}
+
+
+def test_upgrade_captures_an_old_pollers_outcome_between_migration_commits(tmp_path, monkeypatch):
+    history = next(i for i, sql in enumerate(db.MIGRATIONS) if "CREATE TABLE run_vods" in sql)
+    monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[: history + 1])
+    old = db.connect(tmp_path / "gap.db")
+    assert db.claim(old, "v1", "u", "s", "top", run_id=1)
+    old.execute("UPDATE vods SET status = 'failed' WHERE id = 'v1'")
+    old.close()
+    monkeypatch.undo()
+    upgraded = db.connect(tmp_path / "gap.db")
+    assert db.run_vod_result(upgraded, 1) == {"total": 1, "failed": 1}
+    upgraded.close()
+
+
+def test_upgrade_drops_an_ambiguous_deleted_success_from_earlier_history(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:-1])
+    old = db.connect(tmp_path / "deleted.db")
+    assert db.claim(old, "v1", "u", "s", "top", now=T0, run_id=1)
+    with db.deleting_vod(old, "v1", now=T0 + db.STALE_CLAIM * 2):
+        pass
+    old.close()
+    monkeypatch.undo()
+    upgraded = db.connect(tmp_path / "deleted.db")
+    assert db.run_vod_result(upgraded, 1) == {"total": 0, "failed": 0}
+    upgraded.close()
+
+
 def test_claim_once_until_done(conn):
     assert db.claim(conn, "v1", "u", "s", "top", now=T0)
     assert not db.claim(conn, "v1", "u", "s", "top", now=T0)  # another run has it
