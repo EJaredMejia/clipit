@@ -41,7 +41,7 @@ def test_run_vod_results_survive_deletion_and_retry_before_the_run_ends(conn):
     assert run_id
     for vod, error in (("good", None), ("deleted", "failed"), ("retried", "failed")):
         assert db.claim(conn, vod, "u", "s", "top", run_id=run_id)
-        db.finish(conn, vod, error=error)
+        db.finish(conn, vod, error=error, run_id=run_id)
     with db.deleting_vod(conn, "deleted") as files:
         assert files == []
     assert db.claim(conn, "retried", "u", "s", "top", now=db.utcnow() + db.RETRY_AFTER)
@@ -62,6 +62,25 @@ def test_run_vod_result_migration_backfills_existing_finished_vods(tmp_path, mon
     upgraded = db.connect(tmp_path / "old.db")
     assert db.run_vod_result(upgraded, run_id) == {"total": 1, "failed": 1}
     upgraded.close()
+
+
+def test_interrupted_run_still_reports_the_vods_that_already_failed(conn):
+    run_id = db.start_run(conn, ["Clip the latest VODs"])
+    assert run_id
+    db.claim(conn, "v1", "u", "s", "top", run_id=run_id)
+    db.finish(conn, "v1", error="OpenCL failed", run_id=run_id)
+    run = db.latest_run(conn, db.utcnow() + db.RUN_DEAD * 2)
+    assert run and run["steps"][0]["status"] == "interrupted"
+    assert run["steps"][0]["vods"] == {"total": 1, "failed": 1}
+
+
+def test_late_finish_belongs_to_its_original_run_and_preserves_a_new_claim(conn):
+    assert db.claim(conn, "v1", "u", "s", "top", now=T0, run_id=1)
+    assert db.claim(conn, "v1", "u", "s", "top", now=T0 + db.STALE_CLAIM * 2, run_id=2)
+    db.finish(conn, "v1", error="old worker resumed", run_id=1)
+    assert db.status(conn, "v1") == "processing"
+    assert db.run_vod_result(conn, 1) == {"total": 1, "failed": 1}
+    assert db.run_vod_result(conn, 2) == {"total": 0, "failed": 0}
 
 
 def test_claim_once_until_done(conn):
@@ -250,7 +269,7 @@ def test_claim_upload_skips_stale_and_hand_run_clips(conn):
 def test_claim_upload_in_a_run_takes_only_vods_its_polling_claimed(conn):
     (other,) = kept_clips(conn, 1)  # v1: claimed by a scheduled poll (no run), at the same time as the run's VOD
     db.claim(conn, "v2", "u2", "s", "top", now=T0, run_id=7)
-    db.finish(conn, "v2", now=T0)
+    db.finish(conn, "v2", now=T0, run_id=7)
     db.save_clips(conn, "v2", [{**CLIP, "score": db.AUTO_SCORE}])  # unreviewed, scored just high enough
     (own,) = [r[0] for r in conn.execute("SELECT id FROM clips WHERE vod_id = 'v2'")]
     conn.execute("UPDATE clips SET created_at = ? WHERE id = ?", (T0.isoformat(), own))  # older than the kept one

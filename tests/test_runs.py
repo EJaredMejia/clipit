@@ -73,9 +73,9 @@ def test_partial_poll_is_reported_and_posting_still_runs_after_it(conn, tmp_path
     run_id = db.start_run(conn, NAMES)
     assert run_id
     db.claim(conn, "good", "u", "s", "top", run_id=run_id)
-    db.finish(conn, "good")
+    db.finish(conn, "good", run_id=run_id)
     db.claim(conn, "bad", "u", "s", "top", run_id=run_id)
-    db.finish(conn, "bad", error="OpenCL allocation failed")
+    db.finish(conn, "bad", error="OpenCL allocation failed", run_id=run_id)
     # A failed VOD belonging to a different run must not inflate this run's result.
     db.claim(conn, "other", "u", "s", "top")
     db.finish(conn, "other", error="audio failed")

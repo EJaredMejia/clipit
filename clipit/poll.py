@@ -141,6 +141,7 @@ def poll(
     search_ai: the AI command with web search that finds who's popping off (ai.find_hot).
     Returns how many VODs failed if none worked: one broken VOD among good ones is logged, not a failed pass."""
     now = utcnow()
+    run_id = runs.current()
     failed = 0
     top_left = top_n
     extra_left, good, tried = EXTRA, 0, 0  # good: VODs with a clip good enough to post
@@ -191,7 +192,7 @@ def poll(
                 top_left -= 1
                 log(f"would clip {login}: {url}")
             continue
-        if not db.claim(conn, vod_id, url, login, "top", run_id=runs.current()):
+        if not db.claim(conn, vod_id, url, login, "top", run_id=run_id):
             if is_hot:
                 log(f"skipping {login}, found by the search: this VOD was already clipped")
             continue  # already clipped: the next streamer takes the slot, so a repeat pass finds someone new
@@ -216,16 +217,16 @@ def poll(
                         raise
                     logger.warning("VOD %s failed, trying it again", vod_id, exc_info=True)
             db.save_clips(conn, vod_id, [{**c, "file": f"{vod_id}/{c['file']}"} for c in clips])
-            db.finish(conn, vod_id)
+            db.finish(conn, vod_id, run_id=run_id)
             good += any(c["score"] >= db.AUTO_SCORE for c in clips)
         except AILimit as e:  # every VOD after this one would download, then fail the same way
             logger.error("the AI ran out of usage, so this pass stops here; the next run goes on:\n%s", e)
-            db.finish(conn, vod_id, error=f"{type(e).__name__}: {e}"[:1000])
+            db.finish(conn, vod_id, error=f"{type(e).__name__}: {e}"[:1000], run_id=run_id)
             failed += 1
             break
         except Exception as e:  # one bad VOD (sub-only, deleted...) must not stop the rest
             logger.exception("VOD %s failed %d times, the next streamer takes its place", vod_id, TRIES)
-            db.finish(conn, vod_id, error=f"{type(e).__name__}: {e}"[:1000])
+            db.finish(conn, vod_id, error=f"{type(e).__name__}: {e}"[:1000], run_id=run_id)
             failed += 1
             if failed <= REPLACE:  # it made nothing: its slot goes to the next one on the list
                 top_left += slot == "top"

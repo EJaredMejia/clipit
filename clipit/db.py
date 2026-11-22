@@ -310,19 +310,20 @@ def busy(row: sqlite3.Row, now: datetime.datetime) -> bool:
     return claimed or bool(row["running_at"]) and now - _ts(row["running_at"]) < STALE_CLAIM
 
 
-def finish(conn: sqlite3.Connection, vod_id: str, error: str | None = None, now=None) -> None:
+def finish(conn: sqlite3.Connection, vod_id: str, error: str | None = None, now=None, *, run_id: int | None = None) -> None:
     """Finish a VOD and atomically preserve its outcome for the run that claimed it."""
     conn.execute("BEGIN IMMEDIATE")
     try:
         conn.execute(
-            "UPDATE vods SET status = ?, error = ?, finished_at = ? WHERE id = ?",
-            ("failed" if error else "done", error, (now or utcnow()).isoformat(), vod_id),
+            "UPDATE vods SET status = ?, error = ?, finished_at = ? WHERE id = ? AND run_id IS ?",
+            ("failed" if error else "done", error, (now or utcnow()).isoformat(), vod_id, run_id),
         )
-        conn.execute(
-            """INSERT INTO run_vods SELECT run_id, id, status FROM vods WHERE id = ? AND run_id IS NOT NULL
-               ON CONFLICT (run_id, vod_id) DO UPDATE SET status = excluded.status""",
-            (vod_id,),
-        )
+        if run_id is not None:
+            conn.execute(
+                """INSERT INTO run_vods (run_id, vod_id, status) VALUES (?, ?, ?)
+                   ON CONFLICT (run_id, vod_id) DO UPDATE SET status = excluded.status""",
+                (run_id, vod_id, "failed" if error else "done"),
+            )
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
@@ -788,10 +789,15 @@ def latest_run(conn: sqlite3.Connection, now: datetime.datetime | None = None) -
     if not ended and (now or utcnow()) - _ts(row["beat_at"]) > RUN_DEAD:
         ended = row["beat_at"]
         steps = [{**s, "status": "interrupted"} if s["status"] in ("waiting", "running") else s for s in steps]
+    job = json.loads(row["job"] or "null")
+    if steps and "reedit" not in (job or {}) and "vods" not in steps[0]:
+        steps[0]["vods"] = run_vod_result(conn, row["id"])
+        if steps[0]["status"] == "done" and steps[0]["vods"]["failed"]:
+            steps[0]["status"] = "partial"
     return {"id": row["id"], "running": not ended, "stopping": bool(row["stop"]) and not ended,
             "started": row["started_at"], "ended": ended, "steps": steps,
             "doing": json.loads(row["doing"] or "{}") if not ended else {},
-            "job": json.loads(row["job"] or "null")}  # fmt: skip
+            "job": job}  # fmt: skip
 
 
 def run_vod_result(conn: sqlite3.Connection, run_id: int) -> dict[str, int]:
