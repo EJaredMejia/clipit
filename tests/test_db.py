@@ -36,6 +36,34 @@ def test_migrations_are_applied_once(tmp_path):
     assert c.execute("PRAGMA user_version").fetchone()[0] == len(db.MIGRATIONS)
 
 
+def test_run_vod_results_survive_deletion_and_retry_before_the_run_ends(conn):
+    run_id = db.start_run(conn, ["Clip"])
+    assert run_id
+    for vod, error in (("good", None), ("deleted", "failed"), ("retried", "failed")):
+        assert db.claim(conn, vod, "u", "s", "top", run_id=run_id)
+        db.finish(conn, vod, error=error)
+    with db.deleting_vod(conn, "deleted") as files:
+        assert files == []
+    assert db.claim(conn, "retried", "u", "s", "top", now=db.utcnow() + db.RETRY_AFTER)
+    db.finish(conn, "retried")
+    assert db.run_vod_result(conn, run_id) == {"total": 3, "failed": 2}
+
+
+def test_run_vod_result_migration_backfills_existing_finished_vods(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:-1])
+    old = db.connect(tmp_path / "old.db")
+    run_id = db.start_run(old, ["Clip"])
+    assert run_id
+    assert db.claim(old, "failed", "u", "s", "top", run_id=run_id)
+    old.execute("UPDATE vods SET status = 'failed' WHERE id = 'failed'")
+    assert db.claim(old, "still_running", "u", "s", "top", run_id=run_id)
+    old.close()
+    monkeypatch.undo()
+    upgraded = db.connect(tmp_path / "old.db")
+    assert db.run_vod_result(upgraded, run_id) == {"total": 1, "failed": 1}
+    upgraded.close()
+
+
 def test_claim_once_until_done(conn):
     assert db.claim(conn, "v1", "u", "s", "top", now=T0)
     assert not db.claim(conn, "v1", "u", "s", "top", now=T0)  # another run has it

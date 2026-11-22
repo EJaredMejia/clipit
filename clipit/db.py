@@ -190,6 +190,17 @@ MIGRATIONS = [
     ALTER TABLE uploads ADD COLUMN likes INTEGER;
     ALTER TABLE uploads ADD COLUMN stats_at TEXT;
     """,
+    # Historical outcomes belong to a run even after a VOD is deleted or claimed by a later run.
+    """
+    CREATE TABLE run_vods (
+        run_id INTEGER NOT NULL,
+        vod_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('done', 'failed')),
+        PRIMARY KEY (run_id, vod_id)
+    );
+    INSERT INTO run_vods SELECT run_id, id, status FROM vods
+        WHERE run_id IS NOT NULL AND status IN ('done', 'failed');
+    """,
 ]
 TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")
@@ -300,10 +311,22 @@ def busy(row: sqlite3.Row, now: datetime.datetime) -> bool:
 
 
 def finish(conn: sqlite3.Connection, vod_id: str, error: str | None = None, now=None) -> None:
-    conn.execute(
-        "UPDATE vods SET status = ?, error = ?, finished_at = ? WHERE id = ?",
-        ("failed" if error else "done", error, (now or utcnow()).isoformat(), vod_id),
-    )
+    """Finish a VOD and atomically preserve its outcome for the run that claimed it."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute(
+            "UPDATE vods SET status = ?, error = ?, finished_at = ? WHERE id = ?",
+            ("failed" if error else "done", error, (now or utcnow()).isoformat(), vod_id),
+        )
+        conn.execute(
+            """INSERT INTO run_vods SELECT run_id, id, status FROM vods WHERE id = ? AND run_id IS NOT NULL
+               ON CONFLICT (run_id, vod_id) DO UPDATE SET status = excluded.status""",
+            (vod_id,),
+        )
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
 
 
 def record_manual(conn: sqlite3.Connection, vod_id: str, url: str) -> None:
@@ -772,9 +795,9 @@ def latest_run(conn: sqlite3.Connection, now: datetime.datetime | None = None) -
 
 
 def run_vod_result(conn: sqlite3.Connection, run_id: int) -> dict[str, int]:
-    """VOD counts for this run only. The runner saves a snapshot in its step before later retries change the VODs."""
+    """Finished VOD counts preserved for this run, independent of later deletions and retries."""
     row = conn.execute(
-        "SELECT COUNT(*) AS total, COUNT(CASE WHEN status = 'failed' THEN 1 END) AS failed FROM vods WHERE run_id = ?",
+        "SELECT COUNT(*) AS total, COUNT(CASE WHEN status = 'failed' THEN 1 END) AS failed FROM run_vods WHERE run_id = ?",
         (run_id,),
     ).fetchone()
     return dict(row)
