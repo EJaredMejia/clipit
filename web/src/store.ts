@@ -52,7 +52,11 @@ export type Vod = {
 export type Data = { vods: Vod[]; clips: Clip[] };
 // A run of clipit --poll, then --upload, started from the page (clipit/runs.py). It goes on without the page or the
 // dashboard, so a reopened page picks it up. Lines are clipit's output: untrusted.
-export type Step = { name: string; status: "waiting" | "running" | "done" | "failed" | "stopped" | "interrupted" };
+export type Step = {
+  name: string;
+  status: "waiting" | "running" | "done" | "partial" | "failed" | "stopped" | "interrupted";
+  vods?: { total: number; failed: number };
+};
 // How runs go (clipit/runs.py SETTINGS): saved on the server, a run keeps the ones it started with as its job.
 export type Settings = { lang: string; clips: number; high_effort: boolean; prioritize: string[]; upload: boolean };
 export type ReeditJob = { reedit: number; request: string; at: number | null };
@@ -228,6 +232,7 @@ export async function loadRun(): Promise<void> {
   const made = runResult(run, get().data.clips);
   const failed = run.steps.filter((s) => s.status === "failed" || s.status === "interrupted").map((s) => s.name);
   const stopped = run.steps.some((s) => s.status === "stopped");
+  const partial = run.steps.some((s) => s.status === "partial");
   const open = { label: "See the run", onClick: () => showTab("run") };
   if (isReedit(run.job)) {
     const opts = { description: run.job.request, duration: Infinity, closeButton: true, action: open };
@@ -236,10 +241,12 @@ export async function loadRun(): Promise<void> {
     else toast.success("Re-edit done: the clip has its new video", opts);
     return;
   }
-  const text = `${plural(made.clips, "new clip")}, ${made.posted} posted to YouTube`;
+  const failedVods = run.steps.reduce((n, s) => n + (s.vods?.failed ?? 0), 0);
+  const text = `${plural(made.clips, "new clip")}, ${made.posted} posted to YouTube${failedVods ? `, ${plural(failedVods, "VOD")} failed` : ""}`;
   const opts = { description: text, duration: Infinity, closeButton: true, action: open };
   if (failed.length) toast.error(`Run finished, but this failed: ${failed.join(", ")}`, opts);
   else if (stopped) toast(`Run stopped`, opts);
+  else if (partial) toast.warning("Run finished with VOD failures", opts);
   else toast.success("Run finished", { ...opts, action: made.clips ? { label: "Review", onClick: () => showTab("review") } : open });
 }
 

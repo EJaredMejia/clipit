@@ -140,6 +140,17 @@ def test_poll_pass(world, monkeypatch):
     assert len(calls) == 2  # nothing new: v1 done, v3 waits RETRY_AFTER
 
 
+def test_dashboard_poll_records_successes_and_failures_for_its_own_run(world, monkeypatch):
+    conn, calls, out = world
+    monkeypatch.setattr(db, "POSTS", 2)
+    run_id = db.start_run(conn, ["Clip the latest VODs"])
+    assert run_id
+    monkeypatch.setattr(poll.runs, "current", lambda: run_id)
+    poll.poll(conn, top_n=3, out_root=out)
+    assert db.status(conn, "v1") == "done" and db.status(conn, "v3") == "failed"
+    assert db.run_vod_result(conn, run_id) == {"total": 2, "failed": 1}
+
+
 def test_a_repeat_pass_gives_an_already_clipped_streamers_slot_to_the_next(world):
     conn, calls, out = world
     poll.poll(conn, top_n=1, lang="EN", out_root=out)

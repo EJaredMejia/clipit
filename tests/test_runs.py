@@ -69,6 +69,30 @@ def test_every_step_runs_even_after_one_fails_and_its_output_is_kept(conn, tmp_p
     assert "clipping caedrel ✓" in lines and "posted" in lines
 
 
+def test_partial_poll_is_reported_and_posting_still_runs_after_it(conn, tmp_path, monkeypatch) -> None:
+    run_id = db.start_run(conn, NAMES)
+    assert run_id
+    db.claim(conn, "good", "u", "s", "top", run_id=run_id)
+    db.finish(conn, "good", run_id=run_id)
+    db.claim(conn, "bad", "u", "s", "top", run_id=run_id)
+    db.finish(conn, "bad", error="OpenCL allocation failed", run_id=run_id)
+    # A failed VOD belonging to a different run must not inflate this run's result.
+    db.claim(conn, "other", "u", "s", "top")
+    db.finish(conn, "other", error="audio failed")
+    fake(monkeypatch, {"--poll": "pass", "--upload": "print('posted')"})
+    runs.run(conn, tmp_path, run_id)
+    run = db.latest_run(conn)
+    assert run and run["steps"][0]["status"] == "partial"
+    assert run["steps"][0]["vods"] == {"total": 2, "failed": 1}
+    assert run["steps"][1]["status"] == "done"
+    assert "posted" in runs.tail(tmp_path, run_id)
+    # Retrying the VOD later must not rewrite the completed run's result.
+    assert db.claim(conn, "bad", "u", "s", "top", now=utcnow() + db.RETRY_AFTER)
+    db.finish(conn, "bad")
+    later = db.latest_run(conn)
+    assert later and later["steps"][0]["vods"] == {"total": 2, "failed": 1}
+
+
 def test_stop_kills_a_clipping_step_with_everything_it_started_and_skips_the_rest(conn, tmp_path, monkeypatch) -> None:
     ticks = tmp_path / "ticks"
     # the step starts a child that keeps writing, like ffmpeg under clipit --poll

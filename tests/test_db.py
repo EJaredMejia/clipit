@@ -1,4 +1,5 @@
 import datetime
+import sqlite3
 import time
 
 import pytest
@@ -34,6 +35,115 @@ def test_migrations_are_applied_once(tmp_path):
     db.connect(tmp_path / "x.db").close()
     c = db.connect(tmp_path / "x.db")  # reopening must not re-run migrations
     assert c.execute("PRAGMA user_version").fetchone()[0] == len(db.MIGRATIONS)
+
+
+def test_run_vod_results_survive_deletion_and_retry_before_the_run_ends(conn):
+    run_id = db.start_run(conn, ["Clip"])
+    assert run_id
+    for vod, error in (("good", None), ("deleted", "failed"), ("retried", "failed")):
+        assert db.claim(conn, vod, "u", "s", "top", run_id=run_id)
+        db.finish(conn, vod, error=error, run_id=run_id)
+    with db.deleting_vod(conn, "deleted") as files:
+        assert files == []
+    assert db.claim(conn, "retried", "u", "s", "top", now=db.utcnow() + db.RETRY_AFTER)
+    db.finish(conn, "retried")
+    assert db.run_vod_result(conn, run_id) == {"total": 3, "failed": 2}
+
+
+def test_run_vod_result_migration_backfills_existing_finished_vods(tmp_path, monkeypatch):
+    history = next(i for i, sql in enumerate(db.MIGRATIONS) if "CREATE TABLE run_vods" in sql)
+    monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:history])
+    old = db.connect(tmp_path / "old.db")
+    run_id = db.start_run(old, ["Clip"])
+    assert run_id
+    assert db.claim(old, "failed", "u", "s", "top", run_id=run_id)
+    old.execute("UPDATE vods SET status = 'failed' WHERE id = 'failed'")
+    assert db.claim(old, "still_running", "u", "s", "top", run_id=run_id)
+    old.close()
+    monkeypatch.undo()
+    upgraded = db.connect(tmp_path / "old.db")
+    assert db.run_vod_result(upgraded, run_id) == {"total": 1, "failed": 1}
+    upgraded.close()
+
+
+def test_interrupted_run_still_reports_the_vods_that_already_failed(conn):
+    run_id = db.start_run(conn, ["Clip the latest VODs"])
+    assert run_id
+    db.claim(conn, "v1", "u", "s", "top", run_id=run_id)
+    db.finish(conn, "v1", error="OpenCL failed", run_id=run_id)
+    run = db.latest_run(conn, db.utcnow() + db.RUN_DEAD * 2)
+    assert run and run["steps"][0]["status"] == "interrupted"
+    assert run["steps"][0]["vods"] == {"total": 1, "failed": 1}
+
+
+def test_late_finish_belongs_to_its_original_run_and_preserves_a_new_claim(conn):
+    assert db.claim(conn, "v1", "u", "s", "top", now=T0, run_id=1)
+    assert db.claim(conn, "v1", "u", "s", "top", now=T0 + db.STALE_CLAIM * 2, run_id=2)
+    db.finish(conn, "v1", error="old worker resumed", run_id=1)
+    assert db.status(conn, "v1") == "processing"
+    assert db.run_vod_result(conn, 1) == {"total": 1, "failed": 1}
+    assert db.run_vod_result(conn, 2) == {"total": 0, "failed": 0}
+
+
+def test_a_poller_already_running_during_upgrade_preserves_its_outcome(conn):
+    assert db.claim(conn, "v1", "u", "s", "top", run_id=1)
+    # The old poller's db.finish is already loaded: it only updates vods, without writing run_vods.
+    conn.execute("UPDATE vods SET status = 'failed', error = 'OpenCL failed' WHERE id = 'v1'")
+    with db.deleting_vod(conn, "v1"):
+        pass
+    assert db.run_vod_result(conn, 1) == {"total": 1, "failed": 1}
+
+
+def test_deleting_an_unfinished_stale_vod_is_not_a_successful_run_outcome(conn):
+    assert db.claim(conn, "v1", "u", "s", "top", now=T0, run_id=1)
+    with db.deleting_vod(conn, "v1", now=T0 + db.STALE_CLAIM * 2):
+        pass
+    assert db.run_vod_result(conn, 1) == {"total": 0, "failed": 0}
+
+
+def test_upgrade_captures_an_old_pollers_outcome_between_migration_commits(tmp_path, monkeypatch):
+    history = next(i for i, sql in enumerate(db.MIGRATIONS) if "CREATE TABLE run_vods" in sql)
+    monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[: history + 1])
+    old = db.connect(tmp_path / "gap.db")
+    assert db.claim(old, "v1", "u", "s", "top", run_id=1)
+    old.execute("UPDATE vods SET status = 'failed' WHERE id = 'v1'")
+    old.close()
+    monkeypatch.undo()
+    upgraded = db.connect(tmp_path / "gap.db")
+    assert db.run_vod_result(upgraded, 1) == {"total": 1, "failed": 1}
+    upgraded.close()
+
+
+def test_upgrade_drops_an_ambiguous_deleted_success_from_earlier_history(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:-1])
+    old = db.connect(tmp_path / "deleted.db")
+    assert db.claim(old, "v1", "u", "s", "top", now=T0, run_id=1)
+    with db.deleting_vod(old, "v1", now=T0 + db.STALE_CLAIM * 2):
+        pass
+    old.close()
+    monkeypatch.undo()
+    upgraded = db.connect(tmp_path / "deleted.db")
+    assert db.run_vod_result(upgraded, 1) == {"total": 0, "failed": 0}
+    upgraded.close()
+
+
+def test_pending_migrations_commit_together_or_all_roll_back(tmp_path, monkeypatch):
+    path = tmp_path / "atomic.db"
+    db.connect(path).close()
+    version = len(db.MIGRATIONS)
+    monkeypatch.setattr(db, "MIGRATIONS", [*db.MIGRATIONS, "CREATE TABLE partial (id INTEGER);", "INVALID SQL;"])
+    with pytest.raises(sqlite3.OperationalError):
+        db.connect(path)
+    check = sqlite3.connect(path, timeout=30)
+    assert check.execute("PRAGMA user_version").fetchone()[0] == version
+    assert not check.execute("SELECT name FROM sqlite_master WHERE name = 'partial'").fetchall()
+    check.close()
+
+
+def test_manual_completion_of_a_stale_claim_does_not_finish_the_original_poll(conn):
+    assert db.claim(conn, "v1", "u", "s", "top", now=T0, run_id=1)
+    db.record_manual(conn, "v1", "u")
+    assert db.run_vod_result(conn, 1) == {"total": 0, "failed": 0}
 
 
 def test_claim_once_until_done(conn):
@@ -222,7 +332,7 @@ def test_claim_upload_skips_stale_and_hand_run_clips(conn):
 def test_claim_upload_in_a_run_takes_only_vods_its_polling_claimed(conn):
     (other,) = kept_clips(conn, 1)  # v1: claimed by a scheduled poll (no run), at the same time as the run's VOD
     db.claim(conn, "v2", "u2", "s", "top", now=T0, run_id=7)
-    db.finish(conn, "v2", now=T0)
+    db.finish(conn, "v2", now=T0, run_id=7)
     db.save_clips(conn, "v2", [{**CLIP, "score": db.AUTO_SCORE}])  # unreviewed, scored just high enough
     (own,) = [r[0] for r in conn.execute("SELECT id FROM clips WHERE vod_id = 'v2'")]
     conn.execute("UPDATE clips SET created_at = ? WHERE id = ?", (T0.isoformat(), own))  # older than the kept one
@@ -334,7 +444,7 @@ def test_variant_migration_keeps_clips_uploads_and_id_sequence(tmp_path, monkeyp
     variant = next(i for i, sql in enumerate(db.MIGRATIONS) if "uploads_keep" in sql)
     monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:variant])  # the schema just before it
     old = db.connect(tmp_path / "x.db")
-    db.record_manual(old, "v1", "u")
+    old.execute("INSERT INTO vods (id, url, tier, status) VALUES ('v1', 'u', 'manual', 'done')")
     for start in (1, 60):  # written by the old code
         old.execute(
             """INSERT INTO clips (vod_id, idx, file, start_s, end_s, title, hook, caption, trend, sound, score, why,

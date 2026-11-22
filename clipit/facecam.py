@@ -107,6 +107,9 @@ def detect_faces(frames: list[np.ndarray]) -> list[tuple]:
     """Frontal faces as (frame index, x, y, w, h) in 960x540 pixels."""
     import cv2  # heavy import, only needed here
 
+    # Haar detection can select OpenCL even for numpy frames. A GPU allocation failure then poisons every
+    # later VOD in the same polling process. These small frames need no GPU; set this in the calling thread.
+    cv2.ocl.setUseOpenCL(False)
     cascades = cv2.data.haarcascades  # pyright: ignore[reportAttributeAccessIssue]  # exists, missing from cv2's stubs
     det = cv2.CascadeClassifier(cascades + "haarcascade_frontalface_default.xml")
     return [(i, *map(int, b)) for i, f in enumerate(frames) for b in det.detectMultiScale(f, 1.1, 6, minSize=(24, 24))]

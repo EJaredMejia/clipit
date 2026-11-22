@@ -1,8 +1,39 @@
+import sys
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
 from clipit import facecam
 from clipit.util import ClipitError
+
+
+def test_face_detection_uses_cpu_even_when_opencl_is_enabled(monkeypatch):
+    enabled = True
+
+    def set_opencl(value):
+        nonlocal enabled
+        enabled = value
+
+    class Detector:
+        def detectMultiScale(self, frame, *args, **kwargs):
+            if enabled:
+                raise RuntimeError("OpenCL error CL_MEM_OBJECT_ALLOCATION_FAILURE")
+            return [(int(frame[0, 0]), 20, 30, 40)]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "cv2",
+        SimpleNamespace(
+            ocl=SimpleNamespace(setUseOpenCL=set_opencl),
+            data=SimpleNamespace(haarcascades="/cascades/"),
+            CascadeClassifier=lambda path: Detector(),
+        ),
+    )
+    frames = [np.full((540, 960), i, np.uint8) for i in (10, 11)]
+    for _ in range(2):
+        enabled = True  # another caller (or a new thread) may have enabled OpenCL again
+        assert facecam.detect_faces(frames) == [(0, 10, 20, 30, 40), (1, 11, 20, 30, 40)]
 
 
 def test_face_that_stays_put_wins_over_moving_game_faces():

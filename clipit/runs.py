@@ -137,7 +137,7 @@ def run(conn: sqlite3.Connection, out: Path, run_id: int) -> None:
     """The runner (clipit --run-steps): every step in order, a failed one doesn't stop the next, Stop skips the rest."""
     job = db.run_job(conn, run_id) or SETTINGS
     plan = steps(job)
-    done = [{"name": name, "status": "waiting"} for name, _, _ in plan]
+    done: list[dict] = [{"name": name, "status": "waiting"} for name, _, _ in plan]
     log_file(out, run_id).parent.mkdir(parents=True, exist_ok=True)
     with log_file(out, run_id).open("a", encoding="utf-8") as log:
         try:
@@ -149,6 +149,10 @@ def run(conn: sqlite3.Connection, out: Path, run_id: int) -> None:
                 db.run_doing(conn, run_id, {"what": step["name"]}, replace=True)  # nothing left from the step before
                 _say(log, f"{step['name']}: clipit {subprocess.list2cmdline(args)}")
                 step["status"] = _step(conn, run_id, done, command(args, out), log, timeout, stoppable=args[0] != UPLOAD)
+                if args[0] == "--poll":
+                    step["vods"] = db.run_vod_result(conn, run_id)
+                    if step["status"] == "done" and step["vods"]["failed"]:
+                        step["status"] = "partial"
                 if "reedit" in job and step["status"] != "done":  # killed (Stop, a timeout), it couldn't record why
                     db.fail_reedit(conn, f"the run's step {step['status']}", run_id=run_id)
         except Exception as e:  # the run must still end, or the page shows it running until it goes stale

@@ -190,6 +190,43 @@ MIGRATIONS = [
     ALTER TABLE uploads ADD COLUMN likes INTEGER;
     ALTER TABLE uploads ADD COLUMN stats_at TEXT;
     """,
+    # Historical outcomes belong to a run even after a VOD is deleted or claimed by a later run.
+    """
+    CREATE TABLE run_vods (
+        run_id INTEGER NOT NULL,
+        vod_id TEXT NOT NULL,
+        status TEXT NOT NULL CHECK (status IN ('done', 'failed')),
+        PRIMARY KEY (run_id, vod_id)
+    );
+    INSERT INTO run_vods SELECT run_id, id, status FROM vods
+        WHERE run_id IS NOT NULL AND status IN ('done', 'failed');
+    """,
+    # A poll process already running during upgrade still uses its old finish(). Capture its terminal update too.
+    """
+    CREATE TRIGGER record_run_vod AFTER UPDATE OF status ON vods
+    WHEN OLD.status = 'processing' AND NEW.status IN ('done', 'failed') AND NEW.run_id IS NOT NULL
+    BEGIN
+        INSERT INTO run_vods (run_id, vod_id, status) VALUES (NEW.run_id, NEW.id, NEW.status)
+        ON CONFLICT (run_id, vod_id) DO UPDATE SET status = excluded.status;
+    END;
+    """,
+    # A deletion is not a completed VOD. Reconcile legacy writes made between earlier migration commits while
+    # holding the same write lock that installs the trigger, so no old poller can finish in a backfill/trigger gap.
+    """
+    DROP TRIGGER record_run_vod;
+    CREATE TRIGGER record_run_vod AFTER UPDATE OF status ON vods
+    WHEN OLD.status = 'processing' AND NEW.status IN ('done', 'failed') AND NEW.run_id IS NOT NULL AND NOT NEW.deleted
+    BEGIN
+        INSERT INTO run_vods (run_id, vod_id, status) VALUES (NEW.run_id, NEW.id, NEW.status)
+        ON CONFLICT (run_id, vod_id) DO UPDATE SET status = excluded.status;
+    END;
+    INSERT INTO run_vods SELECT run_id, id, status FROM vods
+        WHERE run_id IS NOT NULL AND status IN ('done', 'failed') AND NOT deleted
+        ON CONFLICT (run_id, vod_id) DO NOTHING;
+    DELETE FROM run_vods WHERE status = 'done' AND EXISTS (
+        SELECT 1 FROM vods WHERE vods.id = run_vods.vod_id AND vods.run_id = run_vods.run_id AND vods.deleted
+    );
+    """,
 ]
 TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")
@@ -211,8 +248,12 @@ def connect(path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode = WAL")  # readers (a future dashboard) don't block the poller
     conn.execute("PRAGMA foreign_keys = ON")
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    for v, sql in enumerate(MIGRATIONS[version:], version + 1):
-        conn.executescript(f"BEGIN;\n{sql}\nPRAGMA user_version = {v};\nCOMMIT;")
+    if pending := MIGRATIONS[version:]:
+        try:
+            conn.executescript("BEGIN IMMEDIATE;\n" + "\n".join(pending) + f"\nPRAGMA user_version = {len(MIGRATIONS)};\nCOMMIT;")
+        except BaseException:
+            conn.close()  # rolls back every pending migration, including the history table and its triggers
+            raise
     return conn
 
 
@@ -299,11 +340,24 @@ def busy(row: sqlite3.Row, now: datetime.datetime) -> bool:
     return claimed or bool(row["running_at"]) and now - _ts(row["running_at"]) < STALE_CLAIM
 
 
-def finish(conn: sqlite3.Connection, vod_id: str, error: str | None = None, now=None) -> None:
-    conn.execute(
-        "UPDATE vods SET status = ?, error = ?, finished_at = ? WHERE id = ?",
-        ("failed" if error else "done", error, (now or utcnow()).isoformat(), vod_id),
-    )
+def finish(conn: sqlite3.Connection, vod_id: str, error: str | None = None, now=None, *, run_id: int | None = None) -> None:
+    """Finish a VOD and atomically preserve its outcome for the run that claimed it."""
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute(
+            "UPDATE vods SET status = ?, error = ?, finished_at = ? WHERE id = ? AND run_id IS ?",
+            ("failed" if error else "done", error, (now or utcnow()).isoformat(), vod_id, run_id),
+        )
+        if run_id is not None:
+            conn.execute(
+                """INSERT INTO run_vods (run_id, vod_id, status) VALUES (?, ?, ?)
+                   ON CONFLICT (run_id, vod_id) DO UPDATE SET status = excluded.status""",
+                (run_id, vod_id, "failed" if error else "done"),
+            )
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
 
 
 def record_manual(conn: sqlite3.Connection, vod_id: str, url: str) -> None:
@@ -312,7 +366,8 @@ def record_manual(conn: sqlite3.Connection, vod_id: str, url: str) -> None:
     conn.execute(
         """INSERT INTO vods (id, url, tier, status, attempts, claimed_at, finished_at)
            VALUES (?, ?, 'manual', 'done', 1, ?, ?)
-           ON CONFLICT (id) DO UPDATE SET status = 'done', error = NULL, deleted = 0, finished_at = excluded.finished_at""",
+           ON CONFLICT (id) DO UPDATE SET status = 'done', error = NULL, deleted = 0, finished_at = excluded.finished_at,
+               run_id = CASE WHEN vods.status = 'processing' THEN NULL ELSE vods.run_id END""",
         (vod_id, url, now, now),
     )
 
@@ -765,10 +820,24 @@ def latest_run(conn: sqlite3.Connection, now: datetime.datetime | None = None) -
     if not ended and (now or utcnow()) - _ts(row["beat_at"]) > RUN_DEAD:
         ended = row["beat_at"]
         steps = [{**s, "status": "interrupted"} if s["status"] in ("waiting", "running") else s for s in steps]
+    job = json.loads(row["job"] or "null")
+    if steps and "reedit" not in (job or {}) and "vods" not in steps[0]:
+        steps[0]["vods"] = run_vod_result(conn, row["id"])
+        if steps[0]["status"] == "done" and steps[0]["vods"]["failed"]:
+            steps[0]["status"] = "partial"
     return {"id": row["id"], "running": not ended, "stopping": bool(row["stop"]) and not ended,
             "started": row["started_at"], "ended": ended, "steps": steps,
             "doing": json.loads(row["doing"] or "{}") if not ended else {},
-            "job": json.loads(row["job"] or "null")}  # fmt: skip
+            "job": job}  # fmt: skip
+
+
+def run_vod_result(conn: sqlite3.Connection, run_id: int) -> dict[str, int]:
+    """Finished VOD counts preserved for this run, independent of later deletions and retries."""
+    row = conn.execute(
+        "SELECT COUNT(*) AS total, COUNT(CASE WHEN status = 'failed' THEN 1 END) AS failed FROM run_vods WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    return dict(row)
 
 
 def run_job(conn: sqlite3.Connection, run_id: int) -> dict | None:
