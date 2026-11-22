@@ -201,6 +201,15 @@ MIGRATIONS = [
     INSERT INTO run_vods SELECT run_id, id, status FROM vods
         WHERE run_id IS NOT NULL AND status IN ('done', 'failed');
     """,
+    # A poll process already running during upgrade still uses its old finish(). Capture its terminal update too.
+    """
+    CREATE TRIGGER record_run_vod AFTER UPDATE OF status ON vods
+    WHEN OLD.status = 'processing' AND NEW.status IN ('done', 'failed') AND NEW.run_id IS NOT NULL
+    BEGIN
+        INSERT INTO run_vods (run_id, vod_id, status) VALUES (NEW.run_id, NEW.id, NEW.status)
+        ON CONFLICT (run_id, vod_id) DO UPDATE SET status = excluded.status;
+    END;
+    """,
 ]
 TEXT_FIELDS = {"title": 100, "youtube": 5000, "caption": 2200}  # what the user can edit, capped at the platforms' limits
 PLATFORMS = ("tiktok", "youtube")

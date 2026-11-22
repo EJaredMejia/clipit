@@ -50,7 +50,8 @@ def test_run_vod_results_survive_deletion_and_retry_before_the_run_ends(conn):
 
 
 def test_run_vod_result_migration_backfills_existing_finished_vods(tmp_path, monkeypatch):
-    monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:-1])
+    history = next(i for i, sql in enumerate(db.MIGRATIONS) if "CREATE TABLE run_vods" in sql)
+    monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:history])
     old = db.connect(tmp_path / "old.db")
     run_id = db.start_run(old, ["Clip"])
     assert run_id
@@ -81,6 +82,15 @@ def test_late_finish_belongs_to_its_original_run_and_preserves_a_new_claim(conn)
     assert db.status(conn, "v1") == "processing"
     assert db.run_vod_result(conn, 1) == {"total": 1, "failed": 1}
     assert db.run_vod_result(conn, 2) == {"total": 0, "failed": 0}
+
+
+def test_a_poller_already_running_during_upgrade_preserves_its_outcome(conn):
+    assert db.claim(conn, "v1", "u", "s", "top", run_id=1)
+    # The old poller's db.finish is already loaded: it only updates vods, without writing run_vods.
+    conn.execute("UPDATE vods SET status = 'failed', error = 'OpenCL failed' WHERE id = 'v1'")
+    with db.deleting_vod(conn, "v1"):
+        pass
+    assert db.run_vod_result(conn, 1) == {"total": 1, "failed": 1}
 
 
 def test_claim_once_until_done(conn):
