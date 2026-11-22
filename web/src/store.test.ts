@@ -5,7 +5,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { toast } from "sonner";
 import { type Clip, type Run, SORTS, VIEWS, type Vod, deal, decide, description, flushTexts, loadRun, runResult, saveText, searchVods, set, setDraft, startFling, textStatus, undo, useClipit } from "./store";
 
-vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }) }));
+vi.mock("sonner", () => ({ toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn(), warning: vi.fn() }) }));
 
 const drafts = () => useClipit.getState().drafts;
 
@@ -303,6 +303,25 @@ test("the page tells you when a run it watched ends, and names the step that fai
   await loadRun(); // a run that had ended before the page saw it running: no notice either
   expect(toast.error).toHaveBeenCalledTimes(1);
   expect(toast.success).not.toHaveBeenCalled();
+});
+
+test("partial VOD failures show a warning with the count instead of a success notice", async () => {
+  vi.mocked(toast.success).mockClear();
+  vi.mocked(toast.warning).mockClear();
+  let served = run({ running: true });
+  vi.stubGlobal("fetch", async (url: string) => json(url === "/api/run" ? served : { vods: [], clips: [] }));
+  set({ run: null });
+  await loadRun();
+  served = run({ ended: "2026-10-27T11:00:00+00:00", steps: [
+    { name: "Clip the latest VODs", status: "partial", vods: { total: 14, failed: 8 } },
+    { name: "Post to YouTube", status: "done" },
+  ] });
+  await loadRun();
+  expect(toast.warning).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(toast.warning).mock.calls[0][1]?.description).toContain("8 VODs failed");
+  expect(toast.success).not.toHaveBeenCalled();
+  await loadRun();
+  expect(toast.warning).toHaveBeenCalledTimes(1);
 });
 
 test("a re-edit's end says how the re-edit went, not how many clips a poll made", async () => {

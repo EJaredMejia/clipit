@@ -771,6 +771,15 @@ def latest_run(conn: sqlite3.Connection, now: datetime.datetime | None = None) -
             "job": json.loads(row["job"] or "null")}  # fmt: skip
 
 
+def run_vod_result(conn: sqlite3.Connection, run_id: int) -> dict[str, int]:
+    """VOD counts for this run only. The runner saves a snapshot in its step before later retries change the VODs."""
+    row = conn.execute(
+        "SELECT COUNT(*) AS total, COUNT(CASE WHEN status = 'failed' THEN 1 END) AS failed FROM vods WHERE run_id = ?",
+        (run_id,),
+    ).fetchone()
+    return dict(row)
+
+
 def run_job(conn: sqlite3.Connection, run_id: int) -> dict | None:
     """What the run was asked to do, None for a run from before jobs (it polled, then posted)."""
     row = conn.execute("SELECT job FROM runs WHERE id = ?", (run_id,)).fetchone()

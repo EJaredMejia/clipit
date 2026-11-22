@@ -1,7 +1,7 @@
 // The Run tab: start clipit --poll, then --upload, from here, with the settings saved below, and watch each step and
 // its output as it goes. Re-edits started from a clip run here too. The run goes on when the dashboard is closed, and
 // shows here again when it's reopened.
-import { Check, Circle, CircleSlash, Loader2, Play, Square, X } from "lucide-react";
+import { Check, Circle, CircleSlash, Loader2, Play, Square, TriangleAlert, X } from "lucide-react";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ const STEP_ICON: Record<Step["status"], React.ReactNode> = {
   waiting: <Circle className="size-5 text-muted-foreground/50" />,
   running: <Loader2 className="size-5 animate-spin text-warn motion-reduce:animate-none" />,
   done: <Check className="size-5 text-keep" />,
+  partial: <TriangleAlert className="size-5 text-warn" />,
   failed: <X className="size-5 text-skip" />,
   stopped: <Square className="size-4 text-muted-foreground" />,
   interrupted: <CircleSlash className="size-5 text-skip" />,
@@ -76,12 +77,15 @@ export function Run() {
           />
           <ol className="mt-4 flex flex-col gap-2">
             {run.steps.map((s, i) => (
-              <li key={s.name} className="flex items-center gap-3">
+              <li key={s.name} className="flex flex-wrap items-center gap-3">
                 <span className="flex size-6 items-center justify-center" aria-hidden="true">
                   {STEP_ICON[s.status]}
                 </span>
                 <span className="font-heading font-semibold">{`${i + 1}. ${s.name}`}</span>
-                <span className={`text-sm ${s.status === "failed" ? "text-skip" : "text-muted-foreground"}`}>{s.status}</span>
+                <span className={`text-sm ${s.status === "failed" ? "text-skip" : s.status === "partial" ? "text-warn" : "text-muted-foreground"}`}>
+                  {s.status === "partial" ? "finished with failures" : s.status}
+                </span>
+                {!!s.vods?.failed && <span className="text-sm text-warn">{s.vods.failed} of {s.vods.total} VODs failed</span>}
               </li>
             ))}
           </ol>
