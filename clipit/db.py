@@ -248,8 +248,12 @@ def connect(path: Path) -> sqlite3.Connection:
     conn.execute("PRAGMA journal_mode = WAL")  # readers (a future dashboard) don't block the poller
     conn.execute("PRAGMA foreign_keys = ON")
     version = conn.execute("PRAGMA user_version").fetchone()[0]
-    for v, sql in enumerate(MIGRATIONS[version:], version + 1):
-        conn.executescript(f"BEGIN;\n{sql}\nPRAGMA user_version = {v};\nCOMMIT;")
+    if pending := MIGRATIONS[version:]:
+        try:
+            conn.executescript("BEGIN IMMEDIATE;\n" + "\n".join(pending) + f"\nPRAGMA user_version = {len(MIGRATIONS)};\nCOMMIT;")
+        except BaseException:
+            conn.close()  # rolls back every pending migration, including the history table and its triggers
+            raise
     return conn
 
 
@@ -362,7 +366,8 @@ def record_manual(conn: sqlite3.Connection, vod_id: str, url: str) -> None:
     conn.execute(
         """INSERT INTO vods (id, url, tier, status, attempts, claimed_at, finished_at)
            VALUES (?, ?, 'manual', 'done', 1, ?, ?)
-           ON CONFLICT (id) DO UPDATE SET status = 'done', error = NULL, deleted = 0, finished_at = excluded.finished_at""",
+           ON CONFLICT (id) DO UPDATE SET status = 'done', error = NULL, deleted = 0, finished_at = excluded.finished_at,
+               run_id = CASE WHEN vods.status = 'processing' THEN NULL ELSE vods.run_id END""",
         (vod_id, url, now, now),
     )
 

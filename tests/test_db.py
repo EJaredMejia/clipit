@@ -1,4 +1,5 @@
 import datetime
+import sqlite3
 import time
 
 import pytest
@@ -124,6 +125,25 @@ def test_upgrade_drops_an_ambiguous_deleted_success_from_earlier_history(tmp_pat
     upgraded = db.connect(tmp_path / "deleted.db")
     assert db.run_vod_result(upgraded, 1) == {"total": 0, "failed": 0}
     upgraded.close()
+
+
+def test_pending_migrations_commit_together_or_all_roll_back(tmp_path, monkeypatch):
+    path = tmp_path / "atomic.db"
+    db.connect(path).close()
+    version = len(db.MIGRATIONS)
+    monkeypatch.setattr(db, "MIGRATIONS", [*db.MIGRATIONS, "CREATE TABLE partial (id INTEGER);", "INVALID SQL;"])
+    with pytest.raises(sqlite3.OperationalError):
+        db.connect(path)
+    check = sqlite3.connect(path, timeout=30)
+    assert check.execute("PRAGMA user_version").fetchone()[0] == version
+    assert not check.execute("SELECT name FROM sqlite_master WHERE name = 'partial'").fetchall()
+    check.close()
+
+
+def test_manual_completion_of_a_stale_claim_does_not_finish_the_original_poll(conn):
+    assert db.claim(conn, "v1", "u", "s", "top", now=T0, run_id=1)
+    db.record_manual(conn, "v1", "u")
+    assert db.run_vod_result(conn, 1) == {"total": 0, "failed": 0}
 
 
 def test_claim_once_until_done(conn):
@@ -424,7 +444,7 @@ def test_variant_migration_keeps_clips_uploads_and_id_sequence(tmp_path, monkeyp
     variant = next(i for i, sql in enumerate(db.MIGRATIONS) if "uploads_keep" in sql)
     monkeypatch.setattr(db, "MIGRATIONS", db.MIGRATIONS[:variant])  # the schema just before it
     old = db.connect(tmp_path / "x.db")
-    db.record_manual(old, "v1", "u")
+    old.execute("INSERT INTO vods (id, url, tier, status) VALUES ('v1', 'u', 'manual', 'done')")
     for start in (1, 60):  # written by the old code
         old.execute(
             """INSERT INTO clips (vod_id, idx, file, start_s, end_s, title, hook, caption, trend, sound, score, why,
