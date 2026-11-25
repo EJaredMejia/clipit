@@ -9,6 +9,7 @@ import { Post } from "./Post";
 import { Review } from "./Review";
 import { Run } from "./Run";
 import { clipOf, load, loadRun, openClip, POLL_MS, postQueue, RUN_MS, showTab, type Tab, TABS, useClipit } from "./store";
+import { when } from "./ui";
 import { Vods } from "./Vods";
 
 const ICONS: Record<Tab, LucideIcon> = { run: Play, review: GalleryVerticalEnd, post: Send, library: LayoutGrid, vods: MonitorPlay };
@@ -49,6 +50,7 @@ export function App() {
         </div>
       </header>
       <main className="mx-auto w-full max-w-[1440px] px-4 pt-6 pb-32 sm:px-6 md:pt-8 md:pb-16">
+        <LoginLost />
         {(Object.keys(TABS) as Tab[]).map((t) => (
           // every tab stays mounted, so the deck's video and the Library's filters survive switching
           <div key={t} data-panel={t} hidden={tab !== t} aria-label={TABS[t]}>
@@ -60,6 +62,21 @@ export function App() {
       <ClipSheet />
       <Toaster position="bottom-right" mobileOffset={{ bottom: 88 }} />
     </TooltipProvider>
+  );
+}
+
+// On every tab while the AI's login is lost: nothing gets clipped until you log in again.
+function LoginLost() {
+  const lost = useClipit((s) => s.run?.ai_login);
+  if (!lost) return null;
+  return (
+    <div role="alert" className="mb-6 rounded-2xl border border-skip/40 bg-skip-bg p-4 text-sm">
+      <p className="font-semibold text-skip">clip-it stopped: the AI isn't logged in ({when(lost.at)})</p>
+      <p className="mt-1">
+        Runs stop before downloading anything until you log in. Open a terminal, run <code>claude</code> and type <code>/login</code>{" "}
+        (with Codex: <code>codex login</code>). The next run clears this.
+      </p>
+    </div>
   );
 }
 

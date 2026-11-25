@@ -64,7 +64,8 @@ gets in the way, stop and ask.
   - Every upload is claimed (`db.claim_upload`) before it's sent, and one that broke off is never retried automatically:
     the video may already be up.
 - **Errors:** library code raises `ClipitError`; one bad VOD never stops a polling pass: it's tried again once
-  (`poll.TRIES`), then the next streamer takes its slot. An AI out of usage (`util.AILimit`) ends the pass at once.
+  (`poll.TRIES`), then the next streamer takes its slot. An AI out of usage or logged out (`util.AIDown`) ends the pass at once;
+  a lost login also pops up and shows on the dashboard until an AI answers again.
   Log with `util.log`, never `print`. Prefer failing a VOD so it's retried over quietly producing worse output.
 - **Tests:** new logic gets a pytest test with fakes, and the test must be able to fail on a real bug.
 - **Dependencies:** add to `pyproject.toml` and regenerate `requirements.lock`

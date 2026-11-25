@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from clipit import ai
-from clipit.util import AILimit, ClipitError
+from clipit.util import AILimit, AILogin, ClipitError
 
 
 def test_extract_json_ignores_chatter_and_fences():
@@ -193,6 +193,9 @@ def test_ask_ai_failures_raise_clipit_error(monkeypatch):
     out_of_usage = "print('You' + chr(39) + 've hit your session limit - resets 10:40pm'); import sys; sys.exit(1)"
     with pytest.raises(AILimit):  # the pass stops on this one: every later call would fail the same way
         ai.ask_ai(f'"{sys.executable}" -c "{out_of_usage}"', "prompt")
+    logged_out = "print('Failed to authenticate: OAuth session expired and could not be refreshed'); import sys; sys.exit(1)"
+    with pytest.raises(AILogin):  # also stops the pass, and asks you to log in
+        ai.ask_ai(f'"{sys.executable}" -c "{logged_out}"', "prompt")
 
     def hang(*a, **k):
         raise subprocess.TimeoutExpired("cmd", 1)
@@ -286,10 +289,10 @@ def test_a_clip_nothing_could_watch_is_stopped(monkeypatch):
     assert ai.veto('"claude" -p', clip, "s", "words", stills, 20.0) == ["review: failed"]
 
     def out_of_usage(*a):
-        raise ai.AILimit("You've hit your session limit")
+        raise AILimit("You've hit your session limit")
 
     monkeypatch.setattr(ai, "ask_ai", out_of_usage)
-    with pytest.raises(ai.AILimit):  # not a failed review: the clip keeps its score and the VOD is tried again
+    with pytest.raises(AILimit):  # not a failed review: the clip keeps its score and the VOD is tried again
         ai.veto('"claude" -p', clip, "s", "words", stills, 20.0)
 
 

@@ -3,7 +3,7 @@ import datetime
 import pytest
 
 from clipit import db, poll
-from clipit.util import AILimit, ClipitError
+from clipit.util import AILimit, AILogin, ClipitError
 
 STREAMS = [
     ("big1", 30000, "EN"),
@@ -434,3 +434,39 @@ def test_the_event_day_buys_extra_age_only_for_a_vod_from_that_day_on_and_a_done
     assert calls == []
     poll.poll(conn, top_n=0, out_root=out, search_ai="search", prioritize=[("twitch", "s2")])
     assert calls == ["v9"]  # asked for by name: still clipped, from their newest VOD
+
+
+def test_a_lost_ai_login_stops_the_pass_pops_up_once_and_clears_when_the_ai_answers(world, monkeypatch):
+    conn, calls, out = world
+    popups = []
+    monkeypatch.setattr(poll.util, "alert", lambda title, text: popups.append(title))
+
+    def logged_out(url, out_root, **kw):
+        calls.append(url)
+        raise AILogin("Failed to authenticate: OAuth session expired and could not be refreshed")
+
+    monkeypatch.setattr(poll, "process_vod", logged_out)
+    assert poll.poll(conn, top_n=3, out_root=out) == 1
+    assert len(calls) == 1  # no retry, and no more VODs downloaded only to fail the same way
+    lost = db.setting(conn, db.AI_LOGIN)
+    assert isinstance(lost, dict) and lost["error"].startswith("Failed to authenticate")  # the dashboard asks you to log in
+    poll.poll(conn, top_n=3, out_root=out)
+    assert len(popups) == 1  # not one more on every timer run until you're back
+
+    monkeypatch.setattr(poll.ai, "find_hot", lambda cmd, focus: [])
+    monkeypatch.setattr(poll, "process_vod", lambda url, out_root, **kw: (out, []))
+    poll.poll(conn, top_n=1, out_root=out, search_ai="search")
+    assert db.setting(conn, db.AI_LOGIN) is None
+
+
+def test_a_search_logged_out_ends_the_pass_before_any_download(world, monkeypatch):
+    conn, calls, out = world
+    monkeypatch.setattr(poll.util, "alert", lambda title, text: None)
+
+    def logged_out(cmd, focus):
+        raise AILogin("Not logged in · Please run /login")
+
+    monkeypatch.setattr(poll.ai, "find_hot", logged_out)
+    with pytest.raises(AILogin):
+        poll.poll(conn, top_n=3, out_root=out, search_ai="search")
+    assert calls == [] and db.setting(conn, db.AI_LOGIN)
