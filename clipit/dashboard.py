@@ -101,7 +101,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     "job": None,
                 }
                 saved = runs.settings(conn)
-            return self.send(200, json.dumps({**run, "lines": runs.tail(self.out, run["id"]), "settings": saved}).encode())
+                ai_login = db.setting(conn, db.AI_LOGIN)  # the AI's login was lost: the page asks you to log in
+            body = {**run, "lines": runs.tail(self.out, run["id"]), "settings": saved, "ai_login": ai_login}
+            return self.send(200, json.dumps(body).encode())
         if m := re.fullmatch(r"/media/(\d+)", path):
             return self.video(int(m[1]))
         self.send(404, b'{"error": "not found"}')

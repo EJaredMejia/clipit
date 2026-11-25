@@ -16,9 +16,9 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import ModuleType
 
-from clipit import ai, db, kick, runs, twitch
+from clipit import ai, db, kick, runs, twitch, util
 from clipit.pipeline import process_vod
-from clipit.util import ROOT, AILimit, ClipitError, ended, log, logger, utcnow
+from clipit.util import ROOT, AIDown, AILogin, ClipitError, ended, log, logger, utcnow
 
 MIN_VIEWERS = 2000  # smaller streamers' clips don't get views
 MAX_AGE = datetime.timedelta(days=2)  # older VODs aren't worth clipping anymore
@@ -98,7 +98,7 @@ def find_hot(search_ai: str | None) -> dict[tuple[str, str], tuple[str, datetime
     for f in asked:
         try:
             answers.append(f.result())
-        except AILimit:  # every VOD would download, then fail at picking: end the pass before the first
+        except AIDown:  # every VOD would download, then fail at picking: end the pass before the first
             raise
         except Exception:
             logger.exception("a search for who's popping off failed")
@@ -144,8 +144,13 @@ def poll(
     failed = 0
     top_left = top_n
     extra_left, good, tried = EXTRA, 0, 0  # good: VODs with a clip good enough to post
+    down: AIDown | None = None
     runs.progress(what="Searching what's popping off today")
-    hot = find_hot(search_ai)
+    try:
+        hot = find_hot(search_ai)
+    except AIDown as e:  # nothing downloaded yet, and nothing will be
+        ai_down(conn, e)
+        raise
     runs.progress(what="Finding streamers to clip")
     prioritize = list(prioritize)
     first = list(dict.fromkeys([*prioritize, *hot]))
@@ -212,16 +217,17 @@ def poll(
                         _, clips = process_vod(url, out_root=out_root, clipped=clipped, event=why, **pipeline_opts)
                     break
                 except Exception as e:
-                    if attempt == TRIES or isinstance(e, AILimit):
+                    if attempt == TRIES or isinstance(e, AIDown):
                         raise
                     logger.warning("VOD %s failed, trying it again", vod_id, exc_info=True)
             db.save_clips(conn, vod_id, [{**c, "file": f"{vod_id}/{c['file']}"} for c in clips])
             db.finish(conn, vod_id)
             good += any(c["score"] >= db.AUTO_SCORE for c in clips)
-        except AILimit as e:  # every VOD after this one would download, then fail the same way
-            logger.error("the AI ran out of usage, so this pass stops here; the next run goes on:\n%s", e)
+        except AIDown as e:  # every VOD after this one would download, then fail the same way
             db.finish(conn, vod_id, error=f"{type(e).__name__}: {e}"[:1000])
             failed += 1
+            down = e
+            ai_down(conn, e)
             break
         except Exception as e:  # one bad VOD (sub-only, deleted...) must not stop the rest
             logger.exception("VOD %s failed %d times, the next streamer takes its place", vod_id, TRIES)
@@ -237,4 +243,24 @@ def poll(
         logger.warning("only %d of %d VODs had a clip scored %d+ this pass", good, db.POSTS, db.AUTO_SCORE)
     if failed:
         logger.warning("%d of %d VODs failed to clip this pass (see above)", failed, tried)
+    # an AI answered, or failed for a reason other than its login: the dashboard stops asking you to log in
+    # shortcut: a pass whose VODs all broke before reaching the AI clears it too; the next login failure sets it again
+    if not isinstance(down, AILogin) and (search_ai or tried) and db.setting(conn, db.AI_LOGIN):
+        db.save_setting(conn, db.AI_LOGIN, None)
     return failed if failed == tried else 0
+
+
+LOGIN_HELP = "Open a terminal, run `claude` and type /login (with Codex: run `codex login`). The next run clips again."
+
+
+def ai_down(conn: sqlite3.Connection, e: AIDown) -> None:
+    """Say why the pass stops. A lost login waits on you: it's saved for the dashboard and shown in a pop-up."""
+    if not isinstance(e, AILogin):
+        logger.error("the AI ran out of usage, so this pass stops here; the next run goes on:\n%s", e)
+        return
+    logger.error("the AI isn't logged in, so this pass stops here. %s\n%s", LOGIN_HELP, e)
+    if not db.setting(conn, db.AI_LOGIN):  # one pop-up, not one more on every timer run until you're back
+        util.alert(
+            "clip-it stopped: log in to the AI", f"The AI that picks clips isn't logged in, so no clips get made.\n\n{LOGIN_HELP}"
+        )
+    db.save_setting(conn, db.AI_LOGIN, {"at": utcnow().isoformat(), "error": str(e)[-1000:]})

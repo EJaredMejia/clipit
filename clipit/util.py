@@ -19,8 +19,16 @@ class ClipitError(Exception):
     """A VOD can't be processed. The CLI prints it; the poller records it and moves on to the next VOD."""
 
 
-class AILimit(ClipitError):
-    """The AI CLI's usage limit ran out: every AI call fails until it resets, so a pass stops instead of wasting VODs."""
+class AIDown(ClipitError):
+    """Every AI call fails the same way until something changes: a pass stops at once instead of wasting VODs."""
+
+
+class AILimit(AIDown):
+    """The AI CLI's usage limit ran out: it comes back when the limit resets."""
+
+
+class AILogin(AIDown):
+    """The AI CLI isn't logged in, or its login expired: nothing works until the user logs in again."""
 
 
 # What Claude Code ("You've hit your session limit") and Codex ("You've hit your usage limit") print when out of usage.
@@ -28,9 +36,36 @@ class AILimit(ClipitError):
 LIMIT = re.compile(r"hit your (?:\w+ )?limit|usage limit", re.IGNORECASE)
 
 
+# What Claude Code ("Not logged in · Please run /login", "Failed to authenticate: OAuth session expired...", "Invalid
+# API key") and Codex ("401 Unauthorized") print when their login is gone.
+LOGIN = re.compile(
+    r"not logged in|please run /login|failed to authenticate|invalid api key|oauth \w+ (?:has )?expired|401 unauthori[sz]ed",
+    re.IGNORECASE,
+)
+
+
 def ai_error(message: str, output: str) -> ClipitError:
-    """The error for a failed AI call: AILimit when its output says the usage limit ran out."""
-    return (AILimit if LIMIT.search(output) else ClipitError)(message)
+    """The error for a failed AI call: AILogin or AILimit when its output says the login or the usage ran out."""
+    return (AILogin if LOGIN.search(output) else AILimit if LIMIT.search(output) else ClipitError)(message)
+
+
+def alert(title: str, text: str) -> None:
+    """A desktop pop-up for something only the user can fix. Never raises: the log says it too."""
+    if sys.platform == "win32":
+        flags = 0x30 | 0x1000 | 0x10000  # warning icon, on top of every window, brought to the front
+        script = f"import ctypes, sys; ctypes.windll.user32.MessageBoxW(0, sys.argv[1], sys.argv[2], {flags})"
+        cmd = [sys.executable, "-c", script, text, title]
+    elif sys.platform == "darwin":
+        script = ["-e", "on run argv", "-e", "display alert (item 1 of argv) message (item 2 of argv)", "-e", "end run"]
+        cmd = ["osascript", *script, title, text]
+    else:
+        cmd = ["notify-send", "--urgency=critical", title, text]
+    try:
+        # never waited on, so no timeout: the pop-up stays until the user closes it, while clipit goes on and exits
+        kw: dict = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}  # no console window
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kw)
+    except OSError:
+        logger.warning("couldn't show a pop-up: %s", title, exc_info=True)
 
 
 def utcnow() -> datetime.datetime:

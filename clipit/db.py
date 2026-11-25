@@ -429,6 +429,9 @@ def fail_reedit(conn: sqlite3.Connection, error: str, reedit_id: int | None = No
     )
 
 
+AI_LOGIN = "ai_login"  # the setting saying the AI's login was lost: {"at", "error"}, None once an AI answers again
+
+
 def setting(conn: sqlite3.Connection, key: str) -> object:
     """A saved setting, None when it was never saved."""
     row = conn.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()

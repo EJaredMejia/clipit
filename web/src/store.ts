@@ -68,6 +68,8 @@ export type Run = {
   lines: string[];
   job: Settings | ReeditJob | null; // null: a run from before jobs, or no run yet
   settings: Settings; // what the next run does
+  // the AI's login was lost: runs stop before clipping until you log in again (clipit/poll.py ai_down)
+  ai_login?: { at: string; error: string } | null;
 };
 
 export const isReedit = (job: Run["job"]): job is ReeditJob => !!job && "reedit" in job;

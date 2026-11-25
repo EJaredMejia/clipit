@@ -17,7 +17,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from clipit import codex, db
-from clipit.util import AILimit, ClipitError, ai_error, filter_words, logger, write_atomic
+from clipit.util import AIDown, ClipitError, ai_error, filter_words, logger, write_atomic
 
 AI_TIMEOUT = 900
 # Field caps match what the platforms accept (Shorts titles: 100). The description leaves room in TikTok's 2,200-char
@@ -378,7 +378,7 @@ def veto(
         reply = extract_json(ask_ai(cmd, prompt, codex.VETO_SCHEMA, [p for _, p in sheets]))
         clip["seen"] = seen_cut(reply, length)
         return failed_checks(reply)
-    except AILimit:  # not the clip's fault: the pass stops and the VOD is tried again, instead of demoting its clips
+    except AIDown:  # not the clip's fault: the pass stops and the VOD is tried again, instead of demoting its clips
         raise
     except (ClipitError, ValueError) as e:
         logger.warning("the review of %s failed: %s", clip.get("file"), e)
