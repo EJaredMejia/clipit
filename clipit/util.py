@@ -62,7 +62,8 @@ def alert(title: str, text: str) -> None:
         cmd = ["notify-send", "--urgency=critical", title, text]
     try:
         # never waited on, so no timeout: the pop-up stays until the user closes it, while clipit goes on and exits
-        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        kw: dict = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}  # no console window
+        subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kw)
     except OSError:
         logger.warning("couldn't show a pop-up: %s", title, exc_info=True)
 

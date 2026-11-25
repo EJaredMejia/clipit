@@ -73,7 +73,7 @@ function LoginLost() {
     <div role="alert" className="mb-6 rounded-2xl border border-skip/40 bg-skip-bg p-4 text-sm">
       <p className="font-semibold text-skip">clip-it stopped: the AI isn't logged in ({when(lost.at)})</p>
       <p className="mt-1">
-        Runs stop before downloading anything until you log in. Open a terminal, run <code>claude</code> and type <code>/login</code>{" "}
+        Runs stop at their first AI call, usually before any download, until you log in. Open a terminal, run <code>claude</code> and type <code>/login</code>{" "}
         (with Codex: <code>codex login</code>). The next run clears this.
       </p>
     </div>
